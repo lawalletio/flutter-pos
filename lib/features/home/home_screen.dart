@@ -56,7 +56,14 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
             FilledButton(
-              onPressed: () => context.go('/hub'),
+              onPressed: () {
+                var addr = _ctrl.text.trim().toLowerCase();
+                if (addr.isEmpty) return;
+                // Append the default domain when only a username is entered
+                // (mirrors the webapp home behaviour).
+                if (!addr.contains('@')) addr = '$addr@lacrypta.ar';
+                context.go('/hub?address=${Uri.encodeComponent(addr)}');
+              },
               child: const Text('Configurar'),
             ),
             const SizedBox(height: 24),

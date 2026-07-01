@@ -25,7 +25,7 @@ Future<List<Product>> loadMenu(String name) async {
       .toList();
 }
 
-/// Venues surfaced on the destination hub (mirrors the webapp mapping).
+/// Venues known to the POS (mirrors the webapp's `[destination]/page.tsx` mapping).
 const List<({String menu, String title})> kVenues = [
   (menu: 'barra', title: 'Barra'),
   (menu: 'comida', title: 'Comida'),
@@ -34,6 +34,18 @@ const List<({String menu, String title})> kVenues = [
   (menu: 'merch', title: 'Merch'),
   (menu: 'test', title: 'Test'),
 ];
+
+/// Resolve the single venue menu for a Lightning Address, matched by the username
+/// part (e.g. `merch@lacrypta.ar` → Merch). Returns null if the address does not
+/// map to a known venue — matching the webapp, where only the matching menu card
+/// is shown (and none if there's no match).
+({String menu, String title})? venueForAddress(String address) {
+  final user = address.trim().toLowerCase().split('@').first;
+  for (final v in kVenues) {
+    if (v.menu == user) return v;
+  }
+  return null;
+}
 
 /// Mock order history for the Orders screen.
 class MockOrder {

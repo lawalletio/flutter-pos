@@ -5,12 +5,16 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
 
-/// Destination hub — venue menus + POS modes.
+/// Destination hub — shows the single venue menu that matches the merchant
+/// address (like the webapp) plus the always-available POS modes.
 class HubScreen extends StatelessWidget {
-  const HubScreen({super.key});
+  final String address;
+  const HubScreen({super.key, this.address = 'barra@lacrypta.ar'});
 
   @override
   Widget build(BuildContext context) {
+    final venue = venueForAddress(address);
+
     return Scaffold(
       appBar: const PosAppBar(showBack: false),
       body: PosBody(
@@ -20,9 +24,10 @@ class HubScreen extends StatelessWidget {
               children: [
                 const Icon(Icons.storefront, color: AppColors.primary),
                 const SizedBox(width: 8),
-                const Text('barra@lacrypta.ar',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
-                const Spacer(),
+                Expanded(
+                  child: Text(address,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                ),
                 IconButton(
                   icon: const Icon(Icons.close, size: 18, color: AppColors.muted),
                   onPressed: () => context.go('/'),
@@ -30,16 +35,16 @@ class HubScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
-            const _SectionLabel('Menús'),
-            ...kVenues.map((v) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: PosCard(
-                    icon: Icons.restaurant_menu,
-                    label: v.title,
-                    onTap: () => context.push('/cart/${v.menu}'),
-                  ),
-                )),
-            const SizedBox(height: 12),
+            // Only the menu matching this address (or none for a non-venue address).
+            if (venue != null) ...[
+              const _SectionLabel('Menú'),
+              PosCard(
+                icon: Icons.restaurant_menu,
+                label: venue.title,
+                onTap: () => context.push('/cart/${venue.menu}'),
+              ),
+              const SizedBox(height: 12),
+            ],
             const _SectionLabel('Modos'),
             PosCard(
               icon: Icons.calculate_outlined,

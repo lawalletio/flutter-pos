@@ -18,7 +18,12 @@ final appRouter = GoRouter(
   initialLocation: '/',
   routes: [
     GoRoute(path: '/', pageBuilder: (c, s) => _page(const HomeScreen())),
-    GoRoute(path: '/hub', pageBuilder: (c, s) => _page(const HubScreen())),
+    GoRoute(
+      path: '/hub',
+      pageBuilder: (c, s) => _page(
+        HubScreen(address: s.uri.queryParameters['address'] ?? 'barra@lacrypta.ar'),
+      ),
+    ),
     GoRoute(
       path: '/cart/:menu',
       pageBuilder: (c, s) => _page(MenuScreen(menu: s.pathParameters['menu']!)),
