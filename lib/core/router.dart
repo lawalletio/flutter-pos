@@ -45,6 +45,7 @@ final appRouter = GoRouter(
         return _page(PaymentScreen(
           amountSats: sats,
           initiallyPaid: paid,
+          openAddTab: s.uri.queryParameters['addtab'] == '1',
           back: s.uri.queryParameters['back'],
         ));
       },

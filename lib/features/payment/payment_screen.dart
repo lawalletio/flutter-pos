@@ -4,6 +4,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/mock/mock_data.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/config/settings_state.dart';
@@ -15,11 +16,13 @@ import 'success_view.dart';
 class PaymentScreen extends StatefulWidget {
   final int amountSats;
   final bool initiallyPaid;
+  final bool openAddTab; // preview affordance: auto-open the add-to-tab sheet
   final String? back;
   const PaymentScreen({
     super.key,
     required this.amountSats,
     this.initiallyPaid = false,
+    this.openAddTab = false,
     this.back,
   });
   @override
@@ -32,13 +35,24 @@ class _PaymentScreenState extends State<PaymentScreen> {
   static const _arsPerBtc = 70000000.0;
   late _View _view = widget.initiallyPaid ? _View.paid : _View.waiting;
   String? _tabName;
+  int? _tabTotalSats; // client's total after adding this order
 
   String get _invoice =>
       'lnbc${widget.amountSats}n1pjmockinvoice0lawalletposdemo${widget.amountSats}';
 
-  String get _satsStr => formatToPreference(Currency.sat, widget.amountSats);
-  String get _arsStr => formatToPreference(
-      Currency.ars, widget.amountSats / 100000000 * _arsPerBtc);
+  @override
+  void initState() {
+    super.initState();
+    if (widget.openAddTab && widget.amountSats > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openAddToTab());
+    }
+  }
+
+  String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
+  String _arsOf(int sats) =>
+      formatToPreference(Currency.ars, sats / 100000000 * _arsPerBtc);
+  String get _satsStr => _satsOf(widget.amountSats);
+  String get _arsStr => _arsOf(widget.amountSats);
 
   void _goBack() {
     if (widget.back != null && widget.back!.isNotEmpty) {
@@ -202,26 +216,57 @@ class _PaymentScreenState extends State<PaymentScreen> {
         onBack: _goBack,
       );
 
-  Widget _addedToTabView() => Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.check_circle, color: AppColors.primary, size: 64),
-          const SizedBox(height: 16),
-          const Text('Agregado a la cuenta',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text(_tabName ?? '',
-              style: const TextStyle(color: AppColors.muted, fontSize: 16)),
-          const SizedBox(height: 4),
-          Text('$_satsStr sats · ≈ $_arsStr ARS',
-              style: const TextStyle(color: AppColors.muted)),
-          const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(onPressed: _goBack, child: const Text('Volver')),
-          ),
-        ],
-      );
+  Widget _addedToTabView() {
+    final total = _tabTotalSats ?? widget.amountSats;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.check_circle, color: AppColors.primary, size: 64),
+        const SizedBox(height: 16),
+        const Text('Agregado a la cuenta',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Text(_tabName ?? '',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 16),
+        Text('+ $_satsStr sats agregados',
+            style: const TextStyle(color: AppColors.muted)),
+        const SizedBox(height: 4),
+        const Text('Total de la cuenta',
+            style: TextStyle(color: AppColors.muted, fontSize: 13)),
+        Text('${_satsOf(total)} sats',
+            style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary)),
+        Text('≈ ${_arsOf(total)} ARS',
+            style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+        const SizedBox(height: 32),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(onPressed: _goBack, child: const Text('Volver')),
+        ),
+      ],
+    );
+  }
+
+  /// Add this order to an existing client (accumulating their total).
+  void _addToExisting(MockTab t) {
+    setState(() {
+      _tabName = t.name;
+      _tabTotalSats = t.amountSats + widget.amountSats;
+      _view = _View.addedToTab;
+    });
+  }
+
+  /// Add this order to a brand-new client.
+  void _createTab(String name) {
+    setState(() {
+      _tabName = name;
+      _tabTotalSats = widget.amountSats;
+      _view = _View.addedToTab;
+    });
+  }
 
   void _openAddToTab() {
     final ctrl = TextEditingController();
@@ -239,18 +284,111 @@ class _PaymentScreenState extends State<PaymentScreen> {
           children: [
             const Text('Agregar a una cuenta',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 12),
+            const SizedBox(height: 4),
+            Text('Cobrando $_satsStr sats',
+                style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+            const SizedBox(height: 16),
+            // Existing clients with their current total — tap to select.
+            if (kMockTabs.isNotEmpty) ...[
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('CUENTAS ABIERTAS',
+                    style: TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 12,
+                        letterSpacing: 1.1,
+                        fontWeight: FontWeight.w600)),
+              ),
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: kMockTabs.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) {
+                    final t = kMockTabs[i];
+                    return Material(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          _addToExisting(t);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(t.name,
+                                        style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700)),
+                                    Text(t.summary,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                            color: AppColors.muted,
+                                            fontSize: 12)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text('${_satsOf(t.amountSats)} sats',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700)),
+                                  Text('${_arsOf(t.amountSats)} ARS',
+                                      style: const TextStyle(
+                                          color: AppColors.muted, fontSize: 12)),
+                                ],
+                              ),
+                              const SizedBox(width: 6),
+                              const Icon(Icons.add_circle,
+                                  color: AppColors.primary, size: 22),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(children: const [
+                Expanded(child: Divider(color: AppColors.muted)),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 10),
+                  child: Text('o crear una nueva',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                ),
+                Expanded(child: Divider(color: AppColors.muted)),
+              ]),
+              const SizedBox(height: 12),
+            ],
             TextField(
               controller: ctrl,
-              autofocus: true,
               decoration: const InputDecoration(
                 filled: true,
                 fillColor: AppColors.surface,
-                hintText: 'Nombre del cliente',
+                hintText: 'Nombre del nuevo cliente',
                 border: OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(12))),
               ),
+              onSubmitted: (v) {
+                if (v.trim().isEmpty) return;
+                Navigator.of(ctx).pop();
+                _createTab(v.trim());
+              },
             ),
             const SizedBox(height: 12),
             FilledButton(
@@ -258,12 +396,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 final name = ctrl.text.trim();
                 if (name.isEmpty) return;
                 Navigator.of(ctx).pop();
-                setState(() {
-                  _tabName = name;
-                  _view = _View.addedToTab;
-                });
+                _createTab(name);
               },
-              child: const Text('Agregar'),
+              child: const Text('Crear cuenta nueva'),
             ),
           ],
         ),
