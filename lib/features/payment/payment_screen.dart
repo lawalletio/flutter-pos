@@ -15,6 +15,7 @@ import '../../domain/config/formatter.dart';
 import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/order/order_reset.dart';
+import '../../platform/nfc_channel.dart';
 import '../../platform/printer_channel.dart';
 import 'success_view.dart';
 
@@ -51,6 +52,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _invoiceError;
   bool _loadingInvoice = false;
   bool _printed = false;
+  bool _nfcScanning = false;
   Timer? _poll;
 
   String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
@@ -100,8 +102,47 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void dispose() {
     _poll?.cancel();
+    if (_nfcScanning) NfcChannel.cancel();
     pricing.notifier.removeListener(_onRates);
     super.dispose();
+  }
+
+  /// Pay the current invoice by tapping a Boltcard / LNURL-withdraw card (NFC).
+  Future<void> _payWithCard() async {
+    final inv = _invoice;
+    if (inv == null || _nfcScanning) return;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _nfcScanning = true);
+    messenger.showSnackBar(const SnackBar(
+        content: Text('Acercá la tarjeta al lector…'),
+        duration: Duration(seconds: 60)));
+    try {
+      final cardUrl = await NfcChannel.read();
+      await lnurl.payWithCard(cardUrl, inv);
+      messenger.hideCurrentSnackBar();
+      // Submitted — confirm now, else the LUD-21 polling will catch it.
+      final url = _verifyUrl;
+      if (url != null && await lnurl.checkSettled(url)) {
+        if (mounted) _markPaid();
+      } else {
+        messenger.showSnackBar(const SnackBar(
+            content: Text('Pago enviado, esperando confirmación…')));
+      }
+    } on NfcException catch (e) {
+      messenger.hideCurrentSnackBar();
+      if (e.code != 'NFC_CANCELLED') {
+        messenger.showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: AppColors.error));
+      }
+    } on LnurlException catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(
+          content: Text(e.message), backgroundColor: AppColors.error));
+    } catch (_) {
+      messenger.hideCurrentSnackBar();
+    } finally {
+      if (mounted) setState(() => _nfcScanning = false);
+    }
   }
 
   void _onRates() {
@@ -156,6 +197,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   void _goBack() {
     _poll?.cancel();
+    if (_nfcScanning) NfcChannel.cancel();
     if (widget.back != null && widget.back!.isNotEmpty) {
       context.go(widget.back!);
     } else {
@@ -261,9 +303,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
           children: [
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: () {},
-                icon: const Icon(Icons.nfc),
-                label: const Text('Solicitar NFC'),
+                onPressed: _nfcScanning ? null : _payWithCard,
+                icon: _nfcScanning
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.nfc),
+                label: Text(_nfcScanning ? 'Acercá la tarjeta…' : 'Pagar con tarjeta'),
               ),
             ),
             const SizedBox(width: 12),

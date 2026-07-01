@@ -1,5 +1,12 @@
 package ar.lawallet.lawallet_pos
 
+import android.nfc.NdefMessage
+import android.nfc.NdefRecord
+import android.nfc.NfcAdapter
+import android.nfc.Tag
+import android.nfc.tech.Ndef
+import android.os.Handler
+import android.os.Looper
 import android.text.Layout
 import android.util.Log
 import com.zcs.sdk.DriverManager
@@ -22,6 +29,12 @@ class MainActivity : FlutterActivity() {
     private var printer: Printer? = null
     private var initialized = false
 
+    // NFC (Boltcard / LNURL-withdraw)
+    private val nfcChannelName = "pos/nfc"
+    private var pendingNfc: MethodChannel.Result? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var nfcTimeout: Runnable? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
@@ -37,6 +50,113 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, nfcChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isAvailable" -> result.success(nfcAvailable())
+                    "read" -> startNfcRead(result)
+                    "cancel" -> { stopNfcRead(); result.success(null) }
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    // ---- NFC ----
+
+    private fun nfcAvailable(): Boolean {
+        val a = NfcAdapter.getDefaultAdapter(this)
+        return a != null && a.isEnabled
+    }
+
+    /** Reads one NFC tag and returns its NDEF URL (e.g. lnurlw://…) to Dart. */
+    private fun startNfcRead(result: MethodChannel.Result) {
+        val adapter = NfcAdapter.getDefaultAdapter(this)
+        if (adapter == null || !adapter.isEnabled) {
+            result.error("NFC_UNAVAILABLE", "NFC no disponible o desactivado", null)
+            return
+        }
+        pendingNfc?.let { runCatching { it.error("NFC_CANCELLED", "Reemplazado", null) } }
+        pendingNfc = result
+        val flags = NfcAdapter.FLAG_READER_NFC_A or
+            NfcAdapter.FLAG_READER_NFC_B or
+            NfcAdapter.FLAG_READER_NFC_F or
+            NfcAdapter.FLAG_READER_NFC_V
+        adapter.enableReaderMode(this, { tag -> onNfcTag(tag) }, flags, null)
+        nfcTimeout = Runnable {
+            val r = pendingNfc; pendingNfc = null
+            runCatching { adapter.disableReaderMode(this) }
+            r?.error("NFC_TIMEOUT", "Tiempo de espera agotado", null)
+        }
+        handler.postDelayed(nfcTimeout!!, 60000)
+    }
+
+    private fun stopNfcRead() {
+        nfcTimeout?.let { handler.removeCallbacks(it) }
+        nfcTimeout = null
+        runCatching { NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this) }
+        pendingNfc?.let { runCatching { it.error("NFC_CANCELLED", "Cancelado", null) } }
+        pendingNfc = null
+    }
+
+    private fun onNfcTag(tag: Tag) {
+        var url: String? = null
+        var err: String? = null
+        try {
+            val ndef = Ndef.get(tag)
+            if (ndef != null) {
+                ndef.connect()
+                val msg = runCatching { ndef.ndefMessage }.getOrNull() ?: ndef.cachedNdefMessage
+                runCatching { ndef.close() }
+                url = extractUrl(msg)
+            }
+            if (url == null) err = "Tarjeta sin datos NDEF"
+        } catch (e: Throwable) {
+            err = e.message ?: "Error leyendo la tarjeta"
+        }
+        val u = url
+        runOnUiThread {
+            nfcTimeout?.let { handler.removeCallbacks(it) }
+            nfcTimeout = null
+            val r = pendingNfc; pendingNfc = null
+            runCatching { NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this) }
+            if (u != null) r?.success(u) else r?.error("NFC_READ", err ?: "No se pudo leer", null)
+        }
+    }
+
+    private fun extractUrl(msg: NdefMessage?): String? {
+        if (msg == null) return null
+        for (rec in msg.records) {
+            val payload = rec.payload
+            when {
+                rec.tnf == NdefRecord.TNF_ABSOLUTE_URI ->
+                    return String(rec.type, Charsets.UTF_8)
+                rec.tnf == NdefRecord.TNF_WELL_KNOWN &&
+                    rec.type.contentEquals(NdefRecord.RTD_URI) -> {
+                    if (payload.isEmpty()) continue
+                    val prefix = uriPrefix(payload[0].toInt() and 0xFF)
+                    return prefix + String(payload, 1, payload.size - 1, Charsets.UTF_8)
+                }
+                rec.tnf == NdefRecord.TNF_WELL_KNOWN &&
+                    rec.type.contentEquals(NdefRecord.RTD_TEXT) -> {
+                    if (payload.isEmpty()) continue
+                    val status = payload[0].toInt()
+                    val langLen = status and 0x3F
+                    val enc = if (status and 0x80 == 0) Charsets.UTF_8 else Charsets.UTF_16
+                    return String(payload, 1 + langLen, payload.size - 1 - langLen, enc)
+                }
+            }
+        }
+        for (rec in msg.records) rec.toUri()?.let { return it.toString() }
+        return null
+    }
+
+    private fun uriPrefix(code: Int): String = when (code) {
+        0x01 -> "http://www."
+        0x02 -> "https://www."
+        0x03 -> "http://"
+        0x04 -> "https://"
+        else -> ""
     }
 
     private inline fun handle(result: MethodChannel.Result, block: () -> Int) {

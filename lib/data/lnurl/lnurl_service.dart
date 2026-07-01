@@ -114,6 +114,56 @@ class LnurlService {
     );
   }
 
+  /// Pay [invoice] by pulling from an LNURL-withdraw / Boltcard URL read via NFC.
+  /// The card NDEF holds `lnurlw://…?p=…&c=…` (SUN); resolve it, then hit the
+  /// withdraw callback with `k1` + the invoice `pr` to complete the payment.
+  Future<void> payWithCard(String cardUrl, String invoice) async {
+    var url = cardUrl.trim();
+    final low = url.toLowerCase();
+    if (low.startsWith('lightning://')) {
+      url = url.substring('lightning://'.length);
+    } else if (low.startsWith('lightning:')) {
+      url = url.substring('lightning:'.length);
+    }
+    if (url.toLowerCase().startsWith('lnurlw://')) {
+      url = 'https://${url.substring('lnurlw://'.length)}';
+    } else if (!url.toLowerCase().startsWith('http')) {
+      throw LnurlException('Formato de tarjeta no soportado');
+    }
+
+    final Response wres;
+    try {
+      wres = await _dio.getUri(Uri.parse(url));
+    } catch (e) {
+      throw LnurlException('No se pudo leer la tarjeta');
+    }
+    final w = _asMap(wres.data);
+    if (w == null ||
+        w['tag'] != 'withdrawRequest' ||
+        w['callback'] == null ||
+        w['k1'] == null) {
+      throw LnurlException(
+          w?['reason']?.toString() ?? 'La tarjeta no es una LNURL-withdraw válida');
+    }
+    final callback = w['callback'] as String;
+    final k1 = w['k1'] as String;
+    final sep = callback.contains('?') ? '&' : '?';
+
+    final Response cres;
+    try {
+      cres = await _dio.getUri(Uri.parse(
+          '$callback${sep}k1=${Uri.encodeComponent(k1)}&pr=${Uri.encodeComponent(invoice)}'));
+    } catch (e) {
+      throw LnurlException('No se pudo completar el pago con la tarjeta');
+    }
+    final c = _asMap(cres.data);
+    if (c != null && c['status'] == 'ERROR') {
+      throw LnurlException(c['reason']?.toString() ?? 'Pago con tarjeta rechazado');
+    }
+    // status OK — the withdraw service pays the invoice; settlement is detected
+    // by the payment screen's LUD-21 polling.
+  }
+
   /// Poll a LUD-21 verify URL once; true when the invoice is settled.
   Future<bool> checkSettled(String verifyUrl) async {
     final sep = verifyUrl.contains('?') ? '&' : '?';
