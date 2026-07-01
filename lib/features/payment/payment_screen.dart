@@ -14,6 +14,7 @@ import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
+import '../../domain/order/order_reset.dart';
 import 'success_view.dart';
 
 /// Payment — generates a REAL bolt11 invoice from the merchant Lightning Address
@@ -135,6 +136,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
+  /// Payment finished (paid or moved to a tab): clear the order and return.
+  void _finishAndBack() {
+    resetOrder();
+    _goBack();
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.amountSats <= 0 && _view == _View.waiting) {
@@ -144,7 +151,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       case _View.paid:
         return _scaffold(
           PaymentSuccessView(
-              satsStr: _satsStr, arsStr: _arsStr, onBack: _goBack),
+              satsStr: _satsStr, arsStr: _arsStr, onBack: _finishAndBack),
           title: null,
         );
       case _View.checking:
@@ -375,7 +382,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         const SizedBox(height: 32),
         SizedBox(
           width: double.infinity,
-          child: FilledButton(onPressed: _goBack, child: const Text('Volver')),
+          child: FilledButton(
+              onPressed: _finishAndBack, child: const Text('Volver')),
         ),
       ],
     );

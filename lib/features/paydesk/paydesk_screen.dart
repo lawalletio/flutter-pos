@@ -7,6 +7,7 @@ import '../../core/widgets.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
+import '../../domain/order/order_reset.dart';
 
 /// Cash register — manual amount entry via numpad + currency selector.
 /// Uses a fixed mock BTC rate to show SAT/fiat conversion (engine wires later).
@@ -25,16 +26,23 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
     super.initState();
     pricing.ensureLoaded();
     pricing.notifier.addListener(_onRates);
+    orderResetSignal.addListener(_onOrderReset);
   }
 
   @override
   void dispose() {
     pricing.notifier.removeListener(_onRates);
+    orderResetSignal.removeListener(_onOrderReset);
     super.dispose();
   }
 
   void _onRates() {
     if (mounted) setState(() {});
+  }
+
+  // Reset the entered amount when an order completes.
+  void _onOrderReset() {
+    if (mounted) setState(() => _raw = '0');
   }
 
   num get _enteredAmount {

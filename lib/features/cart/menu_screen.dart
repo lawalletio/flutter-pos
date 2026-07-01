@@ -7,6 +7,7 @@ import '../../data/mock/mock_data.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
+import '../../domain/order/order_reset.dart';
 import '../../domain/order/product.dart';
 
 /// Menu/cart — product catalog grouped by category, add/remove, clear, and a
@@ -31,16 +32,23 @@ class _MenuScreenState extends State<MenuScreen> {
     _load();
     pricing.ensureLoaded();
     pricing.notifier.addListener(_onRates);
+    orderResetSignal.addListener(_onOrderReset);
   }
 
   @override
   void dispose() {
     pricing.notifier.removeListener(_onRates);
+    orderResetSignal.removeListener(_onOrderReset);
     super.dispose();
   }
 
   void _onRates() {
     if (mounted) setState(() {});
+  }
+
+  // Clear the cart when an order completes (payment or moved to a tab).
+  void _onOrderReset() {
+    if (mounted) setState(_cart.clear);
   }
 
   Future<void> _load() async {
