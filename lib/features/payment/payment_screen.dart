@@ -7,6 +7,7 @@ import '../../core/widgets.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/config/settings_state.dart';
+import 'success_view.dart';
 
 /// Payment — invoice QR + waiting / paid / checking / no-amount / added-to-tab
 /// states. UI-only: the "Simular pago" and "Check event" demo buttons stand in
@@ -195,29 +196,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
         ],
       );
 
-  Widget _paidView() => Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(
-                color: AppColors.primary, shape: BoxShape.circle),
-            child: const Icon(Icons.check, size: 56, color: Colors.black),
-          ),
-          const SizedBox(height: 20),
-          const Text('Pago acreditado',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          Text('$_satsStr sats',
-              style: const TextStyle(color: AppColors.muted, fontSize: 18)),
-          Text('≈ $_arsStr ARS',
-              style: const TextStyle(color: AppColors.muted, fontSize: 14)),
-          const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(onPressed: _goBack, child: const Text('Volver')),
-          ),
-        ],
+  Widget _paidView() => PaymentSuccessView(
+        satsStr: _satsStr,
+        arsStr: _arsStr,
+        onBack: _goBack,
       );
 
   Widget _addedToTabView() => Column(
