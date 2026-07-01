@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
 import '../../domain/config/settings_state.dart';
+import '../../domain/order/order_reset.dart';
 
 /// Destination hub — shows the single venue menu that matches the merchant
 /// address (like the webapp) plus the always-available POS modes.
@@ -18,6 +19,26 @@ class HubScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: const PosAppBar(showBack: false),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TextButton.icon(
+                onPressed: () {
+                  resetOrder();
+                  context.go('/');
+                },
+                icon:
+                    const Icon(Icons.logout, size: 14, color: AppColors.muted),
+                label: const Text('Cerrar sesión',
+                    style: TextStyle(color: AppColors.muted, fontSize: 12)),
+              ),
+            ],
+          ),
+        ),
+      ),
       body: PosBody(
         child: ListView(
           children: [
@@ -28,10 +49,6 @@ class HubScreen extends StatelessWidget {
                 Expanded(
                   child: Text(address,
                       style: const TextStyle(fontWeight: FontWeight.w600)),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, size: 18, color: AppColors.muted),
-                  onPressed: () => context.go('/'),
                 ),
               ],
             ),
