@@ -4,6 +4,7 @@ import '../../core/checkout.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
+import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/order/product.dart';
@@ -18,8 +19,6 @@ class MenuScreen extends StatefulWidget {
 }
 
 class _MenuScreenState extends State<MenuScreen> {
-  static const _arsPerBtc = 70000000.0;
-
   List<Product> _products = [];
   List<({int id, String name})> _categories = [];
   final Map<int, CartLine> _cart = {};
@@ -29,6 +28,18 @@ class _MenuScreenState extends State<MenuScreen> {
   void initState() {
     super.initState();
     _load();
+    pricing.ensureLoaded();
+    pricing.notifier.addListener(_onRates);
+  }
+
+  @override
+  void dispose() {
+    pricing.notifier.removeListener(_onRates);
+    super.dispose();
+  }
+
+  void _onRates() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load() async {
@@ -44,7 +55,7 @@ class _MenuScreenState extends State<MenuScreen> {
 
   int get _itemCount => _cart.values.fold(0, (s, l) => s + l.qty);
   num get _totalArs => _cart.values.fold<num>(0, (s, l) => s + l.subtotal);
-  int get _totalSats => (_totalArs / _arsPerBtc * 100000000).round();
+  int get _totalSats => pricing.fiatToSats(_totalArs, Currency.ars) ?? 0;
 
   void _add(Product p) => setState(() {
         _cart.update(p.id, (l) {

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../domain/config/session.dart';
 
 /// Home — merchant Lightning Address entry. (UI-only mock: any address → hub.)
 class HomeScreen extends StatefulWidget {
@@ -62,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 // Append the default domain when only a username is entered
                 // (mirrors the webapp home behaviour).
                 if (!addr.contains('@')) addr = '$addr@lacrypta.ar';
+                merchantAddress.value = addr;
                 context.go('/hub?address=${Uri.encodeComponent(addr)}');
               },
               child: const Text('Configurar'),

@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 
@@ -13,10 +14,9 @@ class TipScreen extends StatelessWidget {
   const TipScreen({super.key, required this.amountSats, this.back});
 
   static const _options = [5, 10, 15];
-  static const _arsPerBtc = 70000000.0;
 
-  String _ars(int sats) =>
-      formatToPreference(Currency.ars, sats / 100000000 * _arsPerBtc);
+  String _ars(int sats) => formatToPreference(
+      Currency.ars, pricing.satsToFiat(sats, Currency.ars) ?? 0);
 
   void _go(BuildContext context, int finalSats) {
     final b = back == null ? '' : '&back=${Uri.encodeComponent(back!)}';
@@ -25,9 +25,12 @@ class TipScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    pricing.ensureLoaded();
     return Scaffold(
       appBar: const PosAppBar(title: 'Propina'),
-      body: PosBody(
+      body: ValueListenableBuilder<Rates?>(
+        valueListenable: pricing.notifier,
+        builder: (context, _, __) => PosBody(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -71,6 +74,7 @@ class TipScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

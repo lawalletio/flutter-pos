@@ -1,18 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/lnurl/lnurl_service.dart';
 import '../../data/mock/mock_data.dart';
+import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
+import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
 import 'success_view.dart';
 
-/// Payment — invoice QR + waiting / paid / checking / no-amount / added-to-tab
-/// states. UI-only: the "Simular pago" and "Check event" demo buttons stand in
-/// for the real dual-detection engine (M3).
+/// Payment — generates a REAL bolt11 invoice from the merchant Lightning Address
+/// callback (LUD-16 → LNURL-pay), shows it as a QR, and polls the LUD-21 verify
+/// URL to detect settlement. Falls back to a demo "simular pago" button so the
+/// paid celebration is reachable in the preview without a real payer.
 class PaymentScreen extends StatefulWidget {
   final int amountSats;
   final bool initiallyPaid;
@@ -32,29 +39,95 @@ class PaymentScreen extends StatefulWidget {
 enum _View { waiting, paid, checking, addedToTab }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  static const _arsPerBtc = 70000000.0;
   late _View _view = widget.initiallyPaid ? _View.paid : _View.waiting;
   String? _tabName;
-  int? _tabTotalSats; // client's total after adding this order
+  int? _tabTotalSats;
 
-  String get _invoice =>
-      'lnbc${widget.amountSats}n1pjmockinvoice0lawalletposdemo${widget.amountSats}';
+  // Real invoice state.
+  String? _invoice; // bolt11
+  String? _verifyUrl; // LUD-21
+  String? _invoiceError;
+  bool _loadingInvoice = false;
+  Timer? _poll;
+
+  String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
+  String _arsOf(int sats) => formatToPreference(
+      Currency.ars, pricing.satsToFiat(sats, Currency.ars) ?? 0);
+  String get _satsStr => _satsOf(widget.amountSats);
+  String get _arsStr => _arsOf(widget.amountSats);
 
   @override
   void initState() {
     super.initState();
+    pricing.ensureLoaded();
+    pricing.notifier.addListener(_onRates);
+    if (!widget.initiallyPaid && widget.amountSats > 0) {
+      _fetchInvoice();
+    }
     if (widget.openAddTab && widget.amountSats > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openAddToTab());
     }
   }
 
-  String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
-  String _arsOf(int sats) =>
-      formatToPreference(Currency.ars, sats / 100000000 * _arsPerBtc);
-  String get _satsStr => _satsOf(widget.amountSats);
-  String get _arsStr => _arsOf(widget.amountSats);
+  @override
+  void dispose() {
+    _poll?.cancel();
+    pricing.notifier.removeListener(_onRates);
+    super.dispose();
+  }
+
+  void _onRates() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _fetchInvoice() async {
+    setState(() {
+      _loadingInvoice = true;
+      _invoiceError = null;
+    });
+    try {
+      final inv =
+          await lnurl.requestInvoice(merchantAddress.value, widget.amountSats);
+      if (!mounted) return;
+      setState(() {
+        _invoice = inv.pr;
+        _verifyUrl = inv.verify;
+        _loadingInvoice = false;
+      });
+      _startPolling();
+    } on LnurlException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _invoiceError = e.message;
+        _loadingInvoice = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _invoiceError = 'No se pudo generar la invoice';
+        _loadingInvoice = false;
+      });
+    }
+  }
+
+  void _startPolling() {
+    final url = _verifyUrl;
+    if (url == null) return; // provider without LUD-21 verify
+    _poll?.cancel();
+    _poll = Timer.periodic(const Duration(seconds: 2), (t) async {
+      if (!mounted || _view != _View.waiting) return;
+      try {
+        if (await lnurl.checkSettled(url)) {
+          if (!mounted) return;
+          t.cancel();
+          setState(() => _view = _View.paid);
+        }
+      } catch (_) {/* keep polling */}
+    });
+  }
 
   void _goBack() {
+    _poll?.cancel();
     if (widget.back != null && widget.back!.isNotEmpty) {
       context.go(widget.back!);
     } else {
@@ -64,13 +137,16 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // No amount → cannot generate an invoice (webapp shows an explicit message).
     if (widget.amountSats <= 0 && _view == _View.waiting) {
       return _scaffold(_noAmountView());
     }
     switch (_view) {
       case _View.paid:
-        return _scaffold(_paidView(), title: null);
+        return _scaffold(
+          PaymentSuccessView(
+              satsStr: _satsStr, arsStr: _arsStr, onBack: _goBack),
+          title: null,
+        );
       case _View.checking:
         return _scaffold(_checkingView());
       case _View.addedToTab:
@@ -104,6 +180,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
       );
 
   Widget _waitingView() {
+    if (_loadingInvoice) return _generatingView();
+    if (_invoiceError != null) return _invoiceErrorView();
     final tabEnabled = appSettings.value.tabEnabled;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -126,13 +204,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
         const SizedBox(height: 4),
         Text('≈ $_arsStr ARS', style: const TextStyle(color: AppColors.muted)),
         const SizedBox(height: 20),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-              color: Colors.white, borderRadius: BorderRadius.circular(16)),
-          child: QrImageView(data: _invoice, version: QrVersions.auto, size: 220),
+        GestureDetector(
+          onLongPress: _copyInvoice,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(16)),
+            child: QrImageView(
+                data: (_invoice ?? '').toUpperCase(),
+                version: QrVersions.auto,
+                size: 220),
+          ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 6),
+        TextButton.icon(
+          onPressed: _copyInvoice,
+          icon: const Icon(Icons.copy, size: 15),
+          label: const Text('Copiar invoice'),
+        ),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
@@ -170,7 +260,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
           ],
         ),
-        // Demo-only shortcut to preview the paid state.
         TextButton(
           onPressed: () => setState(() => _view = _View.paid),
           child: const Text('▶ Simular pago recibido (demo)'),
@@ -178,6 +267,47 @@ class _PaymentScreenState extends State<PaymentScreen> {
       ],
     );
   }
+
+  Widget _generatingView() => Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          CircularProgressIndicator(),
+          SizedBox(height: 20),
+          Text('Generando invoice…',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          SizedBox(height: 6),
+          Text('Resolviendo la Lightning Address…',
+              style: TextStyle(color: AppColors.muted)),
+        ],
+      );
+
+  Widget _invoiceErrorView() => Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline, color: AppColors.error, size: 48),
+          const SizedBox(height: 14),
+          const Text('No se pudo generar la invoice.',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Text(_invoiceError ?? '',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted)),
+          const SizedBox(height: 28),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                    onPressed: _goBack, child: const Text('Volver')),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                    onPressed: _fetchInvoice, child: const Text('Reintentar')),
+              ),
+            ],
+          ),
+        ],
+      );
 
   Widget _checkingView() => Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -201,19 +331,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
-                  onPressed: () => setState(() => _view = _View.waiting),
+                  onPressed: () async {
+                    final url = _verifyUrl;
+                    if (url != null && await lnurl.checkSettled(url)) {
+                      if (mounted) setState(() => _view = _View.paid);
+                    } else if (mounted) {
+                      setState(() => _view = _View.waiting);
+                    }
+                  },
                   child: const Text('Check event'),
                 ),
               ),
             ],
           ),
         ],
-      );
-
-  Widget _paidView() => PaymentSuccessView(
-        satsStr: _satsStr,
-        arsStr: _arsStr,
-        onBack: _goBack,
       );
 
   Widget _addedToTabView() {
@@ -250,8 +381,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
-  /// Add this order to an existing client (accumulating their total).
+  void _copyInvoice() {
+    final inv = _invoice;
+    if (inv == null) return;
+    Clipboard.setData(ClipboardData(text: inv));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text('Invoice copiada'), duration: Duration(seconds: 1)),
+    );
+  }
+
   void _addToExisting(MockTab t) {
+    _poll?.cancel();
     setState(() {
       _tabName = t.name;
       _tabTotalSats = t.amountSats + widget.amountSats;
@@ -259,8 +400,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
     });
   }
 
-  /// Add this order to a brand-new client.
   void _createTab(String name) {
+    _poll?.cancel();
     setState(() {
       _tabName = name;
       _tabTotalSats = widget.amountSats;
@@ -288,7 +429,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
             Text('Cobrando $_satsStr sats',
                 style: const TextStyle(color: AppColors.muted, fontSize: 13)),
             const SizedBox(height: 16),
-            // Existing clients with their current total — tap to select.
             if (kMockTabs.isNotEmpty) ...[
               const Align(
                 alignment: Alignment.centerLeft,

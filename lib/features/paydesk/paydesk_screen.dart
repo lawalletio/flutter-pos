@@ -4,6 +4,7 @@ import '../../core/checkout.dart';
 import '../../core/numpad.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 
@@ -16,28 +17,32 @@ class PaydeskScreen extends StatefulWidget {
 }
 
 class _PaydeskScreenState extends State<PaydeskScreen> {
-  // Mock rate: 1 BTC = 100,000,000 sats = 70,000 USD = 70,000,000 ARS.
-  static const _arsPerBtc = 70000000.0;
-  static const _usdPerBtc = 70000.0;
-
   Currency _currency = Currency.ars;
   String _raw = '0'; // integer string in the selected currency's minor logic
+
+  @override
+  void initState() {
+    super.initState();
+    pricing.ensureLoaded();
+    pricing.notifier.addListener(_onRates);
+  }
+
+  @override
+  void dispose() {
+    pricing.notifier.removeListener(_onRates);
+    super.dispose();
+  }
+
+  void _onRates() {
+    if (mounted) setState(() {});
+  }
 
   num get _enteredAmount {
     final n = num.tryParse(_raw) ?? 0;
     return _currency == Currency.usd ? n / 100 : n;
   }
 
-  int get _sats {
-    switch (_currency) {
-      case Currency.sat:
-        return _enteredAmount.round();
-      case Currency.ars:
-        return (_enteredAmount / _arsPerBtc * 100000000).round();
-      case Currency.usd:
-        return (_enteredAmount / _usdPerBtc * 100000000).round();
-    }
-  }
+  int get _sats => pricing.fiatToSats(_enteredAmount, _currency) ?? 0;
 
   /// Value of the current sats in a given currency's minor-unit raw string.
   String _rawForCurrency(int sats, Currency c) {
@@ -45,9 +50,11 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
       case Currency.sat:
         return sats.toString();
       case Currency.ars:
-        return (sats / 100000000 * _arsPerBtc).round().toString();
+        return (pricing.satsToFiat(sats, Currency.ars) ?? 0).round().toString();
       case Currency.usd:
-        return (sats / 100000000 * _usdPerBtc * 100).round().toString();
+        return ((pricing.satsToFiat(sats, Currency.usd) ?? 0) * 100)
+            .round()
+            .toString();
     }
   }
 

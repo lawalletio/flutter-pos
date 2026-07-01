@@ -4,6 +4,7 @@ import '../../core/checkout.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
+import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 
@@ -17,6 +18,23 @@ class TabScreen extends StatefulWidget {
 
 class _TabScreenState extends State<TabScreen> {
   late final List<MockTab> _tabs = List.of(kMockTabs);
+
+  @override
+  void initState() {
+    super.initState();
+    pricing.ensureLoaded();
+    pricing.notifier.addListener(_onRates);
+  }
+
+  @override
+  void dispose() {
+    pricing.notifier.removeListener(_onRates);
+    super.dispose();
+  }
+
+  void _onRates() {
+    if (mounted) setState(() {});
+  }
 
   void _clearAll() {
     showModalBottomSheet(
@@ -115,7 +133,7 @@ class _TabScreenState extends State<TabScreen> {
                                           style: const TextStyle(
                                               fontWeight: FontWeight.w700)),
                                       Text(
-                                          '${formatToPreference(Currency.ars, t.amountSats * 0.7)} ARS',
+                                          '${formatToPreference(Currency.ars, pricing.satsToFiat(t.amountSats, Currency.ars) ?? 0)} ARS',
                                           style: const TextStyle(
                                               color: AppColors.muted,
                                               fontSize: 12)),
