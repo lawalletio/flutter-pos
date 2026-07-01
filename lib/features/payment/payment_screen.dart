@@ -280,18 +280,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         const SizedBox(height: 4),
         Text('≈ $_arsStr ARS', style: const TextStyle(color: AppColors.muted)),
         const SizedBox(height: 20),
-        GestureDetector(
-          onLongPress: _copyInvoice,
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-                color: Colors.white, borderRadius: BorderRadius.circular(16)),
-            child: QrImageView(
-                data: (_invoice ?? '').toUpperCase(),
-                version: QrVersions.auto,
-                size: 220),
-          ),
-        ),
+        _qrCard(),
         const SizedBox(height: 6),
         TextButton.icon(
           onPressed: _copyInvoice,
@@ -346,6 +335,35 @@ class _PaymentScreenState extends State<PaymentScreen> {
           child: const Text('▶ Simular pago recibido (demo)'),
         ),
       ],
+    );
+  }
+
+  /// Big invoice QR — the white card spans the screen width minus 25px on each
+  /// side. OverflowBox lets it exceed the surrounding PosBody padding, staying
+  /// centered so the margins are exactly 25px.
+  Widget _qrCard() {
+    final screenW = MediaQuery.of(context).size.width;
+    final card = screenW - 50;
+    return SizedBox(
+      height: card,
+      child: OverflowBox(
+        maxWidth: screenW,
+        child: GestureDetector(
+          onLongPress: _copyInvoice,
+          child: Container(
+            width: card,
+            height: card,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+                color: Colors.white, borderRadius: BorderRadius.circular(16)),
+            child: QrImageView(
+              data: (_invoice ?? '').toUpperCase(),
+              version: QrVersions.auto,
+              padding: EdgeInsets.zero,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
