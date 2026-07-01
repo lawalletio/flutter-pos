@@ -1,0 +1,82 @@
+[
+  {
+    "id": 1,
+    "name": "Tragos"
+  },
+  {
+    "id": 2,
+    "name": "Cerveza"
+  },
+  {
+    "id": 3,
+    "name": "Gaseosas"
+  },
+  {
+    "id": 4,
+    "name": "Comida"
+  },
+  {
+    "id": 5,
+    "name": "Merch"
+  },
+  {
+    "id": 6,
+    "name": "Empanadas"
+  },
+  {
+    "id": 7,
+    "name": "Entretenimiento"
+  },
+  {
+    "id": 8,
+    "name": "Pizza"
+  },
+  {
+    "id": 9,
+    "name": "Con Alcohol"
+  },
+  {
+    "id": 10,
+    "name": "Sin Alcohol"
+  },
+  {
+    "id": 11,
+    "name": "Sandwiches"
+  },
+  {
+    "id": 12,
+    "name": "Hardware wallets"
+  },
+  {
+    "id": 13,
+    "name": "Panchos"
+  },
+  {
+    "id": 14,
+    "name": "Acompañamientos"
+  },
+  {
+    "id": 15,
+    "name": "Otros"
+  },
+  {
+    "id": 16,
+    "name": "Indumentaria"
+  },
+  {
+    "id": 17,
+    "name": "Libros"
+  },
+  {
+    "id": 18,
+    "name": "Bitnaria"
+  },
+  {
+    "id": 19,
+    "name": "Velas"
+  },
+  {
+    "id": 20,
+    "name": "Cafeteria"
+  }
+]

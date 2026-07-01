@@ -1,0 +1,242 @@
+[
+  {
+    "id": 1,
+    "category_id": 15,
+    "name": "Mate de acero",
+    "description": "",
+    "price": {
+      "value": 21000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 2,
+    "category_id": 15,
+    "name": "Popsocket celular",
+    "description": "",
+    "price": {
+      "value": 1000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 3,
+    "category_id": 15,
+    "name": "Taza",
+    "description": "",
+    "price": {
+      "value": 8900,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 4,
+    "category_id": 15,
+    "name": "Moneda BTC La Crypta",
+    "description": "",
+    "price": {
+      "value": 3500,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 5,
+    "category_id": 19,
+    "name": "Velas aromática chica",
+    "description": "",
+    "price": {
+      "value": 16000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 6,
+    "category_id": 19,
+    "name": "Vela aromática grande",
+    "description": "",
+    "price": {
+      "value": 21000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 7,
+    "category_id": 15,
+    "name": "Vaso plástico con tapa",
+    "description": "",
+    "price": {
+      "value": 1500,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 8,
+    "category_id": 16,
+    "name": "Manta Polar",
+    "description": "",
+    "price": {
+      "value": 26000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 9,
+    "category_id": 16,
+    "name": "Remera",
+    "description": "",
+    "price": {
+      "value": 33000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 26,
+    "category_id": 16,
+    "name": "Remera Premium",
+    "description": "",
+    "price": {
+      "value": 57000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 10,
+    "category_id": 16,
+    "name": "Buzo Halving",
+    "description": "",
+    "price": {
+      "value": 44900,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 11,
+    "category_id": 16,
+    "name": "Tote Bags",
+    "description": "",
+    "price": {
+      "value": 59900,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 12,
+    "category_id": 16,
+    "name": "Gorra con sol bordado",
+    "description": "",
+    "price": {
+      "value": 32000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 27,
+    "category_id": 16,
+    "name": "Gorra argentina artesanal",
+    "description": "",
+    "price": {
+      "value": 28000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 28,
+    "category_id": 16,
+    "name": "Beanie",
+    "description": "",
+    "price": {
+      "value": 19000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 15,
+    "category_id": 17,
+    "name": "Profecía Bitcoin",
+    "description": "",
+    "price": {
+      "value": 30000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 16,
+    "category_id": 17,
+    "name": "Criptoria",
+    "description": "",
+    "price": {
+      "value": 25,
+      "currency": "USD"
+    }
+  },
+  {
+    "id": 17,
+    "category_id": 17,
+    "name": "Economías circulares castellano",
+    "description": "",
+    "price": {
+      "value": 25,
+      "currency": "USD"
+    }
+  },
+  {
+    "id": 18,
+    "category_id": 17,
+    "name": "El gran parásito",
+    "description": "",
+    "price": {
+      "value": 21000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 20,
+    "category_id": 17,
+    "name": "El Patrón Bitcoin",
+    "description": "",
+    "price": {
+      "value": 21000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 22,
+    "category_id": 17,
+    "name": "Bitcoinismo",
+    "description": "",
+    "price": {
+      "value": 21000,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 23,
+    "category_id": 17,
+    "name": "La filosofía de Bitcoin",
+    "description": "",
+    "price": {
+      "value": 35,
+      "currency": "USD"
+    }
+  },
+  {
+    "id": 24,
+    "category_id": 15,
+    "name": "Portavasos legacy",
+    "description": "",
+    "price": {
+      "value": 500,
+      "currency": "ARS"
+    }
+  },
+  {
+    "id": 25,
+    "category_id": 15,
+    "name": "POS",
+    "description": "",
+    "price": {
+      "value": 210,
+      "currency": "USD"
+    }
+  }
+]
