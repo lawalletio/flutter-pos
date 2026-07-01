@@ -13,7 +13,8 @@ import '../../domain/order/product.dart';
 /// "Ver carrito" → "Resumen de compra" review sheet before checkout.
 class MenuScreen extends StatefulWidget {
   final String menu;
-  const MenuScreen({super.key, required this.menu});
+  final bool demo; // preview affordance: pre-fill the cart to show highlighting
+  const MenuScreen({super.key, required this.menu, this.demo = false});
   @override
   State<MenuScreen> createState() => _MenuScreenState();
 }
@@ -46,6 +47,10 @@ class _MenuScreenState extends State<MenuScreen> {
     final cats = await loadCategories();
     final prods = await loadMenu(widget.menu);
     if (!mounted) return;
+    if (widget.demo && prods.length >= 2) {
+      _cart[prods[0].id] = CartLine(prods[0], 3);
+      _cart[prods[1].id] = CartLine(prods[1], 1);
+    }
     setState(() {
       _categories = cats;
       _products = prods;
@@ -212,11 +217,31 @@ class _MenuScreenState extends State<MenuScreen> {
   Widget _productTile(Product p) {
     final line = _cart[p.id];
     final qty = line?.qty ?? 0;
-    return Container(
+    // Highlight items in the cart with more background; the more units, the
+    // stronger the emphasis.
+    final inCart = qty >= 1;
+    final many = qty > 1;
+    final bg = many
+        ? AppColors.primary.withValues(alpha: 0.20)
+        : inCart
+            ? AppColors.primary.withValues(alpha: 0.10)
+            : AppColors.surface;
+    final border = many
+        ? Border.all(color: AppColors.primary.withValues(alpha: 0.6), width: 1.5)
+        : inCart
+            ? Border.all(color: AppColors.primary.withValues(alpha: 0.3))
+            : null;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-          color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: border,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -238,8 +263,10 @@ class _MenuScreenState extends State<MenuScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Text('$qty',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w700)),
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: inCart ? AppColors.primary : null)),
             ),
           ],
           _RoundBtn(icon: Icons.add, onTap: () => _add(p)),

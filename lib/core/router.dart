@@ -27,7 +27,10 @@ final appRouter = GoRouter(
     ),
     GoRoute(
       path: '/cart/:menu',
-      pageBuilder: (c, s) => _page(MenuScreen(menu: s.pathParameters['menu']!)),
+      pageBuilder: (c, s) => _page(MenuScreen(
+        menu: s.pathParameters['menu']!,
+        demo: s.uri.queryParameters['demo'] == '1',
+      )),
     ),
     GoRoute(path: '/paydesk', pageBuilder: (c, s) => _page(const PaydeskScreen())),
     GoRoute(
