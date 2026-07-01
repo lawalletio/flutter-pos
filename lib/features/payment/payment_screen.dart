@@ -15,6 +15,7 @@ import '../../domain/config/formatter.dart';
 import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/order/order_reset.dart';
+import '../../platform/printer_channel.dart';
 import 'success_view.dart';
 
 /// Payment — generates a REAL bolt11 invoice from the merchant Lightning Address
@@ -49,6 +50,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _verifyUrl; // LUD-21
   String? _invoiceError;
   bool _loadingInvoice = false;
+  bool _printed = false;
   Timer? _poll;
 
   String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
@@ -68,6 +70,31 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (widget.openAddTab && widget.amountSats > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openAddToTab());
     }
+    if (widget.initiallyPaid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _printReceipt());
+    }
+  }
+
+  /// Transition to the paid state and print the receipt (once).
+  void _markPaid() {
+    if (_view == _View.paid) return;
+    setState(() => _view = _View.paid);
+    _printReceipt();
+  }
+
+  /// Auto-print the receipt on the ZCS printer. No-op where there's no printer
+  /// (e.g. web preview) — the channel returns gracefully.
+  Future<void> _printReceipt() async {
+    if (_printed) return;
+    _printed = true;
+    final ars = pricing.satsToFiat(widget.amountSats, Currency.ars);
+    await PrinterChannel.printOrder({
+      'items': const <Map<String, dynamic>>[],
+      'currency': 'ARS',
+      'total': ars != null ? formatToPreference(Currency.ars, ars) : '-',
+      'totalSats': formatToPreference(Currency.sat, widget.amountSats),
+      'message': 'Gracias por su pago',
+    });
   }
 
   @override
@@ -121,7 +148,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         if (await lnurl.checkSettled(url)) {
           if (!mounted) return;
           t.cancel();
-          setState(() => _view = _View.paid);
+          _markPaid();
         }
       } catch (_) {/* keep polling */}
     });
@@ -268,7 +295,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           ],
         ),
         TextButton(
-          onPressed: () => setState(() => _view = _View.paid),
+          onPressed: _markPaid,
           child: const Text('▶ Simular pago recibido (demo)'),
         ),
       ],
@@ -341,7 +368,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   onPressed: () async {
                     final url = _verifyUrl;
                     if (url != null && await lnurl.checkSettled(url)) {
-                      if (mounted) setState(() => _view = _View.paid);
+                      if (mounted) _markPaid();
                     } else if (mounted) {
                       setState(() => _view = _View.waiting);
                     }
