@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../domain/config/address_history.dart';
 import '../../domain/config/session.dart';
 
 /// Home — merchant Lightning Address entry. (UI-only mock: any address → hub.)
@@ -64,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 // (mirrors the webapp home behaviour).
                 if (!addr.contains('@')) addr = '$addr@lacrypta.ar';
                 merchantAddress.value = addr;
+                addressHistory.add(addr);
                 context.go('/hub?address=${Uri.encodeComponent(addr)}');
               },
               child: const Text('Configurar'),

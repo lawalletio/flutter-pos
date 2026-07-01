@@ -22,7 +22,10 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/hub',
       pageBuilder: (c, s) => _page(
-        HubScreen(address: s.uri.queryParameters['address'] ?? 'barra@lacrypta.ar'),
+        HubScreen(
+          address: s.uri.queryParameters['address'] ?? 'barra@lacrypta.ar',
+          openMenu: s.uri.queryParameters['menu'] == '1',
+        ),
       ),
     ),
     GoRoute(
