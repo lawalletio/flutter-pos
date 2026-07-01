@@ -5,12 +5,14 @@ import 'package:flutter/foundation.dart';
 /// keeps the preview simple while making toggles actually affect other screens.
 
 const List<String> kDefaultRelays = [
+  'wss://relay.lacrypta.ar',
   'wss://relay.damus.io',
   'wss://nostr-pub.wellorder.net',
 ];
 
 /// Suggested relays offered in Settings (mirrors `SUGGESTED_NOSTR_RELAYS`).
 const List<String> kSuggestedRelays = [
+  'wss://relay.lacrypta.ar',
   'wss://relay.damus.io',
   'wss://nostr-pub.wellorder.net',
   'wss://relay.nostr.band',
