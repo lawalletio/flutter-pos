@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../core/checkout.dart';
 import '../../core/numpad.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -39,10 +39,31 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
     }
   }
 
+  /// Value of the current sats in a given currency's minor-unit raw string.
+  String _rawForCurrency(int sats, Currency c) {
+    switch (c) {
+      case Currency.sat:
+        return sats.toString();
+      case Currency.ars:
+        return (sats / 100000000 * _arsPerBtc).round().toString();
+      case Currency.usd:
+        return (sats / 100000000 * _usdPerBtc * 100).round().toString();
+    }
+  }
+
+  void _switchCurrency(Currency c) => setState(() {
+        // Preserve the entered value by converting it to the new currency
+        // (webapp behaviour) instead of resetting to zero.
+        final sats = _sats;
+        _currency = c;
+        _raw = sats == 0 ? '0' : _rawForCurrency(sats, c);
+      });
+
   void _digit(String d) => setState(() {
+        if (d == '00' && _raw == '0') return;
         if (_raw == '0') {
-          _raw = d;
-        } else if (_raw.length < 12) {
+          _raw = d == '00' ? '0' : d;
+        } else if (_raw.length + d.length <= 12) {
           _raw += d;
         }
       });
@@ -63,10 +84,7 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
             const SizedBox(height: 12),
             _CurrencySelector(
               value: _currency,
-              onChanged: (c) => setState(() {
-                _currency = c;
-                _raw = '0';
-              }),
+              onChanged: _switchCurrency,
             ),
             const Spacer(),
             Text(
@@ -85,7 +103,7 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: _sats > 0
-                    ? () => context.push('/payment?sats=$_sats')
+                    ? () => goCheckout(context, sats: _sats, back: '/paydesk')
                     : null,
                 child: const Text('Cobrar'),
               ),

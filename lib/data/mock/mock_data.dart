@@ -7,14 +7,14 @@ import '../../domain/order/product.dart';
 /// Static/mock data used to exercise the UI/UX before the payment engine is wired.
 /// Menus load from the same asset JSON the production app will ship.
 
-Future<Map<int, String>> loadCategories() async {
+/// Categories in their canonical file order (used to order menu sections).
+Future<List<({int id, String name})>> loadCategories() async {
   final raw = await rootBundle.loadString('assets/categories.json');
   final list = jsonDecode(raw) as List;
-  final map = <int, String>{};
-  for (final c in list) {
-    map[(c['id'] as num).toInt()] = c['name'] as String;
-  }
-  return map;
+  return [
+    for (final c in list)
+      (id: (c['id'] as num).toInt(), name: c['name'] as String),
+  ];
 }
 
 Future<List<Product>> loadMenu(String name) async {
@@ -54,13 +54,32 @@ class MockOrder {
   final DateTime createdAt;
   final bool isPaid;
   final String summary;
-  const MockOrder(this.id, this.amountSats, this.createdAt, this.isPaid, this.summary);
+  final String publishStatus; // Pendiente | Publicada | Fallida
+  final int publishRelays;
+  final String zapStatus; // Pendiente | Confirmado
+  final int zapRelays;
+  const MockOrder(
+    this.id,
+    this.amountSats,
+    this.createdAt,
+    this.isPaid,
+    this.summary, {
+    this.publishStatus = 'Publicada',
+    this.publishRelays = 3,
+    this.zapStatus = 'Pendiente',
+    this.zapRelays = 0,
+  });
 }
 
 final List<MockOrder> kMockOrders = [
-  MockOrder('a1b2c3d4e5f6', 21000, DateTime(2026, 6, 30, 21, 14), true, '2x Coca, 1x Empanada'),
-  MockOrder('f6e5d4c3b2a1', 8500, DateTime(2026, 6, 30, 20, 51), true, '1x Café'),
-  MockOrder('998877665544', 45000, DateTime(2026, 6, 30, 20, 3), false, '1x Remera'),
+  MockOrder('a1b2c3d4e5f6', 21000, DateTime(2026, 6, 30, 21, 14), true,
+      '2x Coca, 1x Empanada',
+      publishStatus: 'Publicada', publishRelays: 3, zapStatus: 'Confirmado', zapRelays: 2),
+  MockOrder('f6e5d4c3b2a1', 8500, DateTime(2026, 6, 30, 20, 51), true, '1x Café',
+      publishStatus: 'Publicada', publishRelays: 2, zapStatus: 'Confirmado', zapRelays: 2),
+  MockOrder('998877665544', 45000, DateTime(2026, 6, 30, 20, 3), false,
+      '1x Remera',
+      publishStatus: 'Publicada', publishRelays: 3, zapStatus: 'Pendiente', zapRelays: 0),
 ];
 
 /// Mock open tabs for the Tab screen.

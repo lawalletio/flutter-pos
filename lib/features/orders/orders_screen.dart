@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
@@ -7,7 +8,8 @@ import '../../data/mock/mock_data.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 
-/// Orders — session payment history (mock data).
+/// Orders — session payment history (mock data) with publish/zap status,
+/// relay counts, and a copy-id action.
 class OrdersScreen extends StatelessWidget {
   const OrdersScreen({super.key});
 
@@ -40,19 +42,56 @@ class OrdersScreen extends StatelessWidget {
                                       fontFamily: 'monospace',
                                       color: AppColors.muted)),
                             ),
-                            Text('${formatToPreference(Currency.sat, o.amountSats)} sats',
+                            Text(
+                                '${formatToPreference(Currency.sat, o.amountSats)} sats',
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w700)),
                           ],
                         ),
                         const SizedBox(height: 6),
                         Text(o.summary, style: const TextStyle(fontSize: 13)),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            _Chip(
+                              label: o.isPaid ? 'Acreditado' : 'Pendiente',
+                              color:
+                                  o.isPaid ? AppColors.primary : AppColors.muted,
+                            ),
+                            _Chip(
+                                label:
+                                    'Orden: ${o.publishStatus} (${o.publishRelays})',
+                                color: AppColors.muted),
+                            _Chip(
+                                label:
+                                    'Zap: ${o.zapStatus} (${o.zapRelays})',
+                                color: o.zapStatus == 'Confirmado'
+                                    ? AppColors.primary
+                                    : AppColors.muted),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
                         Row(
                           children: [
-                            _StatusChip(
-                              label: o.isPaid ? 'Acreditado' : 'Pendiente',
-                              color: o.isPaid ? AppColors.primary : AppColors.muted,
+                            TextButton.icon(
+                              style: TextButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: const Size(0, 32),
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap),
+                              onPressed: () {
+                                Clipboard.setData(ClipboardData(text: o.id));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('ID copiado'),
+                                      duration: Duration(seconds: 1)),
+                                );
+                              },
+                              icon: const Icon(Icons.copy, size: 15),
+                              label: const Text('Copiar ID',
+                                  style: TextStyle(fontSize: 12)),
                             ),
                             const Spacer(),
                             Text(df.format(o.createdAt),
@@ -70,10 +109,10 @@ class OrdersScreen extends StatelessWidget {
   }
 }
 
-class _StatusChip extends StatelessWidget {
+class _Chip extends StatelessWidget {
   final String label;
   final Color color;
-  const _StatusChip({required this.label, required this.color});
+  const _Chip({required this.label, required this.color});
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

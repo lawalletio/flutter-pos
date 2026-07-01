@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../core/checkout.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
@@ -8,7 +8,8 @@ import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/order/product.dart';
 
-/// Menu/cart — product catalog grouped by category, add/remove, cart summary.
+/// Menu/cart — product catalog grouped by category, add/remove, clear, and a
+/// "Ver carrito" → "Resumen de compra" review sheet before checkout.
 class MenuScreen extends StatefulWidget {
   final String menu;
   const MenuScreen({super.key, required this.menu});
@@ -20,7 +21,7 @@ class _MenuScreenState extends State<MenuScreen> {
   static const _arsPerBtc = 70000000.0;
 
   List<Product> _products = [];
-  Map<int, String> _categories = {};
+  List<({int id, String name})> _categories = [];
   final Map<int, CartLine> _cart = {};
   bool _loading = true;
 
@@ -60,16 +61,24 @@ class _MenuScreenState extends State<MenuScreen> {
           l.qty--;
         }
       });
+  void _clear() => setState(_cart.clear);
 
   @override
   Widget build(BuildContext context) {
+    // Group products by category, rendered in canonical category order.
     final grouped = <int, List<Product>>{};
     for (final p in _products) {
       grouped.putIfAbsent(p.categoryId, () => []).add(p);
     }
+    final orderedCatIds = [
+      ..._categories.map((c) => c.id).where(grouped.containsKey),
+      ...grouped.keys.where((id) => !_categories.any((c) => c.id == id)),
+    ];
+    final catName = {for (final c in _categories) c.id: c.name};
 
     return Scaffold(
-      appBar: PosAppBar(title: widget.menu[0].toUpperCase() + widget.menu.substring(1)),
+      appBar: PosAppBar(
+          title: widget.menu[0].toUpperCase() + widget.menu.substring(1)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : PosBody(
@@ -77,11 +86,11 @@ class _MenuScreenState extends State<MenuScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
                 children: [
-                  for (final entry in grouped.entries) ...[
+                  for (final catId in orderedCatIds) ...[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(0, 14, 0, 8),
                       child: Text(
-                        (_categories[entry.key] ?? 'Otros').toUpperCase(),
+                        (catName[catId] ?? 'Otros').toUpperCase(),
                         style: const TextStyle(
                             color: AppColors.muted,
                             fontSize: 12,
@@ -89,7 +98,7 @@ class _MenuScreenState extends State<MenuScreen> {
                             fontWeight: FontWeight.w600),
                       ),
                     ),
-                    ...entry.value.map(_productTile),
+                    ...grouped[catId]!.map(_productTile),
                   ],
                 ],
               ),
@@ -99,13 +108,93 @@ class _MenuScreenState extends State<MenuScreen> {
           : SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: FilledButton(
-                  onPressed: () => context.push('/payment?sats=$_totalSats'),
-                  child: Text(
-                      'Cobrar · ${formatToPreference(Currency.ars, _totalArs)} ARS · $_itemCount ítems'),
+                child: Row(
+                  children: [
+                    // Clear cart (trash + count).
+                    Material(
+                      color: AppColors.error.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _clear,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 16),
+                          child: Row(children: [
+                            const Icon(Icons.delete_outline,
+                                color: AppColors.error, size: 20),
+                            const SizedBox(width: 6),
+                            Text('$_itemCount',
+                                style: const TextStyle(
+                                    color: AppColors.error,
+                                    fontWeight: FontWeight.w700)),
+                          ]),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: _openCartSheet,
+                        child: const Text('Ver carrito'),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
+    );
+  }
+
+  void _openCartSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.background,
+      showDragHandle: true,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('Resumen de compra',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            ..._cart.values.map((l) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(l.product.name,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600)),
+                            Text('${l.qty} ${l.qty == 1 ? 'unidad' : 'unidades'}',
+                                style: const TextStyle(
+                                    color: AppColors.muted, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                      Text('ARS ${formatToPreference(Currency.ars, l.subtotal)}',
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                )),
+            const Divider(height: 24),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                goCheckout(context,
+                    sats: _totalSats, back: '/cart/${widget.menu}');
+              },
+              child: Text(
+                  'Cobrar ${formatToPreference(Currency.sat, _totalSats)} sats'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -126,8 +215,10 @@ class _MenuScreenState extends State<MenuScreen> {
                 Text(p.name,
                     style: const TextStyle(
                         fontSize: 15, fontWeight: FontWeight.w600)),
-                Text('${p.priceCurrency} ${formatToPreference(Currency.ars, p.priceValue)}',
-                    style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+                Text(
+                    '${p.priceCurrency} ${formatToPreference(Currency.ars, p.priceValue)}',
+                    style:
+                        const TextStyle(color: AppColors.muted, fontSize: 13)),
               ],
             ),
           ),

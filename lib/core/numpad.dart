@@ -10,7 +10,7 @@ class Numpad extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
+    final keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', '⌫'];
     return GridView.count(
       crossAxisCount: 3,
       shrinkWrap: true,

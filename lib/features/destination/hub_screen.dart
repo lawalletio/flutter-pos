@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
+import '../../domain/config/settings_state.dart';
 
 /// Destination hub — shows the single venue menu that matches the merchant
 /// address (like the webapp) plus the always-available POS modes.
@@ -59,13 +60,22 @@ class HubScreen extends StatelessWidget {
               sublabel: 'Historial de la sesión',
               onTap: () => context.push('/orders'),
             ),
-            const SizedBox(height: 10),
-            PosCard(
-              icon: Icons.account_balance_wallet_outlined,
-              label: 'Cuentas abiertas',
-              sublabel: 'Tabs de clientes',
-              color: const Color(0xFF2C2438),
-              onTap: () => context.push('/tab'),
+            // 'Cuentas abiertas' is gated behind the Tab setting (default off),
+            // like the webapp's `tabEnabled`.
+            ValueListenableBuilder<SettingsState>(
+              valueListenable: appSettings,
+              builder: (context, s, _) => s.tabEnabled
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: PosCard(
+                        icon: Icons.account_balance_wallet_outlined,
+                        label: 'Cuentas abiertas',
+                        sublabel: 'Tabs de clientes',
+                        color: const Color(0xFF2C2438),
+                        onTap: () => context.push('/tab'),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
             ),
           ],
         ),

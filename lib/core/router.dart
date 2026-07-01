@@ -5,6 +5,7 @@ import '../features/home/home_screen.dart';
 import '../features/destination/hub_screen.dart';
 import '../features/cart/menu_screen.dart';
 import '../features/paydesk/paydesk_screen.dart';
+import '../features/tip/tip_screen.dart';
 import '../features/payment/payment_screen.dart';
 import '../features/orders/orders_screen.dart';
 import '../features/tab/tab_screen.dart';
@@ -30,11 +31,22 @@ final appRouter = GoRouter(
     ),
     GoRoute(path: '/paydesk', pageBuilder: (c, s) => _page(const PaydeskScreen())),
     GoRoute(
+      path: '/tip',
+      pageBuilder: (c, s) {
+        final sats = int.tryParse(s.uri.queryParameters['sats'] ?? '') ?? 0;
+        return _page(TipScreen(amountSats: sats, back: s.uri.queryParameters['back']));
+      },
+    ),
+    GoRoute(
       path: '/payment',
       pageBuilder: (c, s) {
         final sats = int.tryParse(s.uri.queryParameters['sats'] ?? '') ?? 0;
         final paid = s.uri.queryParameters['paid'] == '1';
-        return _page(PaymentScreen(amountSats: sats, initiallyPaid: paid));
+        return _page(PaymentScreen(
+          amountSats: sats,
+          initiallyPaid: paid,
+          back: s.uri.queryParameters['back'],
+        ));
       },
     ),
     GoRoute(path: '/orders', pageBuilder: (c, s) => _page(const OrdersScreen())),
