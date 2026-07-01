@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- ZCS SmartPos SDK may read the device serial during init (as in android-pos-wrapper). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <application
         android:label="LaWallet POS"
         android:name="${applicationName}"

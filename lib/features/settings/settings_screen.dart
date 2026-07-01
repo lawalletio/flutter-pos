@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/settings_state.dart';
+import '../../platform/printer_channel.dart';
 
 /// Loaded once and reused across rebuilds.
 final Future<PackageInfo> _packageInfo = PackageInfo.fromPlatform();
@@ -110,11 +111,55 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ],
               )),
+              const SizedBox(height: 16),
+              const Text('IMPRESORA',
+                  style: TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 12,
+                      letterSpacing: 1.1,
+                      fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              _card(Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.print_outlined,
+                            size: 18, color: AppColors.primary),
+                        SizedBox(width: 8),
+                        Text('Impresora ZCS SmartPos',
+                            style: TextStyle(fontSize: 14)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed: () => _testPrint(context),
+                      icon: const Icon(Icons.receipt_long, size: 18),
+                      label: const Text('Probar impresora'),
+                    ),
+                  ],
+                ),
+              )),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _testPrint(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(
+        content: Text('Imprimiendo prueba…'),
+        duration: Duration(seconds: 1)));
+    final res = await PrinterChannel.testPrint();
+    if (!context.mounted) return;
+    messenger.showSnackBar(SnackBar(
+      content: Text(res.message),
+      backgroundColor: res.ok ? AppColors.primary : AppColors.error,
+    ));
   }
 
   Widget _card(Widget child) => Container(

@@ -40,6 +40,12 @@ kotlin {
     }
 }
 
+dependencies {
+    // ZCS SmartPos SDK (thermal printer) — same jars used by android-pos-wrapper.
+    implementation(files("libs/SmartPos_1.9.4_R250117.jar"))
+    implementation(files("libs/zxing-core-3.3.0.jar"))
+}
+
 flutter {
     source = "../.."
 }
