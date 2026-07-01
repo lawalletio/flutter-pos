@@ -12,46 +12,135 @@ import '../../domain/config/formatter.dart';
 const Color _amber = Color(0xFFE0A82E);
 
 /// Orders — session payment history. Payment / publish / zap state are shown as
-/// icons (Pendiente, Acreditado, Publicado) rather than text badges.
-class OrdersScreen extends StatelessWidget {
+/// icons (Pendiente, Acreditado, Publicado) rather than text badges. Shows the
+/// total sold and lets the user clear all orders (with confirmation).
+class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
+  @override
+  State<OrdersScreen> createState() => _OrdersScreenState();
+}
+
+class _OrdersScreenState extends State<OrdersScreen> {
+  late final List<MockOrder> _orders = List.of(kMockOrders);
+  final _df = DateFormat('dd/MM · HH:mm');
+
+  int get _soldSats =>
+      _orders.where((o) => o.isPaid).fold(0, (s, o) => s + o.amountSats);
+  int get _soldCount => _orders.where((o) => o.isPaid).length;
+
+  Future<void> _confirmDeleteAll() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: const Text('¿Eliminar todas las órdenes?'),
+        content: const Text(
+            'Se borrará el historial de órdenes de esta sesión. '
+            'Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar',
+                style: TextStyle(color: AppColors.muted)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Eliminar todas'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) setState(_orders.clear);
+  }
 
   @override
   Widget build(BuildContext context) {
     pricing.ensureLoaded();
-    final df = DateFormat('dd/MM · HH:mm');
-    final orders = kMockOrders;
-    final paidCount = orders.where((o) => o.isPaid).length;
-
     return Scaffold(
       appBar: const PosAppBar(title: 'Órdenes'),
       body: ValueListenableBuilder<Rates?>(
         valueListenable: pricing.notifier,
         builder: (context, _, __) => PosBody(
-          child: orders.isEmpty
+          child: _orders.isEmpty
               ? _empty()
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(2, 4, 2, 12),
-                      child: Text(
-                        '${orders.length} órdenes · $paidCount acreditadas',
-                        style: const TextStyle(
-                            color: AppColors.muted, fontSize: 13),
-                      ),
-                    ),
+                    _totalSoldCard(),
+                    const SizedBox(height: 12),
                     Expanded(
                       child: ListView.separated(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        itemCount: orders.length,
+                        padding: const EdgeInsets.only(bottom: 8),
+                        itemCount: _orders.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (c, i) => _OrderCard(order: orders[i], df: df),
+                        itemBuilder: (c, i) =>
+                            _OrderCard(order: _orders[i], df: _df),
                       ),
                     ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.error,
+                          side: BorderSide(
+                              color: AppColors.error.withValues(alpha: 0.5)),
+                        ),
+                        onPressed: _confirmDeleteAll,
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Eliminar todas'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                   ],
                 ),
         ),
+      ),
+    );
+  }
+
+  Widget _totalSoldCard() {
+    final ars = pricing.satsToFiat(_soldSats, Currency.ars);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Total vendido',
+                    style: TextStyle(color: AppColors.muted, fontSize: 13)),
+                const SizedBox(height: 2),
+                Text('${formatToPreference(Currency.sat, _soldSats)} sats',
+                    style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.primary)),
+                if (ars != null)
+                  Text('≈ ${formatToPreference(Currency.ars, ars)} ARS',
+                      style: const TextStyle(
+                          color: AppColors.muted, fontSize: 13)),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('$_soldCount',
+                  style: const TextStyle(
+                      fontSize: 24, fontWeight: FontWeight.w800)),
+              Text(_soldCount == 1 ? 'venta' : 'ventas',
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+            ],
+          ),
+        ],
       ),
     );
   }
