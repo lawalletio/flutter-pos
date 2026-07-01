@@ -42,6 +42,13 @@ class PricingService {
 
   Rates? get rates => notifier.value;
 
+  /// Seed rates directly (tests) so [ensureLoaded] treats them as fresh.
+  @visibleForTesting
+  void seedRates(Rates rates) {
+    notifier.value = rates;
+    _loadedAt = DateTime.now();
+  }
+
   /// Load rates if missing or stale (deduped across concurrent callers).
   Future<void> ensureLoaded() {
     final fresh = _loadedAt != null &&
