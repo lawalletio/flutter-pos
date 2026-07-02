@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/checkout.dart';
+import '../../core/i18n.dart';
 import '../../core/numpad.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
+import '../../domain/order/current_order.dart';
 import '../../domain/order/order_reset.dart';
 
 /// Cash register — manual amount entry via numpad + currency selector.
@@ -92,7 +94,7 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
     final display = formatToPreference(_currency, _enteredAmount);
     final satsStr = formatToPreference(Currency.sat, _sats);
     return Scaffold(
-      appBar: const PosAppBar(title: 'Modo caja'),
+      appBar: PosAppBar(title: context.tr('Modo caja')),
       body: PosBody(
         child: Column(
           children: [
@@ -118,9 +120,12 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: _sats > 0
-                    ? () => goCheckout(context, sats: _sats, back: '/paydesk')
+                    ? () {
+                        clearOrderItems(); // manual charge: no line items
+                        goCheckout(context, sats: _sats, back: '/paydesk');
+                      }
                     : null,
-                child: const Text('Cobrar'),
+                child: Text(context.tr('Cobrar')),
               ),
             ),
             const SizedBox(height: 12),

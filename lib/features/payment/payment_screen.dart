@@ -5,15 +5,18 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/lnurl/lnurl_service.dart';
 import '../../data/mock/mock_data.dart';
+import '../../data/pricing/block_service.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
+import '../../domain/order/current_order.dart';
 import '../../domain/order/order_reset.dart';
 import '../../platform/nfc_channel.dart';
 import '../../platform/printer_channel.dart';
@@ -83,6 +86,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
   void _markPaid() {
     if (_view == _View.paid) return;
     _stopNfc();
+    _poll?.cancel();
+    // Clear the order immediately on full payment so returning to the menu — by
+    // the "Volver" button, the app bar back, or the Android hardware back — always
+    // shows an empty cart (go_router keeps the menu page alive otherwise).
+    resetOrder();
     setState(() {
       _collecting = false;
       _view = _View.paid;
@@ -101,13 +109,30 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Future<void> _printReceipt() async {
     if (_printed) return;
     _printed = true;
-    final ars = pricing.satsToFiat(widget.amountSats, Currency.ars);
+    final sats = widget.amountSats;
+    final ars = pricing.satsToFiat(sats, Currency.ars);
+    final usd = pricing.satsToFiat(sats, Currency.usd);
+    final btc = pricing.btcUsd; // BTC price in USD (cached, realtime)
+    // Line items carried from the cart (empty for a manual paydesk charge).
+    final items = [
+      for (final it in currentOrderItems.value)
+        {
+          'name': it.name,
+          'price': formatToPreference(Currency.ars, it.unitPrice),
+          'qty': it.qty,
+        }
+    ];
     await PrinterChannel.printOrder({
-      'items': const <Map<String, dynamic>>[],
+      'items': items,
       'currency': 'ARS',
       'total': ars != null ? formatToPreference(Currency.ars, ars) : '-',
-      'totalSats': formatToPreference(Currency.sat, widget.amountSats),
-      'message': 'Gracias por su pago',
+      'currencyB': 'USD',
+      'totalB': usd != null ? formatToPreference(Currency.usd, usd) : '-',
+      'totalSats': formatToPreference(Currency.sat, sats),
+      // Block height + BTC price are kept warm in memory — no print-time delay.
+      'blockNumber': blockHeight.height?.toString() ?? '',
+      'btcPrice': btc != null ? formatToPreference(Currency.ars, btc) : '',
+      'message': context.tr('Gracias por su pago'),
     });
   }
 
@@ -157,8 +182,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _markPaid();
       } else {
         setState(() => _collecting = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Pago enviado, esperando confirmación…')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(context.tr('Pago enviado, esperando confirmación…'))));
       }
     } on LnurlException catch (e) {
       if (!mounted) return;
@@ -262,7 +287,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   Widget _scaffold(Widget body, {String? title = 'Cobrar'}) => Scaffold(
-        appBar: PosAppBar(title: title, showSettings: false),
+        appBar: PosAppBar(
+            title: title != null ? context.tr(title) : null,
+            showSettings: false),
         body: PosBody(child: body),
       );
 
@@ -271,15 +298,16 @@ class _PaymentScreenState extends State<PaymentScreen> {
         children: [
           const Icon(Icons.error_outline, color: AppColors.error, size: 48),
           const SizedBox(height: 14),
-          const Text('No se pudo generar la invoice.',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          Text(context.tr('No se pudo generar la invoice.'),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
-          const Text('La orden no tiene monto.',
-              style: TextStyle(color: AppColors.muted)),
+          Text(context.tr('La orden no tiene monto.'),
+              style: const TextStyle(color: AppColors.muted)),
           const SizedBox(height: 28),
           SizedBox(
             width: double.infinity,
-            child: FilledButton(onPressed: _goBack, child: const Text('Volver')),
+            child: FilledButton(
+                onPressed: _goBack, child: Text(context.tr('Volver'))),
           ),
         ],
       );
@@ -288,19 +316,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (_loadingInvoice) return _generatingView();
     if (_invoiceError != null) return _invoiceErrorView();
     final tabEnabled = appSettings.value.tabEnabled;
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
+    return SingleChildScrollView(
+      child: Column(
+        children: [
         const SizedBox(height: 8),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            SizedBox(
+          children: [
+            const SizedBox(
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(strokeWidth: 2)),
-            SizedBox(width: 10),
-            Text('Esperando el pago…', style: TextStyle(color: AppColors.muted)),
+            const SizedBox(width: 10),
+            Text(context.tr('Esperando el pago…'),
+                style: const TextStyle(color: AppColors.muted)),
           ],
         ),
         const SizedBox(height: 18),
@@ -314,18 +343,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
         TextButton.icon(
           onPressed: _copyInvoice,
           icon: const Icon(Icons.copy, size: 15),
-          label: const Text('Copiar invoice'),
+          label: Text(context.tr('Copiar invoice')),
         ),
         const SizedBox(height: 8),
         if (_nfcAvailable) ...[
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(Icons.contactless_outlined,
+            children: [
+              const Icon(Icons.contactless_outlined,
                   size: 18, color: AppColors.primary),
-              SizedBox(width: 8),
-              Text('Acercá la tarjeta para pagar',
-                  style: TextStyle(color: AppColors.primary)),
+              const SizedBox(width: 8),
+              Text(context.tr('Acercá la tarjeta para pagar'),
+                  style: const TextStyle(color: AppColors.primary)),
             ],
           ),
           const SizedBox(height: 12),
@@ -334,7 +363,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           width: double.infinity,
           child: OutlinedButton(
             onPressed: _goBack,
-            child: const Text('Cancelar'),
+            child: Text(context.tr('Cancelar')),
           ),
         ),
         const SizedBox(height: 8),
@@ -345,13 +374,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 child: TextButton.icon(
                   onPressed: _openAddToTab,
                   icon: const Icon(Icons.add_card, size: 18),
-                  label: const Text('Agregar a tab'),
+                  label: Text(context.tr('Agregar a tab')),
                 ),
               ),
             Expanded(
               child: TextButton(
                 onPressed: () => setState(() => _view = _View.checking),
-                child: const Text('Check event'),
+                child: Text(context.tr('Check event')),
               ),
             ),
           ],
@@ -360,8 +389,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
           onPressed: _markPaid,
           child: const Text('▶ Simular pago recibido (demo)'),
         ),
+        const SizedBox(height: 8),
       ],
-    );
+    ));
   }
 
   /// Big invoice QR — the white card spans the screen width minus 25px on each
@@ -404,27 +434,27 @@ class _PaymentScreenState extends State<PaymentScreen> {
           const SizedBox(height: 24),
           const Icon(Icons.contactless, color: AppColors.primary, size: 32),
           const SizedBox(height: 12),
-          const Text('Cobrando de la tarjeta…',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          Text(context.tr('Cobrando de la tarjeta…'),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
           Text('$_satsStr sats · ≈ $_arsStr ARS',
               style: const TextStyle(color: AppColors.muted)),
           const SizedBox(height: 10),
-          const Text('No retires la tarjeta',
-              style: TextStyle(color: AppColors.muted, fontSize: 13)),
+          Text(context.tr('No retires la tarjeta'),
+              style: const TextStyle(color: AppColors.muted, fontSize: 13)),
         ],
       );
 
   Widget _generatingView() => Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          CircularProgressIndicator(),
-          SizedBox(height: 20),
-          Text('Generando invoice…',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-          SizedBox(height: 6),
-          Text('Resolviendo la Lightning Address…',
-              style: TextStyle(color: AppColors.muted)),
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 20),
+          Text(context.tr('Generando invoice…'),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Text(context.tr('Resolviendo la Lightning Address…'),
+              style: const TextStyle(color: AppColors.muted)),
         ],
       );
 
@@ -433,8 +463,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         children: [
           const Icon(Icons.error_outline, color: AppColors.error, size: 48),
           const SizedBox(height: 14),
-          const Text('No se pudo generar la invoice.',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          Text(context.tr('No se pudo generar la invoice.'),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Text(_invoiceError ?? '',
               textAlign: TextAlign.center,
@@ -444,12 +474,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                    onPressed: _goBack, child: const Text('Volver')),
+                    onPressed: _goBack, child: Text(context.tr('Volver'))),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
-                    onPressed: _fetchInvoice, child: const Text('Reintentar')),
+                    onPressed: _fetchInvoice,
+                    child: Text(context.tr('Reintentar'))),
               ),
             ],
           ),
@@ -461,18 +492,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
         children: [
           const CircularProgressIndicator(),
           const SizedBox(height: 20),
-          const Text('Buscando eventos…',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          Text(context.tr('Buscando eventos…'),
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
-          const Text('Zap e internos…',
-              style: TextStyle(color: AppColors.muted)),
+          Text(context.tr('Zap e internos…'),
+              style: const TextStyle(color: AppColors.muted)),
           const SizedBox(height: 28),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
                   onPressed: () => setState(() => _view = _View.waiting),
-                  child: const Text('Volver'),
+                  child: Text(context.tr('Volver')),
                 ),
               ),
               const SizedBox(width: 12),
@@ -486,7 +517,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       setState(() => _view = _View.waiting);
                     }
                   },
-                  child: const Text('Check event'),
+                  child: Text(context.tr('Check event')),
                 ),
               ),
             ],
@@ -501,17 +532,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
       children: [
         const Icon(Icons.check_circle, color: AppColors.primary, size: 64),
         const SizedBox(height: 16),
-        const Text('Agregado a la cuenta',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+        Text(context.tr('Agregado a la cuenta'),
+            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         Text(_tabName ?? '',
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         const SizedBox(height: 16),
-        Text('+ $_satsStr sats agregados',
+        Text('+ $_satsStr sats ${context.tr('agregados')}',
             style: const TextStyle(color: AppColors.muted)),
         const SizedBox(height: 4),
-        const Text('Total de la cuenta',
-            style: TextStyle(color: AppColors.muted, fontSize: 13)),
+        Text(context.tr('Total de la cuenta'),
+            style: const TextStyle(color: AppColors.muted, fontSize: 13)),
         Text('${_satsOf(total)} sats',
             style: const TextStyle(
                 fontSize: 22,
@@ -523,7 +554,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         SizedBox(
           width: double.infinity,
           child: FilledButton(
-              onPressed: _finishAndBack, child: const Text('Volver')),
+              onPressed: _finishAndBack, child: Text(context.tr('Volver'))),
         ),
       ],
     );
@@ -534,13 +565,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (inv == null) return;
     Clipboard.setData(ClipboardData(text: inv));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-          content: Text('Invoice copiada'), duration: Duration(seconds: 1)),
+      SnackBar(
+          content: Text(context.tr('Invoice copiada')),
+          duration: const Duration(seconds: 1)),
     );
   }
 
   void _addToExisting(MockTab t) {
     _poll?.cancel();
+    resetOrder(); // items moved to the tab — clear the cart
     setState(() {
       _tabName = t.name;
       _tabTotalSats = t.amountSats + widget.amountSats;
@@ -550,6 +583,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   void _createTab(String name) {
     _poll?.cancel();
+    resetOrder(); // items moved to the tab — clear the cart
     setState(() {
       _tabName = name;
       _tabTotalSats = widget.amountSats;
@@ -571,17 +605,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Agregar a una cuenta',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(context.tr('Agregar a una cuenta'),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text('Cobrando $_satsStr sats',
+            Text('${context.tr('Cobrando')} $_satsStr sats',
                 style: const TextStyle(color: AppColors.muted, fontSize: 13)),
             const SizedBox(height: 16),
             if (kMockTabs.isNotEmpty) ...[
-              const Align(
+              Align(
                 alignment: Alignment.centerLeft,
-                child: Text('CUENTAS ABIERTAS',
-                    style: TextStyle(
+                child: Text(context.tr('CUENTAS ABIERTAS'),
+                    style: const TextStyle(
                         color: AppColors.muted,
                         fontSize: 12,
                         letterSpacing: 1.1,
@@ -651,24 +686,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              Row(children: const [
-                Expanded(child: Divider(color: AppColors.muted)),
+              Row(children: [
+                const Expanded(child: Divider(color: AppColors.muted)),
                 Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 10),
-                  child: Text('o crear una nueva',
-                      style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Text(context.tr('o crear una nueva'),
+                      style: const TextStyle(
+                          color: AppColors.muted, fontSize: 12)),
                 ),
-                Expanded(child: Divider(color: AppColors.muted)),
+                const Expanded(child: Divider(color: AppColors.muted)),
               ]),
               const SizedBox(height: 12),
             ],
             TextField(
               controller: ctrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 filled: true,
                 fillColor: AppColors.surface,
-                hintText: 'Nombre del nuevo cliente',
-                border: OutlineInputBorder(
+                hintText: context.tr('Nombre del nuevo cliente'),
+                border: const OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(12))),
               ),
@@ -686,7 +722,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 Navigator.of(ctx).pop();
                 _createTab(name);
               },
-              child: const Text('Crear cuenta nueva'),
+              child: Text(context.tr('Crear cuenta nueva')),
             ),
           ],
         ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -36,6 +37,14 @@ class PricingService {
   final ValueNotifier<Rates?> notifier = ValueNotifier<Rates?>(null);
   DateTime? _loadedAt;
   Future<void>? _inFlight;
+  Timer? _timer;
+
+  /// Current BTC price in USD (derived from the per-sat rate), or null if the
+  /// rates aren't loaded yet.
+  double? get btcUsd {
+    final r = notifier.value;
+    return r == null ? null : r.usdPerSat * 1e8;
+  }
 
   static const _endpoint = 'https://api.yadio.io/exrates/btc';
   static const _ttl = Duration(seconds: 60);
@@ -56,6 +65,17 @@ class PricingService {
         notifier.value != null;
     if (fresh) return Future.value();
     return _inFlight ??= _load().whenComplete(() => _inFlight = null);
+  }
+
+  /// Load now and keep refreshing every [period] so the rate stays current and
+  /// is instantly available when composing a ticket (no print-time delay).
+  void startAutoRefresh([Duration period = const Duration(seconds: 60)]) {
+    ensureLoaded();
+    _timer?.cancel();
+    _timer = Timer.periodic(period, (_) {
+      _loadedAt = null; // force a refresh past the TTL
+      ensureLoaded();
+    });
   }
 
   Future<void> _load() async {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/address_history.dart';
@@ -40,9 +41,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     .headlineMedium
                     ?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
-            const Text('Ingresá la dirección Lightning del comercio',
+            Text(context.tr('Ingresá la dirección Lightning del comercio'),
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.muted)),
+                style: const TextStyle(color: AppColors.muted)),
             const SizedBox(height: 28),
             TextField(
               controller: _ctrl,
@@ -68,7 +69,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 addressHistory.add(addr);
                 context.go('/hub?address=${Uri.encodeComponent(addr)}');
               },
-              child: const Text('Configurar'),
+              child: Text(context.tr('Configurar')),
             ),
             const SizedBox(height: 24),
             const Text('v0.1.0 · M0 preview',

@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'current_order.dart';
+
 /// Broadcast signal to clear the current order/cart after a payment completes.
 ///
 /// go_router preserves the menu/paydesk page state across navigation, so simply
@@ -7,4 +9,7 @@ import 'package:flutter/foundation.dart';
 /// to this and clear themselves when it fires.
 final ValueNotifier<int> orderResetSignal = ValueNotifier<int>(0);
 
-void resetOrder() => orderResetSignal.value++;
+void resetOrder() {
+  clearOrderItems();
+  orderResetSignal.value++;
+}

@@ -14,28 +14,47 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   const PosAppBar({super.key, this.title, this.showBack = true, this.showSettings = true});
 
   @override
-  Size get preferredSize => const Size.fromHeight(64);
+  Size get preferredSize => const Size.fromHeight(72);
 
   @override
   Widget build(BuildContext context) {
     return AppBar(
       backgroundColor: AppColors.background,
       elevation: 0,
-      toolbarHeight: 64,
+      toolbarHeight: 72,
+      leadingWidth: 68,
       leading: showBack
-          ? IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-              onPressed: () => context.canPop() ? context.pop() : context.go('/hub'),
+          ? Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: Material(
+                color: AppColors.surface,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () =>
+                      context.canPop() ? context.pop() : context.go('/hub'),
+                  child: const SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Icon(Icons.arrow_back, size: 26),
+                  ),
+                ),
+              ),
             )
           : null,
       title: title == null
           ? null
-          : Text(title!, style: const TextStyle(fontWeight: FontWeight.w700)),
+          : Text(title!,
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
       actions: [
         if (showSettings)
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => context.push('/settings'),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: IconButton(
+              icon: const Icon(Icons.settings_outlined, size: 26),
+              onPressed: () => context.push('/settings'),
+            ),
           ),
       ],
     );
@@ -68,29 +87,29 @@ class PosCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 18),
+          padding: const EdgeInsets.symmetric(vertical: 26, horizontal: 20),
           child: Row(
             children: [
-              Icon(icon, size: 28, color: AppColors.primary),
-              const SizedBox(width: 16),
+              Icon(icon, size: 34, color: AppColors.primary),
+              const SizedBox(width: 18),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(label,
                         style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w600)),
+                            fontSize: 20, fontWeight: FontWeight.w600)),
                     if (sublabel != null)
                       Padding(
-                        padding: const EdgeInsets.only(top: 2),
+                        padding: const EdgeInsets.only(top: 3),
                         child: Text(sublabel!,
                             style: const TextStyle(
-                                fontSize: 13, color: AppColors.muted)),
+                                fontSize: 14, color: AppColors.muted)),
                       ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: AppColors.muted),
+              const Icon(Icons.chevron_right, size: 26, color: AppColors.muted),
             ],
           ),
         ),
@@ -106,14 +125,14 @@ class PosBody extends StatelessWidget {
   const PosBody({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+    this.padding = const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
   });
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
+        constraints: const BoxConstraints(maxWidth: 560),
         child: Padding(padding: padding, child: child),
       ),
     );

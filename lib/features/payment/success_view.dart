@@ -4,6 +4,7 @@ import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 
 /// Spectacular "payment credited" celebration: confetti burst + rain, an
@@ -185,9 +186,9 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
               ),
               child: Column(
                 children: [
-                  const Text('¡Pago acreditado!',
-                      style:
-                          TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+                  Text(context.tr('¡Pago acreditado!'),
+                      style: const TextStyle(
+                          fontSize: 26, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 10),
                   Text('${widget.satsStr} sats',
                       style: const TextStyle(
@@ -202,7 +203,7 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
                     width: 260,
                     child: FilledButton(
                       onPressed: widget.onBack,
-                      child: const Text('Volver'),
+                      child: Text(context.tr('Volver')),
                     ),
                   ),
                 ],

@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/checkout.dart';
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
+import '../../domain/order/current_order.dart';
 import '../../domain/order/order_reset.dart';
 import '../../domain/order/product.dart';
 
@@ -114,10 +116,10 @@ class _MenuScreenState extends State<MenuScreen> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(0, 14, 0, 8),
                       child: Text(
-                        (catName[catId] ?? 'Otros').toUpperCase(),
+                        (catName[catId] ?? context.tr('Otros')).toUpperCase(),
                         style: const TextStyle(
                             color: AppColors.muted,
-                            fontSize: 12,
+                            fontSize: 14,
                             letterSpacing: 1.1,
                             fontWeight: FontWeight.w600),
                       ),
@@ -160,7 +162,7 @@ class _MenuScreenState extends State<MenuScreen> {
                     Expanded(
                       child: FilledButton(
                         onPressed: _openCartSheet,
-                        child: const Text('Ver carrito'),
+                        child: Text(context.tr('Ver carrito')),
                       ),
                     ),
                   ],
@@ -181,8 +183,9 @@ class _MenuScreenState extends State<MenuScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Resumen de compra',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(context.tr('Resumen de compra'),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             const SizedBox(height: 12),
             ..._cart.values.map((l) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
@@ -195,7 +198,7 @@ class _MenuScreenState extends State<MenuScreen> {
                             Text(l.product.name,
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600)),
-                            Text('${l.qty} ${l.qty == 1 ? 'unidad' : 'unidades'}',
+                            Text('${l.qty} ${context.tr(l.qty == 1 ? 'unidad' : 'unidades')}',
                                 style: const TextStyle(
                                     color: AppColors.muted, fontSize: 12)),
                           ],
@@ -209,12 +212,20 @@ class _MenuScreenState extends State<MenuScreen> {
             const Divider(height: 24),
             FilledButton(
               onPressed: () {
+                // Carry the cart lines to the ticket for printing.
+                setOrderItems([
+                  for (final l in _cart.values)
+                    OrderItem(
+                        name: l.product.name,
+                        unitPrice: l.product.priceValue,
+                        qty: l.qty),
+                ]);
                 Navigator.of(ctx).pop();
                 goCheckout(context,
                     sats: _totalSats, back: '/cart/${widget.menu}');
               },
               child: Text(
-                  'Cobrar ${formatToPreference(Currency.sat, _totalSats)} sats'),
+                  '${context.tr('Cobrar')} ${formatToPreference(Currency.sat, _totalSats)} sats'),
             ),
           ],
         ),
@@ -243,42 +254,53 @@ class _MenuScreenState extends State<MenuScreen> {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 160),
       curve: Curves.easeOut,
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      margin: const EdgeInsets.only(bottom: 10),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: border,
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      // Tapping anywhere on the tile adds the product (same as the + button).
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _add(p),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Row(
               children: [
-                Text(p.name,
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w600)),
-                Text(
-                    '${p.priceCurrency} ${formatToPreference(Currency.ars, p.priceValue)}',
-                    style:
-                        const TextStyle(color: AppColors.muted, fontSize: 13)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(p.name,
+                          style: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(
+                          '${p.priceCurrency} ${formatToPreference(Currency.ars, p.priceValue)}',
+                          style: const TextStyle(
+                              color: AppColors.muted, fontSize: 15)),
+                    ],
+                  ),
+                ),
+                if (qty > 0) ...[
+                  _RoundBtn(icon: Icons.remove, onTap: () => _remove(p)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text('$qty',
+                        style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w700,
+                            color: inCart ? AppColors.primary : null)),
+                  ),
+                ],
+                _RoundBtn(icon: Icons.add, onTap: () => _add(p)),
               ],
             ),
           ),
-          if (qty > 0) ...[
-            _RoundBtn(icon: Icons.remove, onTap: () => _remove(p)),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Text('$qty',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: inCart ? AppColors.primary : null)),
-            ),
-          ],
-          _RoundBtn(icon: Icons.add, onTap: () => _add(p)),
-        ],
+        ),
       ),
     );
   }
@@ -297,8 +319,8 @@ class _RoundBtn extends StatelessWidget {
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(icon, size: 20, color: AppColors.primary),
+          padding: const EdgeInsets.all(10),
+          child: Icon(icon, size: 24, color: AppColors.primary),
         ),
       ),
     );

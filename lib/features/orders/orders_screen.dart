@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
@@ -33,20 +34,20 @@ class _OrdersScreenState extends State<OrdersScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: const Text('¿Eliminar todas las órdenes?'),
-        content: const Text(
+        title: Text(context.tr('¿Eliminar todas las órdenes?')),
+        content: Text(context.tr(
             'Se borrará el historial de órdenes de esta sesión. '
-            'Esta acción no se puede deshacer.'),
+            'Esta acción no se puede deshacer.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar',
-                style: TextStyle(color: AppColors.muted)),
+            child: Text(context.tr('Cancelar'),
+                style: const TextStyle(color: AppColors.muted)),
           ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Eliminar todas'),
+            child: Text(context.tr('Eliminar todas')),
           ),
         ],
       ),
@@ -58,7 +59,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Widget build(BuildContext context) {
     pricing.ensureLoaded();
     return Scaffold(
-      appBar: const PosAppBar(title: 'Órdenes'),
+      appBar: PosAppBar(title: context.tr('Órdenes')),
       body: ValueListenableBuilder<Rates?>(
         valueListenable: pricing.notifier,
         builder: (context, _, __) => PosBody(
@@ -89,7 +90,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         ),
                         onPressed: _confirmDeleteAll,
                         icon: const Icon(Icons.delete_outline),
-                        label: const Text('Eliminar todas'),
+                        label: Text(context.tr('Eliminar todas')),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -111,12 +112,25 @@ class _OrdersScreenState extends State<OrdersScreen> {
       ),
       child: Row(
         children: [
+          // Left: the sales count.
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('$_soldCount',
+                  style: const TextStyle(
+                      fontSize: 24, fontWeight: FontWeight.w800)),
+              Text(context.tr(_soldCount == 1 ? 'venta' : 'ventas'),
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+            ],
+          ),
+          // Right: the total sold (label + amounts), right-aligned.
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                const Text('Total vendido',
-                    style: TextStyle(color: AppColors.muted, fontSize: 13)),
+                Text(context.tr('Total vendido'),
+                    style: const TextStyle(
+                        color: AppColors.muted, fontSize: 13)),
                 const SizedBox(height: 2),
                 Text('${formatToPreference(Currency.sat, _soldSats)} sats',
                     style: const TextStyle(
@@ -130,29 +144,20 @@ class _OrdersScreenState extends State<OrdersScreen> {
               ],
             ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text('$_soldCount',
-                  style: const TextStyle(
-                      fontSize: 24, fontWeight: FontWeight.w800)),
-              Text(_soldCount == 1 ? 'venta' : 'ventas',
-                  style: const TextStyle(color: AppColors.muted, fontSize: 12)),
-            ],
-          ),
         ],
       ),
     );
   }
 
-  Widget _empty() => const Center(
+  Widget _empty() => Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.receipt_long_outlined, size: 48, color: AppColors.muted),
-            SizedBox(height: 12),
-            Text('Todavía no hay órdenes creadas.',
-                style: TextStyle(color: AppColors.muted)),
+            const Icon(Icons.receipt_long_outlined,
+                size: 48, color: AppColors.muted),
+            const SizedBox(height: 12),
+            Text(context.tr('Todavía no hay órdenes creadas.'),
+                style: const TextStyle(color: AppColors.muted)),
           ],
         ),
       );
@@ -275,9 +280,9 @@ class _OrderCard extends StatelessWidget {
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: order.id));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('ID copiado'),
-                          duration: Duration(seconds: 1)),
+                      SnackBar(
+                          content: Text(context.tr('ID copiado')),
+                          duration: const Duration(seconds: 1)),
                     );
                   },
                   icon: const Icon(Icons.copy_rounded, size: 14),

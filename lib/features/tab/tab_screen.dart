@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/checkout.dart';
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
@@ -47,19 +48,19 @@ class _TabScreenState extends State<TabScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('¿Borrar todas las cuentas?',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(context.tr('¿Borrar todas las cuentas?'),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            const Text(
-                'Esta acción no se puede deshacer.',
-                style: TextStyle(color: AppColors.muted)),
+            Text(
+                context.tr('Esta acción no se puede deshacer.'),
+                style: const TextStyle(color: AppColors.muted)),
             const SizedBox(height: 20),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () => Navigator.of(ctx).pop(),
-                    child: const Text('Cancelar'),
+                    child: Text(context.tr('Cancelar')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -71,7 +72,7 @@ class _TabScreenState extends State<TabScreen> {
                       Navigator.of(ctx).pop();
                       setState(_tabs.clear);
                     },
-                    child: const Text('Borrar todo'),
+                    child: Text(context.tr('Borrar todo')),
                   ),
                 ),
               ],
@@ -85,10 +86,10 @@ class _TabScreenState extends State<TabScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const PosAppBar(title: 'Cuentas abiertas'),
+      appBar: PosAppBar(title: context.tr('Cuentas abiertas')),
       body: PosBody(
         child: _tabs.isEmpty
-            ? const Center(child: Text('No hay cuentas abiertas.'))
+            ? Center(child: Text(context.tr('No hay cuentas abiertas.')))
             : Column(
                 children: [
                   Expanded(
@@ -155,7 +156,7 @@ class _TabScreenState extends State<TabScreen> {
                           foregroundColor: AppColors.error),
                       onPressed: _clearAll,
                       icon: const Icon(Icons.delete_outline),
-                      label: const Text('Borrar todo'),
+                      label: Text(context.tr('Borrar todo')),
                     ),
                   ),
                 ],

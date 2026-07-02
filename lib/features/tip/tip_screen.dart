@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/pricing/pricing_service.dart';
@@ -27,7 +28,7 @@ class TipScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     pricing.ensureLoaded();
     return Scaffold(
-      appBar: const PosAppBar(title: 'Propina'),
+      appBar: PosAppBar(title: context.tr('Propina')),
       body: ValueListenableBuilder<Rates?>(
         valueListenable: pricing.notifier,
         builder: (context, _, __) => PosBody(
@@ -35,9 +36,9 @@ class TipScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: 8),
-            const Text('¿Cuánto dejás de propina?',
+            Text(context.tr('¿Cuánto dejás de propina?'),
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(16),
@@ -46,8 +47,8 @@ class TipScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12)),
               child: Column(
                 children: [
-                  const Text('Total sin propina',
-                      style: TextStyle(color: AppColors.muted)),
+                  Text(context.tr('Total sin propina'),
+                      style: const TextStyle(color: AppColors.muted)),
                   const SizedBox(height: 4),
                   Text('${formatToPreference(Currency.sat, amountSats)} sats',
                       style: const TextStyle(
@@ -69,8 +70,8 @@ class TipScreen extends StatelessWidget {
             const SizedBox(height: 8),
             TextButton(
               onPressed: () => _go(context, amountSats),
-              child: const Text('NO QUIERO DEJAR PROPINA',
-                  style: TextStyle(color: AppColors.muted)),
+              child: Text(context.tr('NO QUIERO DEJAR PROPINA'),
+                  style: const TextStyle(color: AppColors.muted)),
             ),
           ],
         ),

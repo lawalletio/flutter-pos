@@ -15,24 +15,24 @@ class Numpad extends StatelessWidget {
       crossAxisCount: 3,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 1.7,
-      mainAxisSpacing: 8,
-      crossAxisSpacing: 8,
+      childAspectRatio: 1.45,
+      mainAxisSpacing: 10,
+      crossAxisSpacing: 10,
       children: keys.map((k) {
         if (k.isEmpty) return const SizedBox.shrink();
         final isBack = k == '⌫';
         return Material(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           child: InkWell(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
             onTap: () => isBack ? onBackspace() : onDigit(k),
             child: Center(
               child: isBack
-                  ? const Icon(Icons.backspace_outlined, size: 24)
+                  ? const Icon(Icons.backspace_outlined, size: 30)
                   : Text(k,
                       style: const TextStyle(
-                          fontSize: 26, fontWeight: FontWeight.w600)),
+                          fontSize: 32, fontWeight: FontWeight.w700)),
             ),
           ),
         );

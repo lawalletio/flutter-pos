@@ -19,6 +19,8 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Bridges the ZCS SmartPos thermal printer to Flutter via a MethodChannel,
@@ -30,7 +32,15 @@ class MainActivity : FlutterActivity() {
     private var printer: Printer? = null
     private var initialized = false
 
-    // NFC (Boltcard / LNURL-withdraw) — persistent reader session that streams tags.
+    // All printer I/O runs off the UI thread on a single background thread. Single
+    // thread = jobs are serialized (the ZCS printer handles one job at a time) and
+    // the UI never blocks on sdkInit / bitmap append / setPrintStart.
+    private val printExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+
+    // NFC (Boltcard / LNURL-withdraw) — reader mode stays on for the whole time the
+    // app is foregrounded (any screen), so an accidental tap is always captured here
+    // and never redirects to the system Tag viewer. Each tag's URL is streamed to
+    // Dart; the payment screen decides when to act on it.
     private val nfcChannelName = "pos/nfc"
     private val nfcEventsName = "pos/nfc/tags"
     private var nfcEvents: EventChannel.EventSink? = null
@@ -38,14 +48,18 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (nfcActive) startNfcSession() // re-arm reader mode after resume
+        enableReader() // always capture every tap while foregrounded
     }
 
     override fun onPause() {
         super.onPause()
-        // Reader mode is tied to the resumed activity; drop it but keep nfcActive
-        // so onResume re-arms it.
+        // Reader mode is tied to the resumed activity; drop it while backgrounded.
         runCatching { NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this) }
+    }
+
+    override fun onDestroy() {
+        printExecutor.shutdown()
+        super.onDestroy()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -53,12 +67,13 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "isAvailable" -> result.success(ensureInit())
-                    "status" -> result.success(printerStatus())
-                    "testPrint" -> handle(result) { testPrint() }
-                    "print" -> handle(result) {
+                    "isAvailable" -> runAsync(result) { ensureInit() }
+                    "status" -> runAsync(result) { printerStatus() }
+                    "testPrint" -> runAsync(result) { testPrint() }
+                    "print" -> {
                         @Suppress("UNCHECKED_CAST")
-                        printOrder(call.arguments as? Map<String, Any?> ?: emptyMap())
+                        val args = call.arguments as? Map<String, Any?> ?: emptyMap()
+                        runAsync(result) { printOrder(args) }
                     }
                     else -> result.notImplemented()
                 }
@@ -68,8 +83,11 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "isAvailable" -> result.success(nfcAvailable())
-                    "startSession" -> { startNfcSession(); result.success(nfcActive) }
-                    "stopSession" -> { stopNfcSession(); result.success(null) }
+                    // Reader mode is global (enabled in onResume); these just report
+                    // state / ensure it's armed. stopSession is intentionally a no-op
+                    // so leaving the payment screen never drops global tap capture.
+                    "startSession" -> { enableReader(); result.success(nfcActive) }
+                    "stopSession" -> result.success(null)
                     else -> result.notImplemented()
                 }
             }
@@ -93,9 +111,9 @@ class MainActivity : FlutterActivity() {
         return a != null && a.isEnabled
     }
 
-    /** Enable reader mode once and keep it active (exclusive) so the system's
-     *  Tag viewer never intercepts a tap; each tag is streamed to Dart. */
-    private fun startNfcSession() {
+    /** Enable reader mode (exclusive) so the system's Tag viewer never intercepts a
+     *  tap; each tag is streamed to Dart. Idempotent — safe to call on every resume. */
+    private fun enableReader() {
         val adapter = NfcAdapter.getDefaultAdapter(this) ?: return
         if (!adapter.isEnabled) return
         val flags = NfcAdapter.FLAG_READER_NFC_A or
@@ -105,11 +123,6 @@ class MainActivity : FlutterActivity() {
             NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS
         adapter.enableReaderMode(this, { tag -> onNfcTag(tag) }, flags, null)
         nfcActive = true
-    }
-
-    private fun stopNfcSession() {
-        nfcActive = false
-        runCatching { NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this) }
     }
 
     private fun onNfcTag(tag: Tag) {
@@ -165,11 +178,19 @@ class MainActivity : FlutterActivity() {
         else -> ""
     }
 
-    private inline fun handle(result: MethodChannel.Result, block: () -> Int) {
-        try {
-            result.success(block())
-        } catch (e: Throwable) {
-            result.error("PRINT_ERROR", e.message ?: e.toString(), null)
+    /** Run [block] on the background print thread; deliver its result (or error)
+     *  back on the UI thread, as Flutter requires for channel replies. */
+    private fun <T> runAsync(result: MethodChannel.Result, block: () -> T) {
+        printExecutor.execute {
+            try {
+                val value = block()
+                runOnUiThread { result.success(value) }
+            } catch (e: Throwable) {
+                Log.e(TAG, "printer op failed", e)
+                runOnUiThread {
+                    result.error("PRINT_ERROR", e.message ?: e.toString(), null)
+                }
+            }
         }
     }
 
@@ -225,7 +246,7 @@ class MainActivity : FlutterActivity() {
     private fun printLogo(p: Printer) {
         logoBitmap()?.let {
             p.setPrintAppendBitmap(it, Layout.Alignment.ALIGN_CENTER)
-            p.setPrintLine(10)
+            p.setPrintLine(30) // tiny blank margin below the logo
         }
     }
 
@@ -252,10 +273,24 @@ class MainActivity : FlutterActivity() {
         if (status == SdkResult.SDK_PRN_STATUS_PAPEROUT) return status
 
         val normal = fmt(20, Layout.Alignment.ALIGN_NORMAL)
-        printLogo(p)
-        p.setPrintAppendString("LaWallet POS", fmt(30, Layout.Alignment.ALIGN_CENTER))
-        p.setPrintAppendString("--------------------------------", normal)
+        printLogo(p) // includes a tiny bottom margin
 
+        // Market info: BTC price (right) + current block, then the date.
+        val btcPrice = order["btcPrice"]?.toString().orEmpty()
+        val blockNumber = order["blockNumber"]?.toString().orEmpty()
+        if (btcPrice.isNotEmpty()) {
+            p.setPrintAppendString(
+                "BTC/USD $btcPrice", fmt(22, Layout.Alignment.ALIGN_OPPOSITE))
+        }
+        if (blockNumber.isNotEmpty()) {
+            p.setPrintAppendString(
+                "Bloque: #$blockNumber", fmt(22, Layout.Alignment.ALIGN_NORMAL))
+        }
+        p.setPrintAppendString(currentDate(), fmt(22, Layout.Alignment.ALIGN_NORMAL))
+        p.setPrintAppendString("--------------------------------", normal)
+        p.setPrintLine(1)
+
+        // Line items: "name (price) x qty".
         val items = order["items"] as? List<*> ?: emptyList<Any>()
         for (it in items) {
             val m = it as? Map<*, *> ?: continue
@@ -266,14 +301,26 @@ class MainActivity : FlutterActivity() {
             p.setPrintLine(1)
         }
 
-        p.setPrintAppendString("--------------------------------", normal)
         p.setPrintLine(6)
         p.setPrintAppendString("***** TOTAL *****", fmt(34, Layout.Alignment.ALIGN_CENTER))
         val currency = order["currency"]?.toString() ?: "ARS"
         val total = order["total"]?.toString() ?: "0"
+        val currencyB = order["currencyB"]?.toString().orEmpty()
+        val totalB = order["totalB"]?.toString().orEmpty()
         val totalSats = order["totalSats"]?.toString() ?: "0"
+        if (currencyB.isNotEmpty() && totalB.isNotEmpty() && totalB != "-") {
+            p.setPrintAppendString(
+                "$currencyB $totalB", fmt(28, Layout.Alignment.ALIGN_CENTER))
+        }
         p.setPrintAppendString("$currency $total", fmt(34, Layout.Alignment.ALIGN_CENTER))
         p.setPrintAppendString("$totalSats sats", fmt(24, Layout.Alignment.ALIGN_CENTER))
+        p.setPrintAppendString("--------------------------------", normal)
+
+        val message = order["message"]?.toString().orEmpty()
+        if (message.isNotEmpty()) {
+            p.setPrintLine(6)
+            p.setPrintAppendString(message, fmt(26, Layout.Alignment.ALIGN_CENTER))
+        }
 
         val qr = order["qrcode"]?.toString()
         if (!qr.isNullOrEmpty()) {
@@ -283,6 +330,10 @@ class MainActivity : FlutterActivity() {
         p.setPrintLine(40)
         return p.setPrintStart()
     }
+
+    private fun currentDate(): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date())
 
     companion object {
         private const val TAG = "PosPrinter"

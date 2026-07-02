@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
@@ -73,8 +74,9 @@ class _HubScreenState extends State<HubScreen> {
                 },
                 icon:
                     const Icon(Icons.logout, size: 14, color: AppColors.muted),
-                label: const Text('Cerrar sesión',
-                    style: TextStyle(color: AppColors.muted, fontSize: 12)),
+                label: Text(context.tr('Cerrar sesión'),
+                    style: const TextStyle(
+                        color: AppColors.muted, fontSize: 12)),
               ),
             ],
           ),
@@ -97,15 +99,15 @@ class _HubScreenState extends State<HubScreen> {
             const _SectionLabel('Modos'),
             PosCard(
               icon: Icons.calculate_outlined,
-              label: 'Caja registradora',
-              sublabel: 'Cobrar un monto manual',
+              label: context.tr('Caja registradora'),
+              sublabel: context.tr('Cobrar un monto manual'),
               onTap: () => context.push('/paydesk'),
             ),
             const SizedBox(height: 10),
             PosCard(
               icon: Icons.receipt_long_outlined,
-              label: 'Órdenes',
-              sublabel: 'Historial de la sesión',
+              label: context.tr('Órdenes'),
+              sublabel: context.tr('Historial de la sesión'),
               onTap: () => context.push('/orders'),
             ),
             ValueListenableBuilder<SettingsState>(
@@ -115,8 +117,8 @@ class _HubScreenState extends State<HubScreen> {
                       padding: const EdgeInsets.only(top: 10),
                       child: PosCard(
                         icon: Icons.account_balance_wallet_outlined,
-                        label: 'Cuentas abiertas',
-                        sublabel: 'Tabs de clientes',
+                        label: context.tr('Cuentas abiertas'),
+                        sublabel: context.tr('Tabs de clientes'),
                         color: const Color(0xFF2C2438),
                         onTap: () => context.push('/tab'),
                       ),
@@ -148,10 +150,10 @@ class _HubScreenState extends State<HubScreen> {
           menuChildren: [
             for (final addr in history) _addressItem(addr),
             if (history.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(14),
-                child: Text('Sin historial',
-                    style: TextStyle(color: AppColors.muted)),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Text(context.tr('Sin historial'),
+                    style: const TextStyle(color: AppColors.muted)),
               ),
           ],
           builder: (context, controller, child) => InkWell(
@@ -214,7 +216,7 @@ class _HubScreenState extends State<HubScreen> {
             ),
           ),
           IconButton(
-            tooltip: 'Eliminar del historial',
+            tooltip: context.tr('Eliminar del historial'),
             icon: const Icon(Icons.close, size: 16, color: AppColors.muted),
             onPressed: () => addressHistory.remove(addr),
           ),
@@ -230,7 +232,7 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(bottom: 10, top: 4),
-        child: Text(text.toUpperCase(),
+        child: Text(context.tr(text.toUpperCase()),
             style: const TextStyle(
                 color: AppColors.muted,
                 fontSize: 12,
