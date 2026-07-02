@@ -52,7 +52,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _invoiceError;
   bool _loadingInvoice = false;
   bool _printed = false;
-  bool _nfcScanning = false;
+  bool _collecting = false; // pulling payment from a tapped card
+  bool _nfcAvailable = false;
+  StreamSubscription<String>? _nfcSub;
   Timer? _poll;
 
   String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
@@ -80,8 +82,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// Transition to the paid state and print the receipt (once).
   void _markPaid() {
     if (_view == _View.paid) return;
-    setState(() => _view = _View.paid);
+    _stopNfc();
+    setState(() {
+      _collecting = false;
+      _view = _View.paid;
+    });
     _printReceipt();
+  }
+
+  void _stopNfc() {
+    _nfcSub?.cancel();
+    _nfcSub = null;
+    NfcChannel.stopSession();
   }
 
   /// Auto-print the receipt on the ZCS printer. No-op where there's no printer
@@ -102,46 +114,59 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void dispose() {
     _poll?.cancel();
-    if (_nfcScanning) NfcChannel.cancel();
+    _stopNfc();
     pricing.notifier.removeListener(_onRates);
     super.dispose();
   }
 
-  /// Pay the current invoice by tapping a Boltcard / LNURL-withdraw card (NFC).
-  Future<void> _payWithCard() async {
+  /// Arm the card reader while the payment is pending. No button — reader mode
+  /// stays active and each tap is delivered via the tag stream.
+  Future<void> _startAutoNfc() async {
+    if (_nfcSub != null) return;
+    _nfcAvailable = await NfcChannel.isAvailable();
+    if (!_nfcAvailable) return;
+    if (mounted) setState(() {});
+    await NfcChannel.startSession();
+    _nfcSub = NfcChannel.tags().listen((cardUrl) {
+      if (!mounted || _view != _View.waiting || _collecting) return;
+      _collectFromCard(cardUrl);
+    });
+  }
+
+  /// A card was tapped: show progress while pulling the payment (LNURL-withdraw).
+  Future<void> _collectFromCard(String cardUrl) async {
     final inv = _invoice;
-    if (inv == null || _nfcScanning) return;
-    final messenger = ScaffoldMessenger.of(context);
-    setState(() => _nfcScanning = true);
-    messenger.showSnackBar(const SnackBar(
-        content: Text('Acercá la tarjeta al lector…'),
-        duration: Duration(seconds: 60)));
+    if (inv == null) return;
+    setState(() => _collecting = true);
     try {
-      final cardUrl = await NfcChannel.read();
       await lnurl.payWithCard(cardUrl, inv);
-      messenger.hideCurrentSnackBar();
-      // Submitted — confirm now, else the LUD-21 polling will catch it.
+      // Submitted — confirm settlement (a few seconds), else leave it to polling.
       final url = _verifyUrl;
-      if (url != null && await lnurl.checkSettled(url)) {
-        if (mounted) _markPaid();
+      var settled = false;
+      if (url != null) {
+        for (var i = 0; i < 12 && mounted; i++) {
+          if (await lnurl.checkSettled(url)) {
+            settled = true;
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 800));
+        }
+      }
+      if (!mounted) return;
+      if (settled) {
+        _markPaid();
       } else {
-        messenger.showSnackBar(const SnackBar(
+        setState(() => _collecting = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('Pago enviado, esperando confirmación…')));
       }
-    } on NfcException catch (e) {
-      messenger.hideCurrentSnackBar();
-      if (e.code != 'NFC_CANCELLED') {
-        messenger.showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: AppColors.error));
-      }
     } on LnurlException catch (e) {
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(
-          content: Text(e.message), backgroundColor: AppColors.error));
+      if (!mounted) return;
+      setState(() => _collecting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
     } catch (_) {
-      messenger.hideCurrentSnackBar();
-    } finally {
-      if (mounted) setState(() => _nfcScanning = false);
+      if (mounted) setState(() => _collecting = false);
     }
   }
 
@@ -164,6 +189,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _loadingInvoice = false;
       });
       _startPolling();
+      _startAutoNfc(); // arm the card reader while pending
     } on LnurlException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -197,7 +223,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   void _goBack() {
     _poll?.cancel();
-    if (_nfcScanning) NfcChannel.cancel();
+    _stopNfc();
     if (widget.back != null && widget.back!.isNotEmpty) {
       context.go(widget.back!);
     } else {
@@ -215,6 +241,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Widget build(BuildContext context) {
     if (widget.amountSats <= 0 && _view == _View.waiting) {
       return _scaffold(_noAmountView());
+    }
+    if (_collecting && _view == _View.waiting) {
+      return _scaffold(_collectingView());
     }
     switch (_view) {
       case _View.paid:
@@ -288,28 +317,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
           label: const Text('Copiar invoice'),
         ),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _nfcScanning ? null : _payWithCard,
-                icon: _nfcScanning
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.nfc),
-                label: Text(_nfcScanning ? 'Acercá la tarjeta…' : 'Pagar con tarjeta'),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _goBack,
-                child: const Text('Cancelar'),
-              ),
-            ),
-          ],
+        if (_nfcAvailable) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Icon(Icons.contactless_outlined,
+                  size: 18, color: AppColors.primary),
+              SizedBox(width: 8),
+              Text('Acercá la tarjeta para pagar',
+                  style: TextStyle(color: AppColors.primary)),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton(
+            onPressed: _goBack,
+            child: const Text('Cancelar'),
+          ),
         ),
         const SizedBox(height: 8),
         Row(
@@ -366,6 +392,28 @@ class _PaymentScreenState extends State<PaymentScreen> {
       ),
     );
   }
+
+  /// Shown while a tapped card is being charged (LNURL-withdraw in progress).
+  Widget _collectingView() => Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+              width: 56,
+              height: 56,
+              child: CircularProgressIndicator(strokeWidth: 4)),
+          const SizedBox(height: 24),
+          const Icon(Icons.contactless, color: AppColors.primary, size: 32),
+          const SizedBox(height: 12),
+          const Text('Cobrando de la tarjeta…',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text('$_satsStr sats · ≈ $_arsStr ARS',
+              style: const TextStyle(color: AppColors.muted)),
+          const SizedBox(height: 10),
+          const Text('No retires la tarjeta',
+              style: TextStyle(color: AppColors.muted, fontSize: 13)),
+        ],
+      );
 
   Widget _generatingView() => Column(
         mainAxisAlignment: MainAxisAlignment.center,

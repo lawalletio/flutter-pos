@@ -1,12 +1,12 @@
 package ar.lawallet.lawallet_pos
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.nfc.NdefMessage
 import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.Ndef
-import android.os.Handler
-import android.os.Looper
 import android.text.Layout
 import android.util.Log
 import com.zcs.sdk.DriverManager
@@ -17,6 +17,7 @@ import com.zcs.sdk.print.PrnStrFormat
 import com.zcs.sdk.print.PrnTextFont
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 /**
@@ -29,11 +30,23 @@ class MainActivity : FlutterActivity() {
     private var printer: Printer? = null
     private var initialized = false
 
-    // NFC (Boltcard / LNURL-withdraw)
+    // NFC (Boltcard / LNURL-withdraw) — persistent reader session that streams tags.
     private val nfcChannelName = "pos/nfc"
-    private var pendingNfc: MethodChannel.Result? = null
-    private val handler = Handler(Looper.getMainLooper())
-    private var nfcTimeout: Runnable? = null
+    private val nfcEventsName = "pos/nfc/tags"
+    private var nfcEvents: EventChannel.EventSink? = null
+    private var nfcActive = false
+
+    override fun onResume() {
+        super.onResume()
+        if (nfcActive) startNfcSession() // re-arm reader mode after resume
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Reader mode is tied to the resumed activity; drop it but keep nfcActive
+        // so onResume re-arms it.
+        runCatching { NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this) }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -55,11 +68,22 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "isAvailable" -> result.success(nfcAvailable())
-                    "read" -> startNfcRead(result)
-                    "cancel" -> { stopNfcRead(); result.success(null) }
+                    "startSession" -> { startNfcSession(); result.success(nfcActive) }
+                    "stopSession" -> { stopNfcSession(); result.success(null) }
                     else -> result.notImplemented()
                 }
             }
+
+        EventChannel(flutterEngine.dartExecutor.binaryMessenger, nfcEventsName)
+            .setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(args: Any?, sink: EventChannel.EventSink?) {
+                    nfcEvents = sink
+                }
+
+                override fun onCancel(args: Any?) {
+                    nfcEvents = null
+                }
+            })
     }
 
     // ---- NFC ----
@@ -69,39 +93,27 @@ class MainActivity : FlutterActivity() {
         return a != null && a.isEnabled
     }
 
-    /** Reads one NFC tag and returns its NDEF URL (e.g. lnurlw://…) to Dart. */
-    private fun startNfcRead(result: MethodChannel.Result) {
-        val adapter = NfcAdapter.getDefaultAdapter(this)
-        if (adapter == null || !adapter.isEnabled) {
-            result.error("NFC_UNAVAILABLE", "NFC no disponible o desactivado", null)
-            return
-        }
-        pendingNfc?.let { runCatching { it.error("NFC_CANCELLED", "Reemplazado", null) } }
-        pendingNfc = result
+    /** Enable reader mode once and keep it active (exclusive) so the system's
+     *  Tag viewer never intercepts a tap; each tag is streamed to Dart. */
+    private fun startNfcSession() {
+        val adapter = NfcAdapter.getDefaultAdapter(this) ?: return
+        if (!adapter.isEnabled) return
         val flags = NfcAdapter.FLAG_READER_NFC_A or
             NfcAdapter.FLAG_READER_NFC_B or
             NfcAdapter.FLAG_READER_NFC_F or
-            NfcAdapter.FLAG_READER_NFC_V
+            NfcAdapter.FLAG_READER_NFC_V or
+            NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS
         adapter.enableReaderMode(this, { tag -> onNfcTag(tag) }, flags, null)
-        nfcTimeout = Runnable {
-            val r = pendingNfc; pendingNfc = null
-            runCatching { adapter.disableReaderMode(this) }
-            r?.error("NFC_TIMEOUT", "Tiempo de espera agotado", null)
-        }
-        handler.postDelayed(nfcTimeout!!, 60000)
+        nfcActive = true
     }
 
-    private fun stopNfcRead() {
-        nfcTimeout?.let { handler.removeCallbacks(it) }
-        nfcTimeout = null
+    private fun stopNfcSession() {
+        nfcActive = false
         runCatching { NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this) }
-        pendingNfc?.let { runCatching { it.error("NFC_CANCELLED", "Cancelado", null) } }
-        pendingNfc = null
     }
 
     private fun onNfcTag(tag: Tag) {
         var url: String? = null
-        var err: String? = null
         try {
             val ndef = Ndef.get(tag)
             if (ndef != null) {
@@ -110,18 +122,12 @@ class MainActivity : FlutterActivity() {
                 runCatching { ndef.close() }
                 url = extractUrl(msg)
             }
-            if (url == null) err = "Tarjeta sin datos NDEF"
         } catch (e: Throwable) {
-            err = e.message ?: "Error leyendo la tarjeta"
+            url = null
         }
-        val u = url
-        runOnUiThread {
-            nfcTimeout?.let { handler.removeCallbacks(it) }
-            nfcTimeout = null
-            val r = pendingNfc; pendingNfc = null
-            runCatching { NfcAdapter.getDefaultAdapter(this)?.disableReaderMode(this) }
-            if (u != null) r?.success(u) else r?.error("NFC_READ", err ?: "No se pudo leer", null)
-        }
+        val u = url ?: return
+        // Keep reader mode active for subsequent taps; just stream this one.
+        runOnUiThread { nfcEvents?.success(u) }
     }
 
     private fun extractUrl(msg: NdefMessage?): String? {
@@ -213,11 +219,22 @@ class MainActivity : FlutterActivity() {
         return f
     }
 
+    private fun logoBitmap(): Bitmap? =
+        runCatching { BitmapFactory.decodeResource(resources, R.drawable.receipt_logo) }.getOrNull()
+
+    private fun printLogo(p: Printer) {
+        logoBitmap()?.let {
+            p.setPrintAppendBitmap(it, Layout.Alignment.ALIGN_CENTER)
+            p.setPrintLine(10)
+        }
+    }
+
     private fun testPrint(): Int {
         if (!ensureInit()) throw RuntimeException("Impresora no disponible")
         val p = printer!!
         val status = p.getPrinterStatus()
         if (status == SdkResult.SDK_PRN_STATUS_PAPEROUT) return status
+        printLogo(p)
         p.setPrintAppendString("LaWallet POS", fmt(30, Layout.Alignment.ALIGN_CENTER))
         p.setPrintAppendString("Prueba de impresora", fmt(24, Layout.Alignment.ALIGN_CENTER))
         p.setPrintAppendString("--------------------------------", fmt(22, Layout.Alignment.ALIGN_NORMAL))
@@ -235,6 +252,7 @@ class MainActivity : FlutterActivity() {
         if (status == SdkResult.SDK_PRN_STATUS_PAPEROUT) return status
 
         val normal = fmt(20, Layout.Alignment.ALIGN_NORMAL)
+        printLogo(p)
         p.setPrintAppendString("LaWallet POS", fmt(30, Layout.Alignment.ALIGN_CENTER))
         p.setPrintAppendString("--------------------------------", normal)
 

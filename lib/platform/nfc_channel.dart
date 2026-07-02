@@ -8,9 +8,12 @@ class NfcException implements Exception {
   String toString() => message;
 }
 
-/// Reads NFC tags via the native NfcAdapter reader mode (see MainActivity.kt).
+/// NFC via a persistent native reader session (see MainActivity.kt). While the
+/// session is active, reader mode stays exclusively on (so the system Tag viewer
+/// never intercepts a tap) and each tag's NDEF URL is streamed via [tags].
 class NfcChannel {
   static const MethodChannel _ch = MethodChannel('pos/nfc');
+  static const EventChannel _events = EventChannel('pos/nfc/tags');
 
   static Future<bool> isAvailable() async {
     try {
@@ -20,23 +23,24 @@ class NfcChannel {
     }
   }
 
-  /// Waits for a tag tap and returns its NDEF URL (e.g. `lnurlw://…`).
-  static Future<String> read() async {
+  /// Start the reader session; returns true if reader mode is active.
+  static Future<bool> startSession() async {
     try {
-      final url = await _ch.invokeMethod<String>('read');
-      if (url == null || url.isEmpty) throw NfcException('Tarjeta vacía');
-      return url;
-    } on MissingPluginException {
-      throw NfcException('NFC no disponible en este dispositivo',
-          code: 'NFC_UNAVAILABLE');
-    } on PlatformException catch (e) {
-      throw NfcException(e.message ?? 'Error de NFC', code: e.code);
+      return await _ch.invokeMethod<bool>('startSession') ?? false;
+    } catch (_) {
+      return false;
     }
   }
 
-  static Future<void> cancel() async {
+  static Future<void> stopSession() async {
     try {
-      await _ch.invokeMethod('cancel');
+      await _ch.invokeMethod('stopSession');
     } catch (_) {}
   }
+
+  /// Stream of tag NDEF URLs (e.g. `lnurlw://…`).
+  static Stream<String> tags() => _events
+      .receiveBroadcastStream()
+      .where((e) => e != null)
+      .map((e) => e.toString());
 }
