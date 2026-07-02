@@ -1,0 +1,12 @@
+# Zapstore publishing manifest — https://zapstore.dev/docs/publish
+repository: https://github.com/lawalletio/flutter-pos
+name: LaWallet POS
+summary: Lightning + Nostr point-of-sale for Android
+description: >-
+  Native Flutter point-of-sale for the LaWallet stack. Charge in sats, ARS or
+  USD, generate real LNURL-pay invoices, accept NFC / Boltcard tap-to-pay, print
+  receipts on ZCS thermal printers, and keep customer tabs plus a session order
+  history. Built for ZCS terminals (armeabi-v7a) and modern arm64 devices.
+metadata_sources:
+  - github
+# pubkey: npub1...   # added on first `zsp publish --wizard` (from your NIP-07 signer)
