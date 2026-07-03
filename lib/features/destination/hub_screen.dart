@@ -5,6 +5,7 @@ import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
+import '../../data/nostr/profile_service.dart';
 import '../../domain/config/address_history.dart';
 import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
@@ -28,11 +29,35 @@ class HubScreen extends StatefulWidget {
 
 class _HubScreenState extends State<HubScreen> {
   final MenuController _menu = MenuController();
+  String? _avatar; // resolved Nostr profile picture for the current address
 
   @override
   void initState() {
     super.initState();
     _init();
+    _resolveAvatar();
+  }
+
+  Future<void> _resolveAvatar() async {
+    final url = await nostrProfile.avatarFor(widget.address);
+    if (mounted && url != null) setState(() => _avatar = url);
+  }
+
+  /// Avatar (if resolved) to the left of the address, else the storefront icon.
+  Widget _leading() {
+    if (_avatar == null) {
+      return const Icon(Icons.storefront, color: AppColors.primary);
+    }
+    return ClipOval(
+      child: Image.network(
+        _avatar!,
+        width: 26,
+        height: 26,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) =>
+            const Icon(Icons.storefront, color: AppColors.primary),
+      ),
+    );
   }
 
   Future<void> _init() async {
@@ -164,7 +189,7 @@ class _HubScreenState extends State<HubScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
               child: Row(
                 children: [
-                  const Icon(Icons.storefront, color: AppColors.primary),
+                  _leading(),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(widget.address,
