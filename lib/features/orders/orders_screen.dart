@@ -5,31 +5,23 @@ import 'package:intl/intl.dart';
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
-import '../../data/mock/mock_data.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
+import '../../domain/order/orders_store.dart';
+import '../../domain/order/receipt_printer.dart';
+import 'recheck_modal.dart';
 
 const Color _amber = Color(0xFFE0A82E);
+final DateFormat _df = DateFormat('dd/MM · HH:mm');
 
-/// Orders — session payment history. Payment / publish / zap state are shown as
-/// icons (Pendiente, Acreditado, Publicado) rather than text badges. Shows the
-/// total sold and lets the user clear all orders (with confirmation).
-class OrdersScreen extends StatefulWidget {
+/// Orders — persisted payment history (empty on a fresh install). Paid orders
+/// count toward the total sold; a **pending** order can be re-verified against
+/// LUD-21 + NIP-57 via the recheck button.
+class OrdersScreen extends StatelessWidget {
   const OrdersScreen({super.key});
-  @override
-  State<OrdersScreen> createState() => _OrdersScreenState();
-}
 
-class _OrdersScreenState extends State<OrdersScreen> {
-  late final List<MockOrder> _orders = List.of(kMockOrders);
-  final _df = DateFormat('dd/MM · HH:mm');
-
-  int get _soldSats =>
-      _orders.where((o) => o.isPaid).fold(0, (s, o) => s + o.amountSats);
-  int get _soldCount => _orders.where((o) => o.isPaid).length;
-
-  Future<void> _confirmDeleteAll() async {
+  Future<void> _confirmDeleteAll(BuildContext context) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -52,7 +44,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         ],
       ),
     );
-    if (ok == true) setState(_orders.clear);
+    if (ok == true) ordersStore.clear();
   }
 
   @override
@@ -60,49 +52,56 @@ class _OrdersScreenState extends State<OrdersScreen> {
     pricing.ensureLoaded();
     return Scaffold(
       appBar: PosAppBar(title: context.tr('Órdenes')),
-      body: ValueListenableBuilder<Rates?>(
-        valueListenable: pricing.notifier,
-        builder: (context, _, __) => PosBody(
-          child: _orders.isEmpty
-              ? _empty()
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _totalSoldCard(),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: ListView.separated(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        itemCount: _orders.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (c, i) =>
-                            _OrderCard(order: _orders[i], df: _df),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.error,
-                          side: BorderSide(
-                              color: AppColors.error.withValues(alpha: 0.5)),
+      body: ValueListenableBuilder<List<OrderRecord>>(
+        valueListenable: ordersStore.notifier,
+        builder: (context, orders, _) => ValueListenableBuilder<Rates?>(
+          valueListenable: pricing.notifier,
+          builder: (context, __, ___) => PosBody(
+            child: orders.isEmpty
+                ? _empty(context)
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _totalSoldCard(context, orders),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          itemCount: orders.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (c, i) => _OrderCard(order: orders[i]),
                         ),
-                        onPressed: _confirmDeleteAll,
-                        icon: const Icon(Icons.delete_outline),
-                        label: Text(context.tr('Eliminar todas')),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.error,
+                            side: BorderSide(
+                                color:
+                                    AppColors.error.withValues(alpha: 0.5)),
+                          ),
+                          onPressed: () => _confirmDeleteAll(context),
+                          icon: const Icon(Icons.delete_outline),
+                          label: Text(context.tr('Eliminar todas')),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _totalSoldCard() {
-    final ars = pricing.satsToFiat(_soldSats, Currency.ars);
+  Widget _totalSoldCard(BuildContext context, List<OrderRecord> orders) {
+    final paid = orders.where((o) => o.isPaid);
+    final soldSats = paid.fold<int>(0, (s, o) => s + o.amountSats);
+    final soldCount = paid.length;
+    final ars = pricing.satsToFiat(soldSats, Currency.ars);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -116,10 +115,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('$_soldCount',
+              Text('$soldCount',
                   style: const TextStyle(
                       fontSize: 24, fontWeight: FontWeight.w800)),
-              Text(context.tr(_soldCount == 1 ? 'venta' : 'ventas'),
+              Text(context.tr(soldCount == 1 ? 'venta' : 'ventas'),
                   style: const TextStyle(color: AppColors.muted, fontSize: 12)),
             ],
           ),
@@ -129,10 +128,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(context.tr('Total vendido'),
-                    style: const TextStyle(
-                        color: AppColors.muted, fontSize: 13)),
+                    style:
+                        const TextStyle(color: AppColors.muted, fontSize: 13)),
                 const SizedBox(height: 2),
-                Text('${formatToPreference(Currency.sat, _soldSats)} sats',
+                Text('${formatToPreference(Currency.sat, soldSats)} sats',
                     style: const TextStyle(
                         fontSize: 26,
                         fontWeight: FontWeight.w800,
@@ -149,7 +148,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
     );
   }
 
-  Widget _empty() => Center(
+  Widget _empty(BuildContext context) => Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -164,13 +163,35 @@ class _OrdersScreenState extends State<OrdersScreen> {
 }
 
 class _OrderCard extends StatelessWidget {
-  final MockOrder order;
-  final DateFormat df;
-  const _OrderCard({required this.order, required this.df});
+  final OrderRecord order;
+  const _OrderCard({required this.order});
+
+  /// Run the check process (LUD-21 + NIP-57 modal). If it confirms the payment,
+  /// the modal marks the order paid; we then run the payment pipeline — print the
+  /// ticket exactly like a normal paid order — and surface the printer result.
+  Future<void> _recheckAndPrint(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final thankYou = context.tr('Gracias por su pago');
+    await showRecheckModal(context, order);
+    final paidNow =
+        ordersStore.notifier.value.any((o) => o.id == order.id && o.isPaid);
+    if (!paidNow) return;
+    final result = await printOrderReceipt(
+      amountSats: order.amountSats,
+      items: order.items,
+      thankYouMessage: thankYou,
+    );
+    messenger.showSnackBar(
+      SnackBar(
+          content: Text(result.message),
+          duration: const Duration(seconds: 2)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final ars = pricing.satsToFiat(order.amountSats, Currency.ars);
+    final showRecheck = !order.isPaid && order.canRecheck;
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -204,80 +225,69 @@ class _OrderCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Status icons: payment, publish, zap.
-                Row(
-                  children: [
-                    order.isPaid
-                        ? const _StatusIcon(
-                            icon: Icons.check_circle_rounded,
-                            color: AppColors.primary,
-                            tooltip: 'Acreditado')
-                        : const _StatusIcon(
-                            icon: Icons.hourglass_top_rounded,
-                            color: _amber,
-                            tooltip: 'Pendiente'),
-                    const SizedBox(width: 6),
-                    _StatusIcon(
-                      icon: order.publishStatus == 'Fallida'
-                          ? Icons.error_rounded
-                          : Icons.podcasts_rounded,
-                      color: order.publishStatus == 'Publicada'
-                          ? AppColors.primary
-                          : order.publishStatus == 'Fallida'
-                              ? AppColors.error
-                              : AppColors.muted,
-                      tooltip:
-                          'Publicado · ${order.publishRelays} relays',
-                      count: order.publishRelays,
-                    ),
-                    const SizedBox(width: 6),
-                    _StatusIcon(
-                      icon: Icons.bolt_rounded,
-                      color: order.zapStatus == 'Confirmado'
-                          ? _amber
-                          : AppColors.muted,
-                      tooltip: 'Zap ${order.zapStatus.toLowerCase()} · '
-                          '${order.zapRelays} relays',
-                      count: order.zapRelays,
-                    ),
-                  ],
-                ),
+                order.isPaid
+                    ? _StatusChip(
+                        icon: Icons.check_circle_rounded,
+                        color: AppColors.primary,
+                        label: context.tr('Acreditado'))
+                    : _StatusChip(
+                        icon: Icons.hourglass_top_rounded,
+                        color: _amber,
+                        label: context.tr('Pendiente')),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                const Icon(Icons.shopping_bag_outlined,
-                    size: 14, color: AppColors.muted),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(order.summary,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13)),
-                ),
-              ],
-            ),
-          ),
-          Divider(
-              height: 20,
-              thickness: 1,
-              indent: 16,
-              endIndent: 16,
-              color: Colors.white.withValues(alpha: 0.06)),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 0, 12, 8),
-            child: Row(
-              children: [
-                TextButton.icon(
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.muted,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          if (order.summary.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  const Icon(Icons.shopping_bag_outlined,
+                      size: 14, color: AppColors.muted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(order.summary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13)),
                   ),
-                  onPressed: () {
+                ],
+              ),
+            ),
+          // Plain separator line (a Divider widget failed to rasterize here
+          // under the web CanvasKit renderer).
+          Container(
+            height: 1,
+            margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            color: Colors.white.withValues(alpha: 0.06),
+          ),
+          // Prominent re-check action — the whole point of a pending order.
+          // Full-width filled button (the button shape that paints reliably).
+          if (showRecheck)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 2),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.onDark,
+                    minimumSize: const Size.fromHeight(46),
+                  ),
+                  onPressed: () => _recheckAndPrint(context),
+                  icon: const Icon(Icons.price_check_rounded, size: 20),
+                  label: Text(context.tr('Checkear')),
+                ),
+              ),
+            ),
+          // Meta row: tap-to-copy id + date.
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, showRecheck ? 4 : 10, 16, 12),
+            child: Row(
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () {
                     Clipboard.setData(ClipboardData(text: order.id));
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -285,17 +295,24 @@ class _OrderCard extends StatelessWidget {
                           duration: const Duration(seconds: 1)),
                     );
                   },
-                  icon: const Icon(Icons.copy_rounded, size: 14),
-                  label: Text(
-                    order.id.length > 12
-                        ? '${order.id.substring(0, 12)}…'
-                        : order.id,
-                    style: const TextStyle(
-                        fontFamily: 'monospace', fontSize: 12),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.copy_rounded,
+                          size: 14, color: AppColors.muted),
+                      const SizedBox(width: 4),
+                      Text(
+                        order.id.length > 12
+                            ? '${order.id.substring(0, 12)}…'
+                            : order.id,
+                        style: const TextStyle(
+                            color: AppColors.muted, fontSize: 12),
+                      ),
+                    ],
                   ),
                 ),
                 const Spacer(),
-                Text(df.format(order.createdAt),
+                Text(_df.format(order.createdAtDate),
                     style:
                         const TextStyle(color: AppColors.muted, fontSize: 12)),
               ],
@@ -307,26 +324,17 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
-/// A small icon status badge with a tooltip and an optional relay count.
-class _StatusIcon extends StatelessWidget {
+/// A small status chip with an icon + label.
+class _StatusChip extends StatelessWidget {
   final IconData icon;
   final Color color;
-  final String tooltip;
-  final int? count;
-  const _StatusIcon({
-    required this.icon,
-    required this.color,
-    required this.tooltip,
-    this.count,
-  });
+  final String label;
+  const _StatusChip(
+      {required this.icon, required this.color, required this.label});
 
   @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Container(
-        padding: EdgeInsets.symmetric(
-            horizontal: count != null ? 8 : 6, vertical: 6),
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(20),
@@ -335,17 +343,11 @@ class _StatusIcon extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 16, color: color),
-            if (count != null) ...[
-              const SizedBox(width: 3),
-              Text('$count',
-                  style: TextStyle(
-                      color: color,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700)),
-            ],
+            const SizedBox(width: 5),
+            Text(label,
+                style: TextStyle(
+                    color: color, fontSize: 12, fontWeight: FontWeight.w700)),
           ],
         ),
-      ),
-    );
-  }
+      );
 }

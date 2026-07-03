@@ -1,7 +1,13 @@
 import 'dart:convert';
+import 'dart:math';
 
+import 'package:convert/convert.dart';
 import 'package:dio/dio.dart';
 
+import '../nostr/event.dart';
+import '../nostr/identity.dart';
+import '../nostr/signer.dart';
+import 'bech32_lnurl.dart';
 import 'lnurl_helpers.dart';
 
 /// dio on web often hands back the JSON body as a String; normalize to a Map.
@@ -39,11 +45,23 @@ class LnurlPayParams {
   });
 }
 
-/// A generated invoice plus its optional LUD-21 verify URL.
+/// A generated invoice plus its optional LUD-21 verify URL and, when the
+/// provider supports NIP-57, the info needed to watch for the zap receipt.
 class LnurlInvoice {
   final String pr; // bolt11
   final String? verify; // LUD-21 verify endpoint
-  const LnurlInvoice({required this.pr, this.verify});
+  final String? zapPubkey; // provider nostrPubkey (author of the zap receipt)
+  final List<String> zapRelays; // relays to watch for the receipt
+  final String? zapOrderId; // `e` tag placed in the zap request
+  const LnurlInvoice({
+    required this.pr,
+    this.verify,
+    this.zapPubkey,
+    this.zapRelays = const [],
+    this.zapOrderId,
+  });
+
+  bool get zapEnabled => zapPubkey != null && zapRelays.isNotEmpty;
 }
 
 /// Resolves Lightning Addresses and requests real invoices from their callback.
@@ -84,8 +102,38 @@ class LnurlService {
     return params;
   }
 
+  /// Validate that [address] is a usable merchant address: LUD-16 resolvable AND
+  /// supports payment confirmation via either NIP-57 zaps (allowsNostr +
+  /// nostrPubkey) or LUD-21 (`verify`). Throws [LnurlException] with a
+  /// user-facing message otherwise.
+  Future<void> validate(String address) async {
+    final params = await resolve(address); // throws if not a valid payRequest
+    final supportsNostr =
+        params.allowsNostr && (params.nostrPubkey?.isNotEmpty ?? false);
+    if (supportsNostr) return; // NIP-57 available
+    // Otherwise require LUD-21: request a minimal invoice and look for `verify`.
+    final minSats =
+        (params.minSendable ~/ 1000) < 1 ? 1 : params.minSendable ~/ 1000;
+    LnurlInvoice inv;
+    try {
+      inv = await requestInvoice(address, minSats);
+    } catch (_) {
+      throw LnurlException(
+          'El proveedor no soporta confirmación de pago (LUD-21 ni NIP-57)');
+    }
+    if (inv.verify == null || inv.verify!.isEmpty) {
+      throw LnurlException(
+          'El proveedor no soporta confirmación de pago (LUD-21 ni NIP-57)');
+    }
+  }
+
   /// Request a real bolt11 invoice for [sats] from the address's callback.
-  Future<LnurlInvoice> requestInvoice(String address, int sats) async {
+  ///
+  /// When the provider supports NIP-57 (allowsNostr + nostrPubkey) and [relays]
+  /// are given, a signed kind-9734 zap request is attached to the callback so
+  /// the payment can be confirmed by watching for the kind-9735 zap receipt.
+  Future<LnurlInvoice> requestInvoice(String address, int sats,
+      {List<String> relays = const []}) async {
     final params = await resolve(address);
     final msats = sats * 1000;
     if (msats < params.minSendable) {
@@ -95,10 +143,31 @@ class LnurlService {
       throw LnurlException('Monto máximo: ${params.maxSendable ~/ 1000} sats');
     }
 
+    // NIP-57: attach a signed zap request when the provider advertises support.
+    final zapPubkey = params.nostrPubkey;
+    final useZap = params.allowsNostr &&
+        (zapPubkey?.isNotEmpty ?? false) &&
+        relays.isNotEmpty;
+    var query = 'amount=$msats';
+    String? orderId;
+    if (useZap) {
+      orderId = _randomHex(32);
+      final lnurl = encodeLnurl(lud16ToUrl(address));
+      final zapReq = await _buildZapRequest(
+        recipientPubkey: zapPubkey!,
+        amountMsats: msats,
+        relays: relays,
+        lnurl: lnurl,
+        orderId: orderId,
+      );
+      query += '&nostr=${Uri.encodeComponent(jsonEncode(zapReq.toJson()))}';
+      if (lnurl != null) query += '&lnurl=$lnurl';
+    }
+
     final sep = params.callback.contains('?') ? '&' : '?';
     final Response res;
     try {
-      res = await _dio.getUri(Uri.parse('${params.callback}${sep}amount=$msats'));
+      res = await _dio.getUri(Uri.parse('${params.callback}$sep$query'));
     } catch (e) {
       throw LnurlException('No se pudo generar la invoice');
     }
@@ -111,7 +180,40 @@ class LnurlService {
     return LnurlInvoice(
       pr: data['pr'] as String,
       verify: data['verify'] as String?,
+      zapPubkey: useZap ? zapPubkey : null,
+      zapRelays: useZap ? relays : const [],
+      zapOrderId: orderId,
     );
+  }
+
+  /// Build + sign a NIP-57 kind-9734 zap request with the app's Nostr identity.
+  Future<NostrEvent> _buildZapRequest({
+    required String recipientPubkey,
+    required int amountMsats,
+    required List<String> relays,
+    required String orderId,
+    String? lnurl,
+  }) async {
+    final priv = await nostrIdentity.privateKey();
+    final unsigned = NostrEvent(
+      pubkey: derivePublicKey(priv),
+      createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      kind: 9734,
+      content: '',
+      tags: [
+        ['relays', ...relays],
+        ['amount', amountMsats.toString()],
+        if (lnurl != null) ['lnurl', lnurl],
+        ['p', recipientPubkey],
+        ['e', orderId],
+      ],
+    );
+    return signEvent(unsigned, priv);
+  }
+
+  String _randomHex(int bytes) {
+    final rng = Random.secure();
+    return hex.encode(List<int>.generate(bytes, (_) => rng.nextInt(256)));
   }
 
   /// Pay [invoice] by pulling from an LNURL-withdraw / Boltcard URL read via NFC.

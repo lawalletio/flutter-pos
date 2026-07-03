@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
+import '../../domain/order/order_reset.dart';
 import '../../platform/printer_channel.dart';
 
 /// Loaded once and reused across rebuilds.
@@ -52,6 +55,51 @@ class SettingsScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 4),
             children: [
+              _sectionHeader(context, 'Cuenta'),
+              _card(Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.storefront_outlined,
+                            size: 20, color: AppColors.primary),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(merchantAddress.value,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 15)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  InkWell(
+                    onTap: () {
+                      resetOrder();
+                      context.go('/');
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.logout,
+                              size: 20, color: AppColors.error),
+                          const SizedBox(width: 10),
+                          Text(context.tr('Cerrar sesión'),
+                              style: const TextStyle(
+                                  color: AppColors.error,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              )),
+              const SizedBox(height: 20),
               _sectionHeader(context, 'General'),
               _card(Column(
                 children: [

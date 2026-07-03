@@ -10,7 +10,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/lnurl/lnurl_service.dart';
 import '../../data/mock/mock_data.dart';
-import '../../data/pricing/block_service.dart';
+import '../../data/nostr/relay_pool.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
@@ -18,8 +18,11 @@ import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/order/current_order.dart';
 import '../../domain/order/order_reset.dart';
+import '../../domain/order/orders_store.dart';
+import '../../domain/order/receipt_printer.dart';
 import '../../platform/nfc_channel.dart';
-import '../../platform/printer_channel.dart';
+import '../orders/recheck_modal.dart';
+import 'nfc_charging_view.dart';
 import 'success_view.dart';
 
 /// Payment — generates a REAL bolt11 invoice from the merchant Lightning Address
@@ -42,7 +45,7 @@ class PaymentScreen extends StatefulWidget {
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
 
-enum _View { waiting, paid, checking, addedToTab }
+enum _View { waiting, paid, addedToTab }
 
 class _PaymentScreenState extends State<PaymentScreen> {
   late _View _view = widget.initiallyPaid ? _View.paid : _View.waiting;
@@ -59,6 +62,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool _nfcAvailable = false;
   StreamSubscription<String>? _nfcSub;
   Timer? _poll;
+  ZapWatcher? _zap; // NIP-57 zap-receipt subscription (live relay connection)
+  String? _orderId; // recorded order in the persisted store
+
+  // Card-charging animation state.
+  double _collectProgress = 0;
+  String _collectStep = '';
 
   String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
   String _arsOf(int sats) => formatToPreference(
@@ -87,6 +96,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (_view == _View.paid) return;
     _stopNfc();
     _poll?.cancel();
+    if (_orderId != null) ordersStore.markPaid(_orderId!);
     // Clear the order immediately on full payment so returning to the menu — by
     // the "Volver" button, the app bar back, or the Android hardware back — always
     // shows an empty cart (go_router keeps the menu page alive otherwise).
@@ -102,6 +112,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _nfcSub?.cancel();
     _nfcSub = null;
     NfcChannel.stopSession();
+    // Also tear down the NIP-57 relay subscription (shared teardown point).
+    _zap?.dispose();
+    _zap = null;
   }
 
   /// Auto-print the receipt on the ZCS printer. No-op where there's no printer
@@ -109,31 +122,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Future<void> _printReceipt() async {
     if (_printed) return;
     _printed = true;
-    final sats = widget.amountSats;
-    final ars = pricing.satsToFiat(sats, Currency.ars);
-    final usd = pricing.satsToFiat(sats, Currency.usd);
-    final btc = pricing.btcUsd; // BTC price in USD (cached, realtime)
-    // Line items carried from the cart (empty for a manual paydesk charge).
-    final items = [
-      for (final it in currentOrderItems.value)
-        {
-          'name': it.name,
-          'price': formatToPreference(Currency.ars, it.unitPrice),
-          'qty': it.qty,
-        }
-    ];
-    await PrinterChannel.printOrder({
-      'items': items,
-      'currency': 'ARS',
-      'total': ars != null ? formatToPreference(Currency.ars, ars) : '-',
-      'currencyB': 'USD',
-      'totalB': usd != null ? formatToPreference(Currency.usd, usd) : '-',
-      'totalSats': formatToPreference(Currency.sat, sats),
-      // Block height + BTC price are kept warm in memory — no print-time delay.
-      'blockNumber': blockHeight.height?.toString() ?? '',
-      'btcPrice': btc != null ? formatToPreference(Currency.ars, btc) : '',
-      'message': context.tr('Gracias por su pago'),
-    });
+    // Print from the order snapshot (the live cart is already cleared by
+    // resetOrder() at this point); fall back to the live cart for the preview
+    // `initiallyPaid` path, which never records an order.
+    final items = _recordedItems() ?? currentOrderItems.value;
+    await printOrderReceipt(
+      amountSats: widget.amountSats,
+      items: items,
+      thankYouMessage: context.tr('Gracias por su pago'),
+    );
+  }
+
+  /// The line items snapshotted on this screen's recorded order, if any.
+  List<OrderItem>? _recordedItems() {
+    final id = _orderId;
+    if (id == null) return null;
+    for (final o in ordersStore.notifier.value) {
+      if (o.id == id) return o.items;
+    }
+    return null;
   }
 
   @override
@@ -158,14 +165,31 @@ class _PaymentScreenState extends State<PaymentScreen> {
     });
   }
 
-  /// A card was tapped: show progress while pulling the payment (LNURL-withdraw).
+  /// A card was tapped: show the NFC charging animation while pulling the
+  /// payment (LNURL-withdraw), updating the step label + progress bar.
   Future<void> _collectFromCard(String cardUrl) async {
     final inv = _invoice;
     if (inv == null) return;
-    setState(() => _collecting = true);
+    setState(() {
+      _collecting = true;
+      _collectStep = 'Leyendo la tarjeta…';
+      _collectProgress = 0.18;
+    });
     try {
+      if (mounted) {
+        setState(() {
+          _collectStep = 'Solicitando el pago…';
+          _collectProgress = 0.42;
+        });
+      }
       await lnurl.payWithCard(cardUrl, inv);
       // Submitted — confirm settlement (a few seconds), else leave it to polling.
+      if (mounted) {
+        setState(() {
+          _collectStep = 'Confirmando el pago…';
+          _collectProgress = 0.66;
+        });
+      }
       final url = _verifyUrl;
       var settled = false;
       if (url != null) {
@@ -174,11 +198,16 @@ class _PaymentScreenState extends State<PaymentScreen> {
             settled = true;
             break;
           }
+          if (mounted) {
+            setState(() =>
+                _collectProgress = (0.66 + i * 0.024).clamp(0.0, 0.95));
+          }
           await Future<void>.delayed(const Duration(milliseconds: 800));
         }
       }
       if (!mounted) return;
       if (settled) {
+        setState(() => _collectProgress = 1);
         _markPaid();
       } else {
         setState(() => _collecting = false);
@@ -205,15 +234,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
       _invoiceError = null;
     });
     try {
-      final inv =
-          await lnurl.requestInvoice(merchantAddress.value, widget.amountSats);
+      final inv = await lnurl.requestInvoice(
+        merchantAddress.value,
+        widget.amountSats,
+        relays: appSettings.value.relays,
+      );
       if (!mounted) return;
       setState(() {
         _invoice = inv.pr;
         _verifyUrl = inv.verify;
         _loadingInvoice = false;
       });
+      _recordOrder(inv); // persist a pending order (re-checkable later)
       _startPolling();
+      _startZapWatch(inv); // NIP-57: watch relays for the zap receipt
       _startAutoNfc(); // arm the card reader while pending
     } on LnurlException catch (e) {
       if (!mounted) return;
@@ -244,6 +278,70 @@ class _PaymentScreenState extends State<PaymentScreen> {
         }
       } catch (_) {/* keep polling */}
     });
+  }
+
+  /// NIP-57: when the provider supports zaps, keep a live relay subscription open
+  /// while the invoice is pending and mark paid the moment the kind-9735 zap
+  /// receipt for this invoice lands (in parallel with the LUD-21 poll).
+  void _startZapWatch(LnurlInvoice inv) {
+    if (!inv.zapEnabled) return;
+    _zap?.dispose();
+    _zap = ZapWatcher(
+      relays: inv.zapRelays,
+      zapperPubkey: inv.zapPubkey!,
+      invoice: inv.pr,
+      orderId: inv.zapOrderId,
+      onPaid: () {
+        if (mounted && _view == _View.waiting) _markPaid();
+      },
+    )..start();
+  }
+
+  /// Persist a pending order carrying everything needed to re-verify it later
+  /// (LUD-21 verify URL + NIP-57 zap details).
+  void _recordOrder(LnurlInvoice inv) {
+    _orderId = 'o${DateTime.now().microsecondsSinceEpoch}';
+    ordersStore.add(OrderRecord(
+      id: _orderId!,
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      amountSats: widget.amountSats,
+      summary: _orderSummary(),
+      verifyUrl: inv.verify,
+      invoice: inv.pr,
+      zapPubkey: inv.zapPubkey,
+      zapRelays: inv.zapRelays,
+      zapOrderId: inv.zapOrderId,
+      // Snapshot the cart now: resetOrder() clears the live cart on payment,
+      // before the receipt is printed and so the order can be re-printed later.
+      items: currentOrderItems.value.toList(),
+    ));
+  }
+
+  String _orderSummary() {
+    final items = currentOrderItems.value;
+    if (items.isEmpty) return context.tr('Cobro manual');
+    return items.map((it) => '${it.qty}× ${it.name}').join(', ');
+  }
+
+  /// "Check event" — re-verify this order via the animated modal that steps
+  /// through LUD-21 then NIP-57 with a progress bar; transition to paid if the
+  /// modal confirmed settlement.
+  Future<void> _checkEvent() async {
+    final id = _orderId;
+    if (id == null) return;
+    OrderRecord? order;
+    for (final o in ordersStore.notifier.value) {
+      if (o.id == id) {
+        order = o;
+        break;
+      }
+    }
+    if (order == null) return;
+    await showRecheckModal(context, order);
+    if (!mounted) return;
+    final confirmed =
+        ordersStore.notifier.value.any((o) => o.id == id && o.isPaid);
+    if (confirmed && _view == _View.waiting) _markPaid();
   }
 
   void _goBack() {
@@ -277,8 +375,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
               satsStr: _satsStr, arsStr: _arsStr, onBack: _finishAndBack),
           title: null,
         );
-      case _View.checking:
-        return _scaffold(_checkingView());
       case _View.addedToTab:
         return _scaffold(_addedToTabView(), title: null);
       case _View.waiting:
@@ -379,15 +475,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
               ),
             Expanded(
               child: TextButton(
-                onPressed: () => setState(() => _view = _View.checking),
+                onPressed: _checkEvent,
                 child: Text(context.tr('Check event')),
               ),
             ),
           ],
-        ),
-        TextButton(
-          onPressed: _markPaid,
-          child: const Text('▶ Simular pago recibido (demo)'),
         ),
         const SizedBox(height: 8),
       ],
@@ -424,25 +516,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   /// Shown while a tapped card is being charged (LNURL-withdraw in progress).
-  Widget _collectingView() => Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const SizedBox(
-              width: 56,
-              height: 56,
-              child: CircularProgressIndicator(strokeWidth: 4)),
-          const SizedBox(height: 24),
-          const Icon(Icons.contactless, color: AppColors.primary, size: 32),
-          const SizedBox(height: 12),
-          Text(context.tr('Cobrando de la tarjeta…'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          Text('$_satsStr sats · ≈ $_arsStr ARS',
-              style: const TextStyle(color: AppColors.muted)),
-          const SizedBox(height: 10),
-          Text(context.tr('No retires la tarjeta'),
-              style: const TextStyle(color: AppColors.muted, fontSize: 13)),
-        ],
+  Widget _collectingView() => NfcChargingView(
+        progress: _collectProgress,
+        step: context.tr(
+            _collectStep.isEmpty ? 'Cobrando de la tarjeta…' : _collectStep),
+        amountLabel: '$_satsStr sats · ≈ $_arsStr ARS',
       );
 
   Widget _generatingView() => Column(
@@ -481,44 +559,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
                 child: FilledButton(
                     onPressed: _fetchInvoice,
                     child: Text(context.tr('Reintentar'))),
-              ),
-            ],
-          ),
-        ],
-      );
-
-  Widget _checkingView() => Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 20),
-          Text(context.tr('Buscando eventos…'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          Text(context.tr('Zap e internos…'),
-              style: const TextStyle(color: AppColors.muted)),
-          const SizedBox(height: 28),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => setState(() => _view = _View.waiting),
-                  child: Text(context.tr('Volver')),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: () async {
-                    final url = _verifyUrl;
-                    if (url != null && await lnurl.checkSettled(url)) {
-                      if (mounted) _markPaid();
-                    } else if (mounted) {
-                      setState(() => _view = _View.waiting);
-                    }
-                  },
-                  child: Text(context.tr('Check event')),
-                ),
               ),
             ],
           ),

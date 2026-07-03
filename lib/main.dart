@@ -6,6 +6,7 @@ import 'app.dart';
 import 'data/pricing/block_service.dart';
 import 'data/pricing/pricing_service.dart';
 import 'domain/config/address_history.dart';
+import 'domain/order/orders_store.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,7 +19,9 @@ Future<void> main() async {
   // no network round-trip while the receipt is being composed.
   pricing.startAutoRefresh();
   blockHeight.startAutoRefresh();
-  // Load the saved Lightning-address history.
+  // Load the saved Lightning-address history + order history (empty on a fresh
+  // install; both persist across restarts).
   addressHistory.load();
+  ordersStore.load();
   runApp(const ProviderScope(child: LaWalletPosApp()));
 }
