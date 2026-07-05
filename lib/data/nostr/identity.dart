@@ -12,6 +12,7 @@ import 'signer.dart';
 class NostrIdentity {
   static const _key = 'nostrPrivateKey';
   String? _priv;
+  String? _pub; // cached derived pubkey — BIP-340 point mult is done once
 
   Future<String> privateKey() async {
     if (_priv != null) return _priv!;
@@ -24,7 +25,8 @@ class NostrIdentity {
     return _priv = hexKey;
   }
 
-  Future<String> publicKey() async => derivePublicKey(await privateKey());
+  Future<String> publicKey() async =>
+      _pub ??= derivePublicKey(await privateKey());
 
   String _generateHex() {
     final rng = Random.secure();

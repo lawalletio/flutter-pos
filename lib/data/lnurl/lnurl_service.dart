@@ -102,29 +102,17 @@ class LnurlService {
     return params;
   }
 
-  /// Validate that [address] is a usable merchant address: LUD-16 resolvable AND
-  /// supports payment confirmation via either NIP-57 zaps (allowsNostr +
-  /// nostrPubkey) or LUD-21 (`verify`). Throws [LnurlException] with a
+  /// Validate that [address] is a usable merchant address: a resolvable LUD-16
+  /// Lightning Address (a valid `payRequest`). Throws [LnurlException] with a
   /// user-facing message otherwise.
+  ///
+  /// Payment confirmation (LUD-21 `verify` / NIP-57 zap receipt) is *not*
+  /// required here — it's detected and used at payment time when the provider
+  /// supports it, and re-checkable manually otherwise. Requiring it up front
+  /// wrongly rejected valid addresses (e.g. `user@lawallet.io`, whose lnurlp
+  /// omits `allowsNostr` and whose callback may be momentarily unavailable).
   Future<void> validate(String address) async {
-    final params = await resolve(address); // throws if not a valid payRequest
-    final supportsNostr =
-        params.allowsNostr && (params.nostrPubkey?.isNotEmpty ?? false);
-    if (supportsNostr) return; // NIP-57 available
-    // Otherwise require LUD-21: request a minimal invoice and look for `verify`.
-    final minSats =
-        (params.minSendable ~/ 1000) < 1 ? 1 : params.minSendable ~/ 1000;
-    LnurlInvoice inv;
-    try {
-      inv = await requestInvoice(address, minSats);
-    } catch (_) {
-      throw LnurlException(
-          'El proveedor no soporta confirmación de pago (LUD-21 ni NIP-57)');
-    }
-    if (inv.verify == null || inv.verify!.isEmpty) {
-      throw LnurlException(
-          'El proveedor no soporta confirmación de pago (LUD-21 ni NIP-57)');
-    }
+    await resolve(address); // throws if not a resolvable, valid payRequest
   }
 
   /// Request a real bolt11 invoice for [sats] from the address's callback.
@@ -196,7 +184,7 @@ class LnurlService {
   }) async {
     final priv = await nostrIdentity.privateKey();
     final unsigned = NostrEvent(
-      pubkey: derivePublicKey(priv),
+      pubkey: await nostrIdentity.publicKey(), // cached — no repeat derivation
       createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       kind: 9734,
       content: '',

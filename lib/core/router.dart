@@ -11,9 +11,34 @@ import '../features/orders/orders_screen.dart';
 import '../features/tab/tab_screen.dart';
 import '../features/settings/settings_screen.dart';
 
-/// Instant (no slide) transitions — snappier for a POS and stable for headless
-/// screenshots.
-Page<void> _page(Widget child) => NoTransitionPage(child: child);
+/// A fast, smooth transition applied to every route change: the incoming page
+/// fades in while easing up from a slight scale/offset — snappy enough for a POS
+/// yet polished.
+Page<void> _page(Widget child) => CustomTransitionPage<void>(
+      child: child,
+      transitionDuration: const Duration(milliseconds: 240),
+      reverseTransitionDuration: const Duration(milliseconds: 190),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.97, end: 1.0).animate(curved),
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.015),
+                end: Offset.zero,
+              ).animate(curved),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
 
 final appRouter = GoRouter(
   initialLocation: '/',
