@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
@@ -22,6 +21,7 @@ import '../../domain/order/orders_store.dart';
 import '../../domain/order/receipt_printer.dart';
 import '../../platform/nfc_channel.dart';
 import '../orders/recheck_modal.dart';
+import 'invoice_view.dart';
 import 'nfc_charging_view.dart';
 import 'success_view.dart';
 
@@ -56,7 +56,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _invoice; // bolt11
   String? _verifyUrl; // LUD-21
   String? _invoiceError;
-  bool _loadingInvoice = false;
   bool _printed = false;
   bool _collecting = false; // pulling payment from a tapped card
   bool _nfcAvailable = false;
@@ -67,7 +66,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   // Card-charging animation state.
   double _collectProgress = 0;
-  String _collectStep = '';
+  int _collectStepIndex = 0; // active task in the NFC charging checklist
 
   String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
   String _arsOf(int sats) => formatToPreference(
@@ -172,13 +171,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (inv == null) return;
     setState(() {
       _collecting = true;
-      _collectStep = 'Leyendo la tarjeta…';
+      _collectStepIndex = 0;
       _collectProgress = 0.18;
     });
     try {
       if (mounted) {
         setState(() {
-          _collectStep = 'Solicitando el pago…';
+          _collectStepIndex = 1;
           _collectProgress = 0.42;
         });
       }
@@ -186,7 +185,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       // Submitted — confirm settlement (a few seconds), else leave it to polling.
       if (mounted) {
         setState(() {
-          _collectStep = 'Confirmando el pago…';
+          _collectStepIndex = 2;
           _collectProgress = 0.66;
         });
       }
@@ -207,7 +206,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
       }
       if (!mounted) return;
       if (settled) {
-        setState(() => _collectProgress = 1);
+        setState(() {
+          _collectProgress = 1;
+          _collectStepIndex = 3; // all tasks done
+        });
         _markPaid();
       } else {
         setState(() => _collecting = false);
@@ -230,7 +232,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _fetchInvoice() async {
     setState(() {
-      _loadingInvoice = true;
       _invoiceError = null;
     });
     try {
@@ -243,7 +244,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
       setState(() {
         _invoice = inv.pr;
         _verifyUrl = inv.verify;
-        _loadingInvoice = false;
       });
       _recordOrder(inv); // persist a pending order (re-checkable later)
       _startPolling();
@@ -253,13 +253,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (!mounted) return;
       setState(() {
         _invoiceError = e.message;
-        _loadingInvoice = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _invoiceError = 'No se pudo generar la invoice';
-        _loadingInvoice = false;
       });
     }
   }
@@ -409,131 +407,30 @@ class _PaymentScreenState extends State<PaymentScreen> {
       );
 
   Widget _waitingView() {
-    if (_loadingInvoice) return _generatingView();
     if (_invoiceError != null) return _invoiceErrorView();
-    final tabEnabled = appSettings.value.tabEnabled;
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2)),
-            const SizedBox(width: 10),
-            Text(context.tr('Esperando el pago…'),
-                style: const TextStyle(color: AppColors.muted)),
-          ],
-        ),
-        const SizedBox(height: 18),
-        Text('$_satsStr sats',
-            style: const TextStyle(fontSize: 34, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 4),
-        Text('≈ $_arsStr ARS', style: const TextStyle(color: AppColors.muted)),
-        const SizedBox(height: 20),
-        _qrCard(),
-        const SizedBox(height: 6),
-        TextButton.icon(
-          onPressed: _copyInvoice,
-          icon: const Icon(Icons.copy, size: 15),
-          label: Text(context.tr('Copiar invoice')),
-        ),
-        const SizedBox(height: 8),
-        if (_nfcAvailable) ...[
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.contactless_outlined,
-                  size: 18, color: AppColors.primary),
-              const SizedBox(width: 8),
-              Text(context.tr('Acercá la tarjeta para pagar'),
-                  style: const TextStyle(color: AppColors.primary)),
-            ],
-          ),
-          const SizedBox(height: 12),
-        ],
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton(
-            onPressed: _goBack,
-            child: Text(context.tr('Cancelar')),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            if (tabEnabled)
-              Expanded(
-                child: TextButton.icon(
-                  onPressed: _openAddToTab,
-                  icon: const Icon(Icons.add_card, size: 18),
-                  label: Text(context.tr('Agregar a tab')),
-                ),
-              ),
-            Expanded(
-              child: TextButton(
-                onPressed: _checkEvent,
-                child: Text(context.tr('Check event')),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-      ],
-    ));
-  }
-
-  /// Big invoice QR — the white card spans the screen width minus 25px on each
-  /// side. OverflowBox lets it exceed the surrounding PosBody padding, staying
-  /// centered so the margins are exactly 25px.
-  Widget _qrCard() {
-    final screenW = MediaQuery.of(context).size.width;
-    final card = screenW - 50;
-    return SizedBox(
-      height: card,
-      child: OverflowBox(
-        maxWidth: screenW,
-        child: GestureDetector(
-          onLongPress: _copyInvoice,
-          child: Container(
-            width: card,
-            height: card,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-                color: Colors.white, borderRadius: BorderRadius.circular(16)),
-            child: QrImageView(
-              data: (_invoice ?? '').toUpperCase(),
-              version: QrVersions.auto,
-              padding: EdgeInsets.zero,
-            ),
-          ),
-        ),
-      ),
+    return InvoiceView(
+      satsStr: _satsStr,
+      arsStr: _arsStr,
+      invoice: _invoice, // null → shows the loading template + QR scramble
+      nfcAvailable: _nfcAvailable,
+      tabEnabled: appSettings.value.tabEnabled,
+      onCancel: _goBack,
+      onCopy: _copyInvoice,
+      onCheck: _checkEvent,
+      onAddTab: _openAddToTab,
     );
   }
 
   /// Shown while a tapped card is being charged (LNURL-withdraw in progress).
   Widget _collectingView() => NfcChargingView(
         progress: _collectProgress,
-        step: context.tr(
-            _collectStep.isEmpty ? 'Cobrando de la tarjeta…' : _collectStep),
-        amountLabel: '$_satsStr sats · ≈ $_arsStr ARS',
-      );
-
-  Widget _generatingView() => Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(),
-          const SizedBox(height: 20),
-          Text(context.tr('Generando invoice…'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          Text(context.tr('Resolviendo la Lightning Address…'),
-              style: const TextStyle(color: AppColors.muted)),
+        currentStep: _collectStepIndex,
+        steps: [
+          context.tr('Leyendo la tarjeta…'),
+          context.tr('Solicitando el pago…'),
+          context.tr('Confirmando el pago…'),
         ],
+        amountLabel: '$_satsStr sats · ≈ $_arsStr ARS',
       );
 
   Widget _invoiceErrorView() => Column(

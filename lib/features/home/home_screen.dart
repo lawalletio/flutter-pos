@@ -223,6 +223,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             borderSide: BorderSide.none,
                             borderRadius:
                                 BorderRadius.all(Radius.circular(12))),
+                        // Clear button (left) — wipes the whole address.
+                        prefixIcon: controller.text.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.close,
+                                    size: 20, color: AppColors.muted),
+                                onPressed: controller.clear,
+                              ),
                         suffixIcon: IconButton(
                           icon: Icon(_focus.hasFocus
                               ? Icons.arrow_drop_up

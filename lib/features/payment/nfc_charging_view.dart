@@ -4,27 +4,29 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
 
-/// A polished full-screen animation shown while a tapped NFC card payment is
-/// being pulled.
+/// Full-screen animation shown while a tapped NFC card payment is being pulled.
 ///
-/// The parent owns the payment lifecycle and simply rebuilds this widget with
-/// updated [progress], [step] and [amountLabel] values as the charge advances.
+/// The parent owns the payment lifecycle and rebuilds this widget with updated
+/// [progress], [currentStep] and [amountLabel] as the charge advances.
 ///
-/// * A central contactless icon emits continuously animated concentric
-///   "signal" ripples that expand and fade outward.
-/// * Below it, the [amountLabel], an animated rounded progress bar reflecting
-///   [progress], and the current [step] label (which cross-fades on change).
-/// * A muted hint reminds the user not to remove the card.
+/// * A central contactless icon breathes and emits continuously animated
+///   "signal" ripples.
+/// * The [amountLabel] + an animated progress bar.
+/// * A live **task checklist** ([steps]): each task ticks off with a pop as it
+///   completes, the active one shows a spinner, pending ones stay dimmed.
+/// * A shimmering promo placeholder ("Surprise coming here…") for future perks.
 class NfcChargingView extends StatefulWidget {
   const NfcChargingView({
     super.key,
     required this.progress, // 0.0 .. 1.0 overall progress
-    required this.step, // current step label, e.g. "Leyendo tarjeta…"
+    required this.steps, // ordered task labels
+    required this.currentStep, // index of the active task (done = < current)
     required this.amountLabel, // e.g. "12.500 sats · ≈ 11.800 ARS"
   });
 
   final double progress;
-  final String step;
+  final List<String> steps;
+  final int currentStep;
   final String amountLabel;
 
   @override
@@ -32,82 +34,79 @@ class NfcChargingView extends StatefulWidget {
 }
 
 class _NfcChargingViewState extends State<NfcChargingView>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _waveController;
+    with TickerProviderStateMixin {
+  late final AnimationController _wave; // ripples + icon breathing
+  late final AnimationController _shimmer; // promo sheen
 
   @override
   void initState() {
     super.initState();
-    _waveController = AnimationController(
+    _wave = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
+    )..repeat();
+    _shimmer = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
     )..repeat();
   }
 
   @override
   void dispose() {
-    _waveController.dispose();
+    _wave.dispose();
+    _shimmer.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Guard against out-of-range inputs from the parent.
-    final clampedProgress = widget.progress.clamp(0.0, 1.0);
+    final progress = widget.progress.clamp(0.0, 1.0);
 
     return ColoredBox(
       color: AppColors.background,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _NfcPulse(controller: _waveController),
-              const SizedBox(height: 48),
-              Text(
-                widget.amountLabel,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AppColors.onDark,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
-                ),
-              ),
-              const SizedBox(height: 28),
-              _ProgressBar(value: clampedProgress),
-              const SizedBox(height: 20),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 260),
-                transitionBuilder: (child, animation) => FadeTransition(
-                  opacity: animation,
-                  child: child,
-                ),
-                child: Text(
-                  widget.step,
-                  // Key on the text so the switcher animates on label changes.
-                  key: ValueKey<String>(widget.step),
+      child: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _NfcPulse(controller: _wave),
+                const SizedBox(height: 32),
+                Text(
+                  widget.amountLabel,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: AppColors.onDark,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
                   ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'No retires la tarjeta',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.muted,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+                const SizedBox(height: 22),
+                _ProgressBar(value: progress),
+                const SizedBox(height: 24),
+                // Live task checklist.
+                Column(
+                  children: [
+                    for (var i = 0; i < widget.steps.length; i++) ...[
+                      _TaskRow(
+                        label: widget.steps[i],
+                        state: i < widget.currentStep
+                            ? _TaskState.done
+                            : i == widget.currentStep
+                                ? _TaskState.active
+                                : _TaskState.pending,
+                      ),
+                      if (i != widget.steps.length - 1)
+                        const SizedBox(height: 14),
+                    ],
+                  ],
                 ),
-              ),
-            ],
+                const SizedBox(height: 26),
+                _PromoTeaser(shimmer: _shimmer),
+              ],
+            ),
           ),
         ),
       ),
@@ -115,8 +114,160 @@ class _NfcChargingViewState extends State<NfcChargingView>
   }
 }
 
-/// The central contactless icon surrounded by continuously radiating,
-/// fading "signal" rings.
+/// The visual state of a single checklist task.
+enum _TaskState { pending, active, done }
+
+/// A checklist row whose leading marker animates between pending → active
+/// (spinner) → done (a checkmark that pops in), with the label brightening.
+class _TaskRow extends StatelessWidget {
+  const _TaskRow({required this.label, required this.state});
+
+  final String label;
+  final _TaskState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = state == _TaskState.active;
+    final isDone = state == _TaskState.done;
+    return Row(
+      children: [
+        SizedBox(
+          width: 24,
+          height: 24,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 340),
+            transitionBuilder: (child, anim) => ScaleTransition(
+              scale: CurvedAnimation(parent: anim, curve: Curves.easeOutBack),
+              child: FadeTransition(opacity: anim, child: child),
+            ),
+            child: _marker(),
+          ),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 300),
+            style: TextStyle(
+              color: isActive
+                  ? AppColors.onDark
+                  : isDone
+                      ? AppColors.muted
+                      : AppColors.muted.withValues(alpha: 0.5),
+              fontSize: 16,
+              fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+            ),
+            child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _marker() {
+    switch (state) {
+      case _TaskState.done:
+        return Container(
+          key: const ValueKey('done'),
+          width: 24,
+          height: 24,
+          decoration: const BoxDecoration(
+            color: AppColors.primary,
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: const Icon(Icons.check_rounded, size: 16, color: AppColors.onDark),
+        );
+      case _TaskState.active:
+        return const SizedBox(
+          key: ValueKey('active'),
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.6,
+            valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+          ),
+        );
+      case _TaskState.pending:
+        return Container(
+          key: const ValueKey('pending'),
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: AppColors.muted.withValues(alpha: 0.4),
+              width: 2,
+            ),
+          ),
+        );
+    }
+  }
+}
+
+/// A placeholder card for future promotions with a light "shimmer" sweeping
+/// across the gift icon + text, hinting there's something to discover.
+class _PromoTeaser extends StatelessWidget {
+  const _PromoTeaser({required this.shimmer});
+
+  final AnimationController shimmer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+      ),
+      child: AnimatedBuilder(
+        animation: shimmer,
+        builder: (context, child) {
+          final t = shimmer.value;
+          return ShaderMask(
+            blendMode: BlendMode.srcIn,
+            shaderCallback: (rect) => LinearGradient(
+              begin: Alignment(-1.3 + 2 * t, 0),
+              end: Alignment(-0.7 + 2 * t, 0),
+              colors: const [
+                AppColors.muted,
+                AppColors.primary,
+                AppColors.muted,
+              ],
+              stops: const [0.0, 0.5, 1.0],
+            ).createShader(rect),
+            child: child,
+          );
+        },
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.card_giftcard_rounded, size: 20, color: Colors.white),
+            SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                'Surprise coming here...',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The central contactless icon: a breathing plate surrounded by continuously
+/// radiating, fading "signal" rings.
 class _NfcPulse extends StatelessWidget {
   const _NfcPulse({required this.controller});
 
@@ -124,65 +275,64 @@ class _NfcPulse extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const size = 200.0;
+    const size = 184.0;
 
     return SizedBox(
       width: size,
       height: size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Expanding, fading concentric rings.
-          AnimatedBuilder(
-            animation: controller,
-            builder: (context, _) {
-              return CustomPaint(
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, child) {
+          // Gentle sinusoidal breathing for the central plate.
+          final breathe =
+              1.0 + 0.05 * math.sin(controller.value * 2 * math.pi);
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              CustomPaint(
                 size: const Size.square(size),
                 painter: _RipplePainter(progress: controller.value),
-              );
-            },
-          ),
-          // Soft static glow disc behind the icon.
-          Container(
-            width: 96,
-            height: 96,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.primary.withValues(alpha: 0.14),
-            ),
-          ),
-          // Icon plate.
-          Container(
-            width: 76,
-            height: 76,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.surface,
-              border: Border.all(
-                color: AppColors.primary.withValues(alpha: 0.6),
-                width: 1.5,
               ),
-            ),
-            alignment: Alignment.center,
-            child: const Icon(
-              Icons.contactless,
-              size: 40,
-              color: AppColors.primary,
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.primary.withValues(alpha: 0.14),
+                ),
+              ),
+              Transform.scale(scale: breathe, child: child),
+            ],
+          );
+        },
+        child: Container(
+          width: 76,
+          height: 76,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppColors.surface,
+            border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.6),
+              width: 1.5,
             ),
           ),
-        ],
+          alignment: Alignment.center,
+          child: const Icon(
+            Icons.contactless,
+            size: 40,
+            color: AppColors.primary,
+          ),
+        ),
       ),
     );
   }
 }
 
-/// Paints 3 staggered rings that expand from the centre and fade as they grow,
-/// producing a looping "signal" ripple effect.
+/// Paints 3 staggered rings that expand from the centre and fade as they grow.
 class _RipplePainter extends CustomPainter {
   _RipplePainter({required this.progress});
 
-  /// Drives the animation, in the range 0.0 .. 1.0 (looping).
-  final double progress;
+  final double progress; // 0.0 .. 1.0 (looping)
 
   static const int _ringCount = 3;
   static const double _minRadius = 44;
@@ -193,19 +343,14 @@ class _RipplePainter extends CustomPainter {
     final maxRadius = size.width / 2;
 
     for (var i = 0; i < _ringCount; i++) {
-      // Stagger each ring evenly across the loop so they trail one another.
       final t = (progress + i / _ringCount) % 1.0;
-
       final radius = _minRadius + (maxRadius - _minRadius) * t;
-      // Fade out as the ring expands; also ease-in at birth to avoid popping.
       final opacity = (1.0 - t) * math.min(1.0, t * 6);
-
       if (opacity <= 0) continue;
 
       final paint = Paint()
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round
-        // Thicker near the centre, thinning as it expands.
         ..strokeWidth = 3.0 * (1.0 - t) + 1.0
         ..color = AppColors.primary.withValues(alpha: 0.55 * opacity);
 
@@ -222,44 +367,23 @@ class _RipplePainter extends CustomPainter {
 class _ProgressBar extends StatelessWidget {
   const _ProgressBar({required this.value});
 
-  /// Already clamped to 0.0 .. 1.0 by the caller.
-  final double value;
+  final double value; // already clamped 0..1 by the caller
 
   @override
   Widget build(BuildContext context) {
-    const height = 10.0;
-    const radius = Radius.circular(height / 2);
-
     return TweenAnimationBuilder<double>(
       tween: Tween<double>(begin: 0, end: value),
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
-      builder: (context, animatedValue, _) {
-        return ClipRRect(
-          borderRadius: const BorderRadius.all(radius),
-          child: SizedBox(
-            height: height,
-            width: double.infinity,
-            child: Stack(
-              children: [
-                // Track.
-                const ColoredBox(color: AppColors.surface),
-                // Fill.
-                FractionallySizedBox(
-                  alignment: Alignment.centerLeft,
-                  widthFactor: animatedValue,
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.all(radius),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+      builder: (context, animatedValue, _) => ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: LinearProgressIndicator(
+          value: animatedValue,
+          minHeight: 10,
+          backgroundColor: AppColors.surface,
+          valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+        ),
+      ),
     );
   }
 }
