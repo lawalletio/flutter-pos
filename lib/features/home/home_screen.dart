@@ -165,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen> {
               final info = snap.data;
               final label = info != null
                   ? 'v${info.version} (${info.buildNumber})'
-                  : 'v0.1.2';
+                  : 'v0.1.3';
               return Text(label,
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: AppColors.muted, fontSize: 12));
