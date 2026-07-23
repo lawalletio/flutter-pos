@@ -29,9 +29,31 @@ flutter pub get
 #   implementation files('libs/zxing-core-3.3.0.jar')
 flutter analyze
 flutter test
-flutter run --dart-define=NOSTR_RELAY=wss://relay.damus.io \
-            --dart-define=FEDERATION_ID=... --dart-define=LEDGER_PUBKEY=...
+flutter run
 ```
+
+## Releasing
+
+```bash
+tool/build_release.sh
+```
+
+Bump `version:` in `pubspec.yaml` first, then run the script. It produces three
+signed APKs in `build/app/outputs/flutter-apk/`:
+
+| Artifact | ABIs | Use |
+|---|---|---|
+| `lawallet-pos-v<v>.apk` | all | Zapstore + general distribution |
+| `lawallet-pos-v<v>-armeabi-v7a.apk` | 32-bit | ZCS/Ciontek terminals — ~⅓ the size |
+| `lawallet-pos-v<v>-arm64-v8a.apk` | 64-bit | modern phones |
+
+Signing requires `android/key.properties` + `android/app/upload-keystore.jks`
+(both gitignored); the script fails rather than silently debug-signing.
+
+Note that `--split-per-abi` offsets `versionCode` per ABI (armeabi-v7a +1000,
+arm64-v8a +2000), so a split APK outranks the universal one. Moving a device
+from a split build back to universal is a downgrade and Android will refuse it
+— pick one channel per device and stay on it.
 
 ## Architecture
 Riverpod replaces the 6 React contexts. See the plan and `docs/`. Layered `lib/`:
