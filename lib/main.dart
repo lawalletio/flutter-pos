@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'data/lnurl/lnurl_service.dart';
+import 'data/nostr/catalog_service.dart';
 import 'data/nostr/identity.dart';
 import 'data/pricing/block_service.dart';
 import 'data/pricing/pricing_service.dart';
@@ -32,5 +33,9 @@ Future<void> main() async {
   // invoice request. Fire-and-forget; errors are irrelevant here.
   nostrIdentity.publicKey().ignore();
   lnurl.resolve(merchantAddress.value).ignore();
+  // Same idea for the menu: resolve NIP-05 and pull the merchant's NIP-99
+  // catalog now, so opening the menu paints instead of spinning. Serves the
+  // persisted copy first, then revalidates against the relays.
+  catalog.ensureLoaded(merchantAddress.value).ignore();
   runApp(const ProviderScope(child: LaWalletPosApp()));
 }

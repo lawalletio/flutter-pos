@@ -87,9 +87,37 @@ const Map<String, String> _en = {
   'Modo caja': 'Register mode',
   'Cobrar': 'Charge',
 
+  // Relays / sync
+  'Relays': 'Relays',
+  'REGISTRO': 'LOG',
+  'Sin actividad.': 'No activity.',
+  'Sincronizando': 'Syncing',
+  'Sincronización completa': 'Sync complete',
+  'Publicados': 'Published',
+  'Fallidos': 'Failed',
+  'Al día': 'Up to date',
+  'Rechazados': 'Refused',
+  'Los rechazos son política del relay (eventos viejos, antispam). No se reintentan.':
+      'Refusals are relay policy (old events, anti-spam). They are not retried.',
+  'Todavía no se sincronizó ningún comercio.':
+      'No merchant has been synced yet.',
+
   // Menu / cart
   'Ver carrito': 'View cart',
   'Resumen de compra': 'Order summary',
+  'Menú': 'Menu',
+  'Esperando cotización…': 'Waiting for rate…',
+  'Sin conexión': 'Offline',
+  'actualizado': 'updated',
+  'recién': 'just now',
+  'producto oculto (precio no soportado)': 'product hidden (unsupported price)',
+  'productos ocultos (precio no soportado)':
+      'products hidden (unsupported price)',
+  'Este comercio todavía no publicó su menú':
+      'This merchant has not published a menu yet',
+  'No se pudo leer el catálogo': 'Could not read the catalog',
+  'Podés cobrar un monto manual desde la caja.':
+      'You can charge a manual amount from the register.',
   'unidad': 'unit',
   'unidades': 'units',
 

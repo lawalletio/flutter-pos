@@ -7,6 +7,7 @@ import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
+import '../../data/nostr/catalog_service.dart';
 import '../../data/nostr/profile_service.dart';
 import '../../domain/config/address_history.dart';
 import '../../domain/config/session.dart';
@@ -40,13 +41,53 @@ class _HubScreenState extends State<HubScreen> {
   @override
   void initState() {
     super.initState();
-    _init();
-    _resolveAvatar();
+    _initOnce();
+    _syncToAddress();
   }
 
-  Future<void> _resolveAvatar() async {
-    final url = await nostrProfile.avatarFor(widget.address);
-    if (mounted && url != null) setState(() => _avatar = url);
+  @override
+  void didUpdateWidget(covariant HubScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.address == widget.address) return;
+
+    // go_router keys its pages by PATH, not by query string, so picking another
+    // merchant from the dropdown re-enters `/hub?address=…` on this very same
+    // State and initState never runs again. Everything derived from the address
+    // has to be redone here — otherwise the hub keeps showing the previous
+    // merchant's avatar and never looks up the new one's catalog at all.
+    _syncToAddress();
+    addressHistory.add(widget.address).ignore(); // keep the MRU order honest
+  }
+
+  /// Everything keyed to the selected merchant. Runs on first build, and again
+  /// on every switch.
+  void _syncToAddress() {
+    final address = widget.address;
+
+    // The route is the source of truth for who we are selling as. Without this,
+    // a cold start straight into `/hub?address=X` leaves `merchantAddress` at
+    // its default, so the menu would come from one merchant while
+    // PaymentScreen charges another.
+    merchantAddress.value = address;
+
+    // Re-ask the relays rather than ensureLoaded: a different merchant is
+    // exactly when the previous catalog is worthless, and switching back to one
+    // seen minutes ago should still show today's prices, not the TTL's copy.
+    // Also tells the menu card below whether this merchant publishes at all.
+    catalog.revalidate(address).ignore();
+
+    // Drop the previous merchant's picture immediately; do not leave their face
+    // on somebody else's till. (Null on first build, so no setState needed.)
+    if (_avatar != null) setState(() => _avatar = null);
+    _resolveAvatar(address);
+  }
+
+  Future<void> _resolveAvatar(String address) async {
+    final url = await nostrProfile.avatarFor(address);
+    // A quick A→B switch can land A's avatar after B's; ignore the stale one.
+    if (mounted && url != null && widget.address == address) {
+      setState(() => _avatar = url);
+    }
   }
 
   /// Avatar (if resolved) to the left of the address, else the storefront icon.
@@ -73,7 +114,9 @@ class _HubScreenState extends State<HubScreen> {
     super.dispose();
   }
 
-  Future<void> _init() async {
+  /// Setup that does not depend on which merchant is selected. The history load
+  /// must finish before the first add, or the add is clobbered by the read.
+  Future<void> _initOnce() async {
     await addressHistory.load();
     await addressHistory.add(widget.address); // record the active address
     if (widget.openMenu) {
@@ -204,15 +247,34 @@ class _HubScreenState extends State<HubScreen> {
           children: [
             _addressToggle(),
             const SizedBox(height: 8),
-            if (venue != null) ...[
-              const _SectionLabel('Menú'),
-              PosCard(
-                icon: Icons.restaurant_menu,
-                label: venue.title,
-                onTap: () => context.push('/cart/${venue.menu}'),
-              ),
-              const SizedBox(height: 12),
-            ],
+            // The menu card appears when the merchant publishes a nostr catalog
+            // OR has a bundled venue — an address can now have a menu without
+            // being one of the six hardcoded venues.
+            ValueListenableBuilder<CatalogResult?>(
+              valueListenable: catalog.notifier,
+              builder: (context, result, _) {
+                final forThisAddress =
+                    result?.address == widget.address.trim().toLowerCase();
+                final hasNostrMenu = forThisAddress && result!.hasProducts;
+                if (!hasNostrMenu && venue == null) {
+                  return const SizedBox.shrink();
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const _SectionLabel('Menú'),
+                    PosCard(
+                      icon: Icons.restaurant_menu,
+                      label: venue?.title ?? context.tr('Menú'),
+                      onTap: () => context.push(
+                        venue == null ? '/cart' : '/cart?menu=${venue.menu}',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                );
+              },
+            ),
             const _SectionLabel('Modos'),
             PosCard(
               icon: Icons.calculate_outlined,
