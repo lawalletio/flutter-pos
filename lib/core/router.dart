@@ -9,6 +9,7 @@ import '../features/tip/tip_screen.dart';
 import '../features/payment/payment_screen.dart';
 import '../features/orders/orders_screen.dart';
 import '../features/tab/tab_screen.dart';
+import '../features/relays/relay_sync_screen.dart';
 import '../features/settings/settings_screen.dart';
 
 /// A fast, smooth transition applied to every route change: the incoming page
@@ -53,10 +54,13 @@ final appRouter = GoRouter(
         ),
       ),
     ),
+    // `menu` is a query parameter, not a path segment: the nostr catalog is per
+    // merchant, so a merchant with a catalog and no bundled venue has no menu
+    // name to put in the path (and go_router will not match an empty segment).
     GoRoute(
-      path: '/cart/:menu',
+      path: '/cart',
       pageBuilder: (c, s) => _page(MenuScreen(
-        menu: s.pathParameters['menu']!,
+        menu: s.uri.queryParameters['menu'],
         demo: s.uri.queryParameters['demo'] == '1',
       )),
     ),
@@ -84,5 +88,6 @@ final appRouter = GoRouter(
     GoRoute(path: '/orders', pageBuilder: (c, s) => _page(const OrdersScreen())),
     GoRoute(path: '/tab', pageBuilder: (c, s) => _page(const TabScreen())),
     GoRoute(path: '/settings', pageBuilder: (c, s) => _page(const SettingsScreen())),
+    GoRoute(path: '/relays', pageBuilder: (c, s) => _page(const RelaySyncScreen())),
   ],
 );

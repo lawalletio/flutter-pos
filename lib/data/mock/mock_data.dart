@@ -35,10 +35,20 @@ const List<({String menu, String title})> kVenues = [
   (menu: 'test', title: 'Test'),
 ];
 
-/// Resolve the single venue menu for a Lightning Address, matched by the username
-/// part (e.g. `merch@lacrypta.ar` → Merch). Returns null if the address does not
-/// map to a known venue — matching the webapp, where only the matching menu card
-/// is shown (and none if there's no match).
+/// The BUNDLED FALLBACK menu for a Lightning Address, matched by the username
+/// part (e.g. `merch@lacrypta.ar` → Merch). Returns null when the address maps
+/// to no known venue.
+///
+/// This is no longer the primary menu source — the merchant's own NIP-99
+/// catalog on nostr is (see `data/nostr/catalog_service.dart`). It is used only
+/// when the address has no nostr identity at all, which is genuinely the case
+/// for `cafe`, `bitnaria` and `test`: they have no entry in
+/// `lacrypta.ar/.well-known/nostr.json`.
+///
+/// Deliberately NOT used when a merchant HAS a catalog we could not reach.
+/// These prices are a build artifact — barra.json has had the same Coca price
+/// since it was committed — so serving them during a relay outage would
+/// undercharge every sale with nothing on screen to say so.
 ({String menu, String title})? venueForAddress(String address) {
   final user = address.trim().toLowerCase().split('@').first;
   for (final v in kVenues) {
