@@ -60,11 +60,11 @@ class CatalogResult {
 
 @immutable
 class _CachedCatalog {
-  /// The address this was fetched for. Stored alongside the pubkey so the menu
-  /// can be painted BEFORE the NIP-05 round trip that would reveal the pubkey —
-  /// otherwise a cold start stares at a spinner through an HTTP call for a
-  /// catalog already sitting on disk.
-  final String? address;
+  /// Also the map key. Keyed by ADDRESS, not pubkey, so the menu can be painted
+  /// BEFORE the NIP-05 round trip that would reveal the pubkey — otherwise a
+  /// cold start stares at a spinner through an HTTP call for a catalog already
+  /// sitting on disk. The pubkey is still checked before anything is trusted.
+  final String address;
   final String pubkey;
   final DateTime at;
   final List<Product> products;
@@ -95,6 +95,17 @@ class _CachedCatalog {
 class CatalogService {
   static const _key = 'catalogCache';
 
+  /// Bumped when the stored shape changes; an older blob is dropped rather than
+  /// misread. v1 was a single slot, which lost the cache on every merchant
+  /// switch — the reason this is a map now.
+  static const _schema = 2;
+
+  /// How many merchants keep a cached menu. A till may legitimately rotate
+  /// between a handful (barra, comida, merch…) in one shift, and each switch
+  /// used to wipe the previous one. Bounded because Android reads the whole
+  /// prefs file into memory at startup.
+  static const _maxMerchants = 6;
+
   /// In-memory freshness only. The persisted copy has no TTL: it is the offline
   /// floor, and something stale-but-labelled beats an empty menu mid-shift.
   static const _ttl = Duration(minutes: 5);
@@ -105,6 +116,11 @@ class CatalogService {
   SharedPreferences? _prefs;
   Future<SharedPreferences> get _p async =>
       _prefs ??= await SharedPreferences.getInstance();
+
+  /// Cached menus by address, read from disk once and mutated in place.
+  /// Keeping it in memory also removes a disk read from every menu open and
+  /// makes the read-modify-write on save race-free.
+  Map<String, _CachedCatalog>? _cacheMem;
 
   /// Event ids that already passed id+signature verification.
   ///
@@ -171,14 +187,13 @@ class CatalogService {
   }
 
   Future<void> _load(String address) async {
-    final cached = await _readCache();
+    final cached = await _readCache(address);
 
     // Show the cached menu straight away, before the NIP-05 lookup. Matching on
     // address rather than pubkey is the whole point: the pubkey is what that
     // lookup is for, and waiting for it means a spinner over data we already
     // have. The pubkey is still checked below before anything is trusted.
     if (cached != null &&
-        cached.address == address &&
         cached.products.isNotEmpty &&
         notifier.value?.hasProducts != true) {
       _publish(CatalogResult(
@@ -375,60 +390,106 @@ class CatalogService {
     _loadedAt = DateTime.now();
   }
 
-  Future<_CachedCatalog?> _readCache() async {
+  /// Every cached menu, keyed by address.
+  Future<Map<String, _CachedCatalog>> _allCached() async {
+    final memo = _cacheMem;
+    if (memo != null) return memo;
+
+    final out = <String, _CachedCatalog>{};
     try {
       final raw = (await _p).getString(_key);
-      if (raw == null) return null;
-      final j = jsonDecode(raw) as Map<String, dynamic>;
-      return _CachedCatalog(
-        // Absent in caches written before this field existed; those simply do
-        // not get the early paint and heal on the next write.
-        address: j['address'] as String?,
-        pubkey: j['pubkey'] as String,
-        at: DateTime.fromMillisecondsSinceEpoch((j['at'] as num).toInt() * 1000),
-        unsellable: (j['unsellable'] as num?)?.toInt() ?? 0,
-        products: [
-          for (final p in j['products'] as List)
-            Product.fromJson((p as Map).cast<String, dynamic>()),
-        ],
-        categories: [
-          for (final c in j['categories'] as List)
-            (
-              id: ((c as Map)['id'] as num).toInt(),
-              name: c['name'] as String,
-            ),
-        ],
-      );
+      if (raw != null) {
+        final j = jsonDecode(raw) as Map<String, dynamic>;
+        // A v1 blob is a single merchant in a different shape. Dropping it
+        // costs one cold fetch; misreading it would show the wrong menu.
+        if ((j['v'] as num?)?.toInt() == _schema) {
+          final entries = (j['entries'] as Map).cast<String, dynamic>();
+          for (final e in entries.entries) {
+            final v = (e.value as Map).cast<String, dynamic>();
+            out[e.key] = _CachedCatalog(
+              address: e.key,
+              pubkey: v['pubkey'] as String,
+              at: DateTime.fromMillisecondsSinceEpoch(
+                  (v['at'] as num).toInt() * 1000),
+              unsellable: (v['unsellable'] as num?)?.toInt() ?? 0,
+              products: [
+                for (final p in v['products'] as List)
+                  Product.fromJson((p as Map).cast<String, dynamic>()),
+              ],
+              categories: [
+                for (final c in v['categories'] as List)
+                  (
+                    id: ((c as Map)['id'] as num).toInt(),
+                    name: c['name'] as String,
+                  ),
+              ],
+            );
+          }
+        }
+      }
     } catch (e) {
       // One try/catch around the WHOLE blob — deliberately not the per-item
       // salvage OrdersStore uses. Losing one order row from history is
       // survivable; silently dropping one expensive product from a menu is a
       // money bug.
       debugPrint('CatalogService: unreadable cache, ignoring ($e)');
-      return null;
+      out.clear();
     }
+    return _cacheMem = out;
   }
 
-  /// One slot, overwritten wholesale.
+  Future<_CachedCatalog?> _readCache(String address) async =>
+      (await _allCached())[address];
+
+  /// Store this merchant's menu, keeping the other merchants' intact.
   ///
-  /// ponytail: a single key with the pubkey inside, so a rebind is simply a
-  /// miss. A key per address grows unbounded across every address ever typed,
-  /// and Android loads the whole prefs blob at startup. Add slots if terminals
-  /// start switching merchants mid-shift.
+  /// `description` is deliberately NOT persisted: nothing renders it, and on a
+  /// real catalog it is by far the largest field (a few kilobytes per product),
+  /// which would put hundreds of kilobytes of dead weight into the prefs file
+  /// that Android loads at every startup.
   Future<void> _writeCache(
       String address, String pubkey, CatalogProjection p, DateTime at) async {
     try {
+      final all = Map<String, _CachedCatalog>.from(await _allCached());
+      all[address] = _CachedCatalog(
+        address: address,
+        pubkey: pubkey,
+        at: at,
+        unsellable: p.unsellable,
+        products: p.products,
+        categories: p.categories,
+      );
+
+      // Evict the least recently fetched merchants.
+      if (all.length > _maxMerchants) {
+        final byAge = all.entries.toList()
+          ..sort((a, b) => b.value.at.compareTo(a.value.at));
+        all
+          ..clear()
+          ..addEntries(byAge.take(_maxMerchants));
+      }
+      _cacheMem = all;
+
       await (await _p).setString(
         _key,
         jsonEncode({
-          'address': address,
-          'pubkey': pubkey,
-          'at': at.millisecondsSinceEpoch ~/ 1000,
-          'unsellable': p.unsellable,
-          'categories': [
-            for (final c in p.categories) {'id': c.id, 'name': c.name},
-          ],
-          'products': [for (final prod in p.products) prod.toJson()],
+          'v': _schema,
+          'entries': {
+            for (final e in all.entries)
+              e.key: {
+                'pubkey': e.value.pubkey,
+                'at': e.value.at.millisecondsSinceEpoch ~/ 1000,
+                'unsellable': e.value.unsellable,
+                'categories': [
+                  for (final c in e.value.categories)
+                    {'id': c.id, 'name': c.name},
+                ],
+                'products': [
+                  for (final prod in e.value.products)
+                    prod.toJson()..remove('description'),
+                ],
+              },
+          },
         }),
       );
     } catch (e) {

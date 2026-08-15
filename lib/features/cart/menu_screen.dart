@@ -5,7 +5,6 @@ import '../../core/checkout.dart';
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
-import '../../data/mock/mock_data.dart';
 import '../../data/nostr/catalog_service.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
@@ -18,20 +17,19 @@ import '../../domain/order/product.dart';
 /// Where the products on screen came from — drives the banners and the empty
 /// states, which are the only signal an operator gets that they may be looking
 /// at prices that are not live.
-enum _Source { nostr, cache, bundled, empty, offline }
+enum _Source { nostr, cache, empty, offline }
 
 /// Menu/cart — product catalog grouped by category, add/remove, clear, and a
 /// "Ver carrito" → "Resumen de compra" review sheet before checkout.
 ///
-/// The catalog comes from the merchant's own NIP-99 events on nostr, resolved
-/// from their Lightning Address. The bundled `assets/menus/*.json` are only a
-/// fallback for addresses with no nostr identity at all; see [_load].
+/// The catalog is the merchant's own NIP-99 events on nostr, resolved from
+/// their Lightning Address. There is no bundled fallback: a menu shipped inside
+/// the app is a build artifact, and there is no moment at which charging a
+/// months-old price is the right answer. When nostr has nothing to say, the
+/// screen says so and points at Paydesk.
 class MenuScreen extends StatefulWidget {
-  /// Bundled fallback menu name, when the address maps to one of the hardcoded
-  /// venues. Null for a merchant that only exists on nostr.
-  final String? menu;
   final bool demo; // preview affordance: pre-fill the cart to show highlighting
-  const MenuScreen({super.key, this.menu, this.demo = false});
+  const MenuScreen({super.key, this.demo = false});
   @override
   State<MenuScreen> createState() => _MenuScreenState();
 }
@@ -102,8 +100,8 @@ class _MenuScreenState extends State<MenuScreen> {
       _pendingRefresh = result;
       return;
     }
-    // Through the full decision, not straight to _adopt: a revalidation that
-    // comes back empty must fall to the bundled menu, not blank the screen.
+    // Through the full decision, not straight to _adopt, so a revalidation that
+    // comes back empty lands on the empty state rather than a blank list.
     _adoptAsync(result);
   }
 
@@ -134,7 +132,7 @@ class _MenuScreenState extends State<MenuScreen> {
 
     final result = catalog.notifier.value;
     if (result == null || result.address != key) {
-      await _loadBundled();
+      _showEmpty(unreachable: true);
       return;
     }
     // The listener already adopts fresh results; only step in if nothing has.
@@ -148,35 +146,38 @@ class _MenuScreenState extends State<MenuScreen> {
   }
 
   Future<void> _adoptAsync(CatalogResult result) async {
-    // 1. A live catalog wins. So does a cached one during an outage — the
-    //    service hands those over already populated, flagged `fromCache`, and
-    //    the banner dates them.
+    // A live catalog wins; so does a cached one during an outage — the service
+    // hands those over already populated, flagged `fromCache`, and the banner
+    // dates them.
     if (result.hasProducts) {
       _adopt(result);
       return;
     }
 
-    // 2. The relays answered and this merchant publishes nothing at all (or has
-    //    no nostr identity in the first place, like cafe/bitnaria/test). Nostr
-    //    has nothing to be stale about, so the bundled menu is the whole truth
-    //    for them — and it is exactly what shipped before this change.
-    if (!result.unreachable && result.unsellable == 0) {
-      await _loadBundled();
-      return;
-    }
+    // Nothing sellable. Either this merchant publishes no catalog, or we could
+    // not read one. Both end here rather than in a bundled menu: those prices
+    // were frozen at build time, and quietly selling them during a relay outage
+    // would undercharge every sale with nothing on screen to say so. Paydesk is
+    // the safe manual path.
+    _showEmpty(
+      unreachable: result.unreachable,
+      unsellable: result.unsellable,
+      fetchedAt: result.fetchedAt,
+    );
+  }
 
-    // 3. Either no relay answered — we learned nothing, and bundled prices are
-    //    a build artifact months old, so quietly swapping them in during an
-    //    outage would undercharge every sale with no signal — or the merchant
-    //    publishes only items this till cannot charge. Paydesk is the safe
-    //    manual path out of both.
+  void _showEmpty({
+    required bool unreachable,
+    int unsellable = 0,
+    DateTime? fetchedAt,
+  }) {
     if (!mounted) return;
     setState(() {
       _products = const [];
       _categories = const [];
-      _unsellable = result.unsellable;
-      _fetchedAt = result.fetchedAt;
-      _source = result.unreachable ? _Source.offline : _Source.empty;
+      _unsellable = unsellable;
+      _fetchedAt = fetchedAt;
+      _source = unreachable ? _Source.offline : _Source.empty;
       _loading = false;
     });
   }
@@ -193,35 +194,6 @@ class _MenuScreenState extends State<MenuScreen> {
       _unsellable = result.unsellable;
       _fetchedAt = result.fetchedAt;
       _source = result.fromCache ? _Source.cache : _Source.nostr;
-      _loading = false;
-    });
-  }
-
-  Future<void> _loadBundled() async {
-    final name = widget.menu;
-    if (name == null) {
-      if (!mounted) return;
-      setState(() {
-        _products = const [];
-        _categories = const [];
-        _source = _Source.empty;
-        _loading = false;
-      });
-      return;
-    }
-    final cats = await loadCategories();
-    final prods = await loadMenu(name);
-    if (!mounted) return;
-    if (widget.demo && prods.length >= 2) {
-      _cart[prods[0].id] = CartLine(prods[0], 3);
-      _cart[prods[1].id] = CartLine(prods[1], 1);
-    }
-    setState(() {
-      _categories = cats;
-      _products = prods;
-      _unsellable = 0;
-      _fetchedAt = null;
-      _source = _Source.bundled;
       _loading = false;
     });
   }
@@ -262,13 +234,8 @@ class _MenuScreenState extends State<MenuScreen> {
     ];
     final catName = {for (final c in _categories) c.id: c.name};
 
-    final menu = widget.menu;
     return Scaffold(
-      appBar: PosAppBar(
-        title: menu == null
-            ? context.tr('Menú')
-            : menu[0].toUpperCase() + menu.substring(1),
-      ),
+      appBar: PosAppBar(title: context.tr('Menú')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _products.isEmpty
@@ -339,10 +306,6 @@ class _MenuScreenState extends State<MenuScreen> {
             ),
     );
   }
-
-  /// Where "Volver" goes from checkout — mirrors the route that opened us.
-  String get _backRoute =>
-      widget.menu == null ? '/cart' : '/cart?menu=${widget.menu}';
 
   /// Bare magnitude ("5 min"), so the surrounding label reads correctly in both
   /// languages without a word-order-dependent "hace"/"ago" to place.
@@ -472,7 +435,7 @@ class _MenuScreenState extends State<MenuScreen> {
                                 qty: l.qty),
                         ]);
                         Navigator.of(ctx).pop();
-                        goCheckout(context, sats: total, back: _backRoute);
+                        goCheckout(context, sats: total, back: '/cart');
                       },
                 child: Text(total == null
                     ? context.tr('Esperando cotización…')
