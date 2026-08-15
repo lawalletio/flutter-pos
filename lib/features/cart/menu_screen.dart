@@ -430,9 +430,12 @@ class _MenuScreenState extends State<MenuScreen> {
                         setOrderItems([
                           for (final l in _cart.values)
                             OrderItem(
-                                name: l.product.name,
-                                unitPrice: l.product.priceValue,
-                                qty: l.qty),
+                              name: l.product.name,
+                              unitPrice: l.product.priceValue,
+                              qty: l.qty,
+                              d: l.product.d,
+                              currency: l.product.priceCurrency,
+                            ),
                         ]);
                         Navigator.of(ctx).pop();
                         goCheckout(context, sats: total, back: '/cart');

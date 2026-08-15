@@ -77,6 +77,7 @@ final appRouter = GoRouter(
         final paid = s.uri.queryParameters['paid'] == '1';
         return _page(PaymentScreen(
           amountSats: sats,
+          tipSats: int.tryParse(s.uri.queryParameters['tip'] ?? '') ?? 0,
           initiallyPaid: paid,
           openAddTab: s.uri.queryParameters['addtab'] == '1',
           back: s.uri.queryParameters['back'],

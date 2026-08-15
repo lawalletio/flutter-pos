@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:bech32/bech32.dart';
+import 'package:convert/convert.dart';
 import 'package:crypto/crypto.dart';
 
 /// Nostr event primitives (NIP-01). Signing (BIP-340 schnorr) is wired in M2 via
@@ -84,4 +86,34 @@ class NostrEvent {
         content: j['content'] as String? ?? '',
         sig: j['sig'] as String?,
       );
+}
+
+/// Decode a NIP-19 `npub` to a hex pubkey, or null if it is not one.
+///
+/// Bech32 with no length limit and no witness version — the `bech32` package's
+/// segwit codec would reject both.
+String? npubToHex(String npub) {
+  if (!npub.startsWith('npub1')) return null;
+  final Bech32 decoded;
+  try {
+    decoded = bech32.decode(npub, 200);
+  } catch (_) {
+    return null;
+  }
+  if (decoded.hrp != 'npub') return null;
+
+  // 5-bit words back to bytes. Leftover bits must be zero padding, or the
+  // string was not an encoding of 32 whole bytes.
+  var acc = 0, bits = 0;
+  final out = <int>[];
+  for (final v in decoded.data) {
+    acc = (acc << 5) | v;
+    bits += 5;
+    while (bits >= 8) {
+      bits -= 8;
+      out.add((acc >> bits) & 0xff);
+    }
+  }
+  if (out.length != 32 || (acc & ((1 << bits) - 1)) != 0) return null;
+  return hex.encode(out);
 }

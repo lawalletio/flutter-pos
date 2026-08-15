@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/order/product.dart';
 import 'catalog.dart';
+import 'coupon_events.dart';
 import 'event.dart';
 import 'profile_service.dart';
 import 'relay_list.dart';
@@ -43,6 +44,13 @@ class CatalogResult {
   final bool fromCache;
   final DateTime? fetchedAt;
 
+  /// Where this merchant's coupons are claimed, when they have authorised a
+  /// service. Null means no coupon button at the till.
+  ///
+  /// Deliberately NOT cached with the catalog: the announcement is how a
+  /// merchant moves or revokes their coupon service, so it is read live.
+  final CouponDiscovery? coupons;
+
   const CatalogResult({
     required this.address,
     required this.pubkey,
@@ -52,6 +60,7 @@ class CatalogResult {
     this.unreachable = false,
     this.fromCache = false,
     this.fetchedAt,
+    this.coupons,
   });
 
   bool get hasNostrIdentity => pubkey != null;
@@ -254,7 +263,15 @@ class CatalogService {
         {
           'kinds': [kindProduct, kindCategory, kindDeletion],
           'authors': [pubkey],
-        }
+        },
+        // Their coupon announcement. A separate filter, narrowed by `d`: kind
+        // 30078 is shared by every app, and the merchant panel's other entries
+        // under it are NIP-44 sealed configs we have no business fetching.
+        {
+          'kinds': [kindAppData],
+          'authors': [pubkey],
+          '#d': [couponDiscoveryD],
+        },
       ],
       relays: relays,
       timeout: const Duration(seconds: 8),
@@ -273,6 +290,7 @@ class CatalogService {
         unreachable: true,
         fromCache: cached?.pubkey == pubkey,
         fetchedAt: cached?.pubkey == pubkey ? cached!.at : null,
+        coupons: notifier.value?.pubkey == pubkey ? notifier.value!.coupons : null,
       ));
       _loadedAddress = address;
       _loadedAt = null;
@@ -304,6 +322,7 @@ class CatalogService {
     }
 
     final projection = buildCatalog(verified, pubkey);
+    final discovery = latestCouponDiscovery(verified, pubkey);
     final now = DateTime.now();
 
     // An incomplete read is NOT a smaller catalog — it is a partial view, and
@@ -324,6 +343,26 @@ class CatalogService {
         debugPrint('CatalogService: partial read '
             '(${projection.products.length}p/${projection.categories.length}c) '
             '— keeping the previous catalog');
+        // The COUPON ANNOUNCEMENT still lands, even though the catalog does
+        // not. Completeness matters for the catalog because it is assembled
+        // from many events and a fragment missing the deletions resurrects
+        // products the merchant removed. The announcement is a single
+        // addressable event: one relay that answered has told us the whole
+        // thing, and withholding it would hide the coupon button for good on a
+        // till whose relay list contains anything unreachable — which, with
+        // relay.damus.io refusing to upgrade, is this till.
+        if (discovery?.claimUrl != previous.coupons?.claimUrl) {
+          _publish(CatalogResult(
+            address: address,
+            pubkey: pubkey,
+            products: previous.products,
+            categories: previous.categories,
+            unsellable: previous.unsellable,
+            fromCache: previous.fromCache,
+            fetchedAt: previous.fetchedAt,
+            coupons: discovery,
+          ));
+        }
         _loadedAddress = address;
         _loadedAt = null; // retry on the next open rather than sit on a fragment
         return;
@@ -338,6 +377,7 @@ class CatalogService {
       categories: projection.categories,
       unsellable: projection.unsellable,
       fetchedAt: now,
+      coupons: discovery,
     ));
 
     // Only a complete read earns the cache. A fragment on disk outlives the

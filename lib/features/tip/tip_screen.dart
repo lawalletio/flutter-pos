@@ -19,9 +19,13 @@ class TipScreen extends StatelessWidget {
   String _ars(int sats) => formatToPreference(
       Currency.ars, pricing.satsToFiat(sats, Currency.ars) ?? 0);
 
+  /// [finalSats] includes the tip; [finalSats] − [amountSats] IS the tip, and
+  /// it travels explicitly. A coupon discounts the goods, never the tip, and
+  /// the payment screen cannot tell the two apart from one total.
   void _go(BuildContext context, int finalSats) {
     final b = back == null ? '' : '&back=${Uri.encodeComponent(back!)}';
-    context.push('/payment?sats=$finalSats$b');
+    final tip = finalSats - amountSats;
+    context.push('/payment?sats=$finalSats${tip > 0 ? '&tip=$tip' : ''}$b');
   }
 
   @override

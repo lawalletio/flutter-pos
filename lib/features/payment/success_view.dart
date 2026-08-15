@@ -13,12 +13,21 @@ import '../../core/theme.dart';
 class PaymentSuccessView extends StatefulWidget {
   final String satsStr;
   final String arsStr;
+
+  /// The coupon applied, if any: its name and what it took off. Shown on the
+  /// same screen as the amount, so the cashier can answer "¿me lo tomó?"
+  /// without reaching for the ticket.
+  final String? couponName;
+  final String? discountStr;
+
   final VoidCallback onBack;
   const PaymentSuccessView({
     super.key,
     required this.satsStr,
     required this.arsStr,
     required this.onBack,
+    this.couponName,
+    this.discountStr,
   });
 
   @override
@@ -198,6 +207,36 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
                   Text('≈ ${widget.arsStr} ARS',
                       style: const TextStyle(
                           color: AppColors.muted, fontSize: 14)),
+                  if (widget.couponName != null) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.local_offer,
+                              size: 16, color: AppColors.primary),
+                          const SizedBox(width: 8),
+                          Text(widget.couponName!,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 14)),
+                          if (widget.discountStr != null) ...[
+                            const SizedBox(width: 8),
+                            Text('-${widget.discountStr!} sats',
+                                style: const TextStyle(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14)),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 36),
                   SizedBox(
                     width: 260,

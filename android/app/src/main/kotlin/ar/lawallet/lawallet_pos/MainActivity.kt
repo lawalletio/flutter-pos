@@ -301,6 +301,25 @@ class MainActivity : FlutterActivity() {
             p.setPrintLine(1)
         }
 
+        // Coupon, between the items and the total: subtotal, the coupon's own
+        // name, and what it took off. Absent keys print nothing, so a ticket
+        // without a coupon looks exactly as it did before.
+        val subtotal = order["subtotal"]?.toString().orEmpty()
+        val couponName = order["couponName"]?.toString().orEmpty()
+        val discount = order["discount"]?.toString().orEmpty()
+        if (subtotal.isNotEmpty() || discount.isNotEmpty()) {
+            p.setPrintLine(1)
+            if (subtotal.isNotEmpty()) {
+                p.setPrintAppendString("Subtotal: $subtotal", normal)
+            }
+            if (couponName.isNotEmpty()) {
+                p.setPrintAppendString("Cupon: $couponName", normal)
+            }
+            if (discount.isNotEmpty()) {
+                p.setPrintAppendString("Descuento: $discount", normal)
+            }
+        }
+
         p.setPrintLine(6)
         p.setPrintAppendString("***** TOTAL *****", fmt(34, Layout.Alignment.ALIGN_CENTER))
         val currency = order["currency"]?.toString() ?: "ARS"
