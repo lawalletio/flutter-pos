@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
+import '../domain/config/session.dart';
 import '../features/home/home_screen.dart';
 import '../features/destination/hub_screen.dart';
 import '../features/cart/menu_screen.dart';
@@ -49,7 +50,7 @@ final appRouter = GoRouter(
       path: '/hub',
       pageBuilder: (c, s) => _page(
         HubScreen(
-          address: s.uri.queryParameters['address'] ?? 'barra@lacrypta.ar',
+          address: hubAddressOr(s.uri.queryParameters['address']),
           openMenu: s.uri.queryParameters['menu'] == '1',
         ),
       ),
