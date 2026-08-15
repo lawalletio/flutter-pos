@@ -235,4 +235,10 @@ const Map<String, String> _en = {
   'Descuento': 'Discount',
   'Subtotal': 'Subtotal',
   'Total': 'Total',
+  'Ingresar el código': 'Enter the code',
+  'Código del cupón': 'Coupon code',
+  'Pegá o escribí el código': 'Paste or type the code',
+  'Pegar': 'Paste',
+  'Ese código no es un cupón': "That code isn't a coupon",
+  'Aplicar': 'Apply',
 };
