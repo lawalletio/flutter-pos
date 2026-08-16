@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
-import '../../data/mock/mock_data.dart';
 import '../../data/nostr/catalog_service.dart';
 import '../../data/nostr/profile_service.dart';
 import '../../domain/config/address_history.dart';
@@ -14,8 +13,8 @@ import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/order/order_reset.dart';
 
-/// Destination hub — shows the single venue menu that matches the merchant
-/// address plus the POS modes. The address header is a full-width dropdown
+/// Destination hub — shows the merchant's menu (only when they publish a
+/// catalog on nostr) plus the POS modes. The address header is a full-width dropdown
 /// listing the history of used Lightning Addresses (persisted), each removable
 /// via an X, plus an "enter another address" action; opening it blurs the hub.
 class HubScreen extends StatefulWidget {
@@ -213,8 +212,6 @@ class _HubScreenState extends State<HubScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final venue = venueForAddress(widget.address);
-
     return Scaffold(
       appBar: const PosAppBar(showBack: false),
       bottomNavigationBar: SafeArea(
@@ -247,16 +244,14 @@ class _HubScreenState extends State<HubScreen> {
           children: [
             _addressToggle(),
             const SizedBox(height: 8),
-            // The menu card appears when the merchant publishes a nostr catalog
-            // OR has a bundled venue — an address can now have a menu without
-            // being one of the six hardcoded venues.
+            // The menu card exists only when this merchant actually publishes a
+            // catalog on nostr. No bundled venue list to fall back on any more.
             ValueListenableBuilder<CatalogResult?>(
               valueListenable: catalog.notifier,
               builder: (context, result, _) {
                 final forThisAddress =
                     result?.address == widget.address.trim().toLowerCase();
-                final hasNostrMenu = forThisAddress && result!.hasProducts;
-                if (!hasNostrMenu && venue == null) {
+                if (!forThisAddress || !result!.hasProducts) {
                   return const SizedBox.shrink();
                 }
                 return Column(
@@ -265,10 +260,8 @@ class _HubScreenState extends State<HubScreen> {
                     const _SectionLabel('Menú'),
                     PosCard(
                       icon: Icons.restaurant_menu,
-                      label: venue?.title ?? context.tr('Menú'),
-                      onTap: () => context.push(
-                        venue == null ? '/cart' : '/cart?menu=${venue.menu}',
-                      ),
+                      label: context.tr('Menú'),
+                      onTap: () => context.push('/cart'),
                     ),
                     const SizedBox(height: 12),
                   ],

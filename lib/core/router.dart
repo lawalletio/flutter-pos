@@ -54,13 +54,11 @@ final appRouter = GoRouter(
         ),
       ),
     ),
-    // `menu` is a query parameter, not a path segment: the nostr catalog is per
-    // merchant, so a merchant with a catalog and no bundled venue has no menu
-    // name to put in the path (and go_router will not match an empty segment).
+    // One cart route: the catalog is per merchant, resolved from the configured
+    // Lightning Address, so there is nothing to name in the path.
     GoRoute(
       path: '/cart',
       pageBuilder: (c, s) => _page(MenuScreen(
-        menu: s.uri.queryParameters['menu'],
         demo: s.uri.queryParameters['demo'] == '1',
       )),
     ),

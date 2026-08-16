@@ -29,8 +29,9 @@ void main() {
 
     expect(total, 42000 + 50000);
     // The bug this replaced: summing 21000 + 25 and converting the lot as ARS.
-    // assets/menus/merch.json really does price books in USD beside ARS drinks,
-    // so this was a live ~1000x undercharge on the USD line.
+    // The bundled menus really did price books in USD beside ARS drinks, so
+    // this was a live ~1000x undercharge on the USD line — and a nostr catalog
+    // can mix currencies just as freely.
     expect(total, isNot(rates.fiatToSats(21025, Currency.ars)));
   });
 

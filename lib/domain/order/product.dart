@@ -67,10 +67,11 @@ class CartLine {
 /// Total of [lines] in whole satoshis, or null if it cannot be known.
 ///
 /// Sums **per currency** and converts each sum once. Never sum across
-/// currencies: `assets/menus/merch.json` prices books and a terminal in USD
-/// beside ARS drinks, and adding 25 (USD) to 21000 (ARS) as though both were
-/// pesos undercharges the USD line by roughly a factor of a thousand — which is
-/// exactly what this app did before this function existed. Summing per currency
+/// currencies. The bundled menus this app used to ship priced books and a
+/// terminal in USD beside ARS drinks, and adding 25 (USD) to 21000 (ARS) as
+/// though both were pesos undercharged the USD line by roughly a factor of a
+/// thousand — which is exactly what this app did before this function existed.
+/// A nostr catalog can mix currencies just as freely. Summing per currency
 /// also beats converting line by line, which accumulates up to half a sat of
 /// rounding error per line.
 ///
