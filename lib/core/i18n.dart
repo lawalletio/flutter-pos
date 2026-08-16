@@ -218,4 +218,27 @@ const Map<String, String> _en = {
   'Imprimiendo prueba…': 'Printing test…',
   'relay': 'relay',
   'relays': 'relays',
+
+  // Coupons
+  'Escanear cupón': 'Scan coupon',
+  'Cupón aplicado': 'Coupon applied',
+  'Apuntá al QR del cupón': 'Point at the coupon QR',
+  'Ese QR no es un cupón': "That QR isn't a coupon",
+  'No pudimos aplicar el cupón': "We couldn't apply the coupon",
+  'Con este cupón el total queda por debajo del mínimo de':
+      'With this coupon the total falls below the minimum of',
+  '¿Quitar el cupón?': 'Remove the coupon?',
+  'Se cobra el precio completo. El cupón ya fue canjeado y no se puede volver a usar.':
+      'The full price will be charged. The coupon has already been redeemed and cannot be reused.',
+  'Quitar': 'Remove',
+  'Quitar cupón': 'Remove coupon',
+  'Descuento': 'Discount',
+  'Subtotal': 'Subtotal',
+  'Total': 'Total',
+  'Ingresar el código': 'Enter the code',
+  'Código del cupón': 'Coupon code',
+  'Pegá o escribí el código': 'Paste or type the code',
+  'Pegar': 'Paste',
+  'Ese código no es un cupón': "That code isn't a coupon",
+  'Aplicar': 'Apply',
 };

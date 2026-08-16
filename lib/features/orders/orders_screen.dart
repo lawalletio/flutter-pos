@@ -180,6 +180,8 @@ class _OrderCard extends StatelessWidget {
       amountSats: order.amountSats,
       items: order.items,
       thankYouMessage: thankYou,
+      couponName: order.couponName ?? '',
+      discountSats: order.discountSats,
     );
     messenger.showSnackBar(
       SnackBar(

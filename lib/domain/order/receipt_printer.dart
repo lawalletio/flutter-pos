@@ -14,10 +14,17 @@ import 'current_order.dart';
 ///
 /// A no-op where there's no printer (e.g. web preview): the channel returns a
 /// graceful "not available" [PrintResult] instead of throwing.
+///
+/// [discountSats] is what a coupon took off, so [amountSats] is what was
+/// actually charged and the two together give the gross. The ticket has to
+/// carry it: it is the customer's only proof the discount was honoured, and the
+/// merchant's only paper record of a coupon that was redeemed.
 Future<PrintResult> printOrderReceipt({
   required int amountSats,
   required List<OrderItem> items,
   required String thankYouMessage,
+  String couponName = '',
+  int discountSats = 0,
 }) {
   final ars = pricing.satsToFiat(amountSats, Currency.ars);
   final usd = pricing.satsToFiat(amountSats, Currency.usd);
@@ -26,12 +33,26 @@ Future<PrintResult> printOrderReceipt({
     for (final it in items)
       {
         'name': it.name,
-        'price': formatToPreference(Currency.ars, it.unitPrice),
+        'price': '${it.priceCurrency.code} '
+            '${formatToPreference(it.priceCurrency, it.unitPrice)}',
         'qty': it.qty,
       }
   ];
+  // Priced in ARS like the total below it, not in sats: the discount has to be
+  // comparable to the number the customer is looking at.
+  final discountArs =
+      discountSats > 0 ? pricing.satsToFiat(discountSats, Currency.ars) : null;
+  final grossArs = discountSats > 0
+      ? pricing.satsToFiat(amountSats + discountSats, Currency.ars)
+      : null;
+
   return PrinterChannel.printOrder({
     'items': lines,
+    if (grossArs != null)
+      'subtotal': 'ARS ${formatToPreference(Currency.ars, grossArs)}',
+    if (couponName.isNotEmpty) 'couponName': couponName,
+    if (discountArs != null)
+      'discount': '-ARS ${formatToPreference(Currency.ars, discountArs)}',
     'currency': 'ARS',
     'total': ars != null ? formatToPreference(Currency.ars, ars) : '-',
     'currencyB': 'USD',

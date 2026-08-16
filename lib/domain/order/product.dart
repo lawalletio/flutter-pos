@@ -15,6 +15,12 @@ class Product {
   /// cache round-trip; nothing renders them yet.
   final List<String> imageUrls;
 
+  /// The NIP-99 `d` tag this product was projected from. Empty for anything not
+  /// backed by a catalog event. Coupons scoped to products match on this — [id]
+  /// cannot serve, since it is a position in the current projection and moves
+  /// whenever the catalog does.
+  final String d;
+
   const Product({
     required this.id,
     required this.categoryId,
@@ -23,6 +29,7 @@ class Product {
     required this.priceValue,
     required this.priceCurrency,
     this.imageUrls = const [],
+    this.d = '',
   });
 
   factory Product.fromJson(Map<String, dynamic> j) {
@@ -43,6 +50,7 @@ class Product {
       imageUrls: [
         for (final u in (j['images'] as List?) ?? const []) u.toString(),
       ],
+      d: (j['d'] as String?) ?? '',
     );
   }
 
@@ -53,6 +61,7 @@ class Product {
         'description': description,
         'price': {'value': priceValue, 'currency': priceCurrency.code},
         if (imageUrls.isNotEmpty) 'images': imageUrls,
+        if (d.isNotEmpty) 'd': d,
       };
 }
 

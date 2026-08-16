@@ -317,7 +317,15 @@ class ZapWatcher {
           onDone: () {},
           cancelOnError: false,
         ));
-        ch.sink.add(req);
+        // Same trap as `fetchEvents`: a connection that is refused or not
+        // upgraded fails on `ready`, not here and not on the stream. Writing to
+        // that sink raised an unhandled exception out of the payment screen on
+        // every charge, once per dead relay.
+        unawaited(ch.ready.then<void>((_) {
+          if (!_done) ch.sink.add(req);
+        }).catchError((Object e) {
+          debugPrint('ZapWatcher: $url did not connect: $e');
+        }));
       } catch (e) {
         debugPrint('ZapWatcher: relay $url failed: $e');
       }

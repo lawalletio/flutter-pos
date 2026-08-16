@@ -24,6 +24,14 @@ class OrderRecord {
   final String? zapOrderId; // `e` tag placed in the zap request
   final List<OrderItem> items; // ticket line items (snapshot at checkout)
 
+  /// The coupon applied, if any. [amountSats] is already NET of
+  /// [discountSats] — the two together give the gross, which is what the
+  /// reprinted ticket shows.
+  final String? couponId;
+  final String? couponName;
+  final String? couponNonce;
+  final int discountSats;
+
   const OrderRecord({
     required this.id,
     required this.createdAt,
@@ -36,6 +44,10 @@ class OrderRecord {
     this.zapRelays = const [],
     this.zapOrderId,
     this.items = const [],
+    this.couponId,
+    this.couponName,
+    this.couponNonce,
+    this.discountSats = 0,
   });
 
   DateTime get createdAtDate => DateTime.fromMillisecondsSinceEpoch(createdAt);
@@ -47,20 +59,6 @@ class OrderRecord {
       (invoice?.isNotEmpty ?? false) &&
       zapRelays.isNotEmpty;
   bool get canRecheck => supportsLud21 || supportsNip57;
-
-  OrderRecord copyWith({bool? isPaid}) => OrderRecord(
-        id: id,
-        createdAt: createdAt,
-        amountSats: amountSats,
-        summary: summary,
-        isPaid: isPaid ?? this.isPaid,
-        verifyUrl: verifyUrl,
-        invoice: invoice,
-        zapPubkey: zapPubkey,
-        zapRelays: zapRelays,
-        zapOrderId: zapOrderId,
-        items: items,
-      );
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -74,7 +72,15 @@ class OrderRecord {
         'zapRelays': zapRelays,
         'zapOrderId': zapOrderId,
         'items': items.map((it) => it.toJson()).toList(),
+        if (couponId != null) 'couponId': couponId,
+        if (couponName != null) 'couponName': couponName,
+        if (couponNonce != null) 'couponNonce': couponNonce,
+        if (discountSats > 0) 'discountSats': discountSats,
       };
+
+  /// What the order would have cost without the coupon.
+  int get grossSats => amountSats + discountSats;
+  bool get hasCoupon => discountSats > 0 || couponName != null;
 
   factory OrderRecord.fromJson(Map<String, dynamic> j) => OrderRecord(
         id: j['id'] as String,
@@ -92,6 +98,10 @@ class OrderRecord {
                 ?.map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
+        couponId: j['couponId'] as String?,
+        couponName: j['couponName'] as String?,
+        couponNonce: j['couponNonce'] as String?,
+        discountSats: (j['discountSats'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -127,8 +137,18 @@ class OrdersStore {
         _key, notifier.value.map((o) => jsonEncode(o.toJson())).toList());
   }
 
-  Future<void> add(OrderRecord order) async {
-    notifier.value = [order, ...notifier.value];
+  /// Insert [order], or replace the one already carrying its id.
+  ///
+  /// Replacing matters because an order can be re-quoted before it is paid — a
+  /// coupon applied at the counter regenerates the invoice — and a second
+  /// `add` would leave the first, now-wrong, pending order in the list forever.
+  Future<void> upsert(OrderRecord order) async {
+    final existing = notifier.value.indexWhere((o) => o.id == order.id);
+    notifier.value = existing < 0
+        ? [order, ...notifier.value]
+        : [
+            for (final o in notifier.value) o.id == order.id ? order : o,
+          ];
     await _persist();
   }
 
@@ -136,7 +156,9 @@ class OrdersStore {
     if (!notifier.value.any((o) => o.id == id && !o.isPaid)) return;
     notifier.value = [
       for (final o in notifier.value)
-        o.id == id ? o.copyWith(isPaid: true) : o,
+        o.id == id
+            ? OrderRecord.fromJson({...o.toJson(), 'isPaid': true})
+            : o,
     ];
     await _persist();
   }

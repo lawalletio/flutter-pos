@@ -518,6 +518,7 @@ CatalogProjection buildCatalog(
         priceValue: p.price!.amount,
         priceCurrency: CurrencyX.tryFromCode(p.price!.currency)!,
         imageUrls: p.imageUrls,
+        d: p.d,
       ));
     }
   }

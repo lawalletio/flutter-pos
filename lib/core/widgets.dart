@@ -18,12 +18,16 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// sync is running; tapping it opens the progress and the log.
   final bool showSync;
 
+  /// Screen-specific buttons, before the sync indicator and the gear.
+  final List<Widget> actions;
+
   const PosAppBar({
     super.key,
     this.title,
     this.showBack = true,
     this.showSettings = true,
     this.showSync = true,
+    this.actions = const [],
   });
 
   @override
@@ -61,6 +65,7 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
               style:
                   const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
       actions: [
+        ...actions,
         if (showSync) const _SyncAction(),
         if (showSettings)
           Padding(
