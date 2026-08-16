@@ -3,7 +3,7 @@ icon: ./assets/zapstore/icon.png
 description: Native Flutter point-of-sale for the LaWallet stack. Charge in sats, ARS or USD, generate real LNURL-pay invoices, accept NFC / Boltcard tap-to-pay, print receipts on ZCS thermal printers, and keep customer tabs plus a session order history. Built for ZCS terminals (armeabi-v7a) and modern arm64 devices.
 summary: Lightning + Nostr point-of-sale for Android
 tags:
-    - lighning,pos,lud16,lawallet
+    - lightning,pos,lud16,lawallet
 license: MIT
 website: https://lawallet.io
 supported_nips:
