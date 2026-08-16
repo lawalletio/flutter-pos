@@ -3,9 +3,9 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
-import '../../domain/config/currencies.dart';
 import '../../domain/coupon/coupon.dart';
 import '../../domain/order/current_order.dart';
+import '../../domain/order/order_tags.dart';
 import '../nostr/coupon_events.dart';
 import '../nostr/event.dart';
 import '../nostr/identity.dart';
@@ -235,31 +235,16 @@ Future<NostrEvent> buildCouponOrder({
   required String merchantPubkey,
   required int amountMsat,
 }) async {
-  final gross = <Currency, num>{};
-  for (final l in lines) {
-    gross.update(l.priceCurrency, (v) => v + l.unitPrice * l.qty,
-        ifAbsent: () => l.unitPrice * l.qty);
-  }
-
   final tags = <List<String>>[
     ['p', merchantPubkey],
     ['amount', '$amountMsat'],
-    [
-      'coupon',
-      coupon.couponId,
-      coupon.benefit.type.name,
-      coupon.name,
-    ],
-    for (final e in gross.entries) ['total', '${e.value}', e.key.code],
-    for (final d in discounts) ['discount', '${d.amount}', d.currency.code],
-    if (lines.isNotEmpty)
-      ['items_count', '${lines.fold<int>(0, (n, l) => n + l.qty)}'],
-    // Lines without a `d` are dropped, not faked: a paydesk charge has no
-    // product behind it and an invented id would corrupt the merchant's
-    // per-product reporting.
-    for (final l in lines)
-      if (l.d != null && l.d!.isNotEmpty)
-        ['item', l.d!, '${l.qty}', '${l.unitPrice}', l.priceCurrency.code],
+    ...orderTags(
+      lines: lines,
+      discounts: discounts,
+      couponId: coupon.couponId,
+      couponType: coupon.benefit.type.name,
+      couponName: coupon.name,
+    ),
   ];
 
   var unsigned = NostrEvent(
@@ -269,16 +254,14 @@ Future<NostrEvent> buildCouponOrder({
     content: '',
     tags: tags,
   );
-  // A long basket would be rejected wholesale. Shedding the per-line detail
-  // keeps the coupon, the totals and the discount — the parts the merchant is
-  // owed — rather than losing the entire record to its own length.
+  // A long basket would be rejected wholesale.
   if (jsonEncode(unsigned.toJson()).length > maxOrderChars) {
     unsigned = NostrEvent(
       pubkey: unsigned.pubkey,
       createdAt: unsigned.createdAt,
       kind: unsigned.kind,
       content: '',
-      tags: tags.where((t) => t[0] != 'item').toList(),
+      tags: withoutLineDetail(tags),
     );
   }
   return signEvent(unsigned, await nostrIdentity.privateKey());

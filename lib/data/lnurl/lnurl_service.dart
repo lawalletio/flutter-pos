@@ -3,7 +3,11 @@ import 'dart:math';
 
 import 'package:convert/convert.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
+import '../../domain/coupon/coupon.dart';
+import '../../domain/order/current_order.dart';
+import '../../domain/order/order_tags.dart';
 import '../nostr/event.dart';
 import '../nostr/identity.dart';
 import '../nostr/signer.dart';
@@ -117,11 +121,23 @@ class LnurlService {
 
   /// Request a real bolt11 invoice for [sats] from the address's callback.
   ///
-  /// When the provider supports NIP-57 (allowsNostr + nostrPubkey) and [relays]
-  /// are given, a signed kind-9734 zap request is attached to the callback so
-  /// the payment can be confirmed by watching for the kind-9735 zap receipt.
+  /// When the provider supports NIP-57 (allowsNostr + nostrPubkey), [relays]
+  /// are given AND [recipientPubkey] is known, a signed kind-9734 zap request is
+  /// attached to the callback so the payment can be confirmed by watching for
+  /// the kind-9735 zap receipt.
+  ///
+  /// [recipientPubkey] is the MERCHANT's own hex pubkey, from NIP-05 — the
+  /// party being paid. Without it no zap request is sent at all: NIP-57 wants
+  /// exactly one `p`, and naming the wrong key is worse than not zapping, since
+  /// settlement is still detected by the LUD-21 poll either way.
   Future<LnurlInvoice> requestInvoice(String address, int sats,
-      {List<String> relays = const []}) async {
+      {List<String> relays = const [],
+      String? recipientPubkey,
+      List<OrderItem> lines = const [],
+      List<DiscountEntry> discounts = const [],
+      String? couponId,
+      String? couponType,
+      String? couponName}) async {
     final params = await resolve(address);
     final msats = sats * 1000;
     if (msats < params.minSendable) {
@@ -131,22 +147,29 @@ class LnurlService {
       throw LnurlException('Monto máximo: ${params.maxSendable ~/ 1000} sats');
     }
 
-    // NIP-57: attach a signed zap request when the provider advertises support.
+    // NIP-57: attach a signed zap request when the provider advertises support
+    // and we know who is being paid.
     final zapPubkey = params.nostrPubkey;
     final useZap = params.allowsNostr &&
         (zapPubkey?.isNotEmpty ?? false) &&
+        (recipientPubkey?.isNotEmpty ?? false) &&
         relays.isNotEmpty;
     var query = 'amount=$msats';
     String? orderId;
     if (useZap) {
       orderId = _randomHex(32);
       final lnurl = encodeLnurl(lud16ToUrl(address));
-      final zapReq = await _buildZapRequest(
-        recipientPubkey: zapPubkey!,
+      final zapReq = await buildZapRequest(
+        recipientPubkey: recipientPubkey!,
         amountMsats: msats,
         relays: relays,
         lnurl: lnurl,
         orderId: orderId,
+        lines: lines,
+        discounts: discounts,
+        couponId: couponId,
+        couponType: couponType,
+        couponName: couponName,
       );
       query += '&nostr=${Uri.encodeComponent(jsonEncode(zapReq.toJson()))}';
       if (lnurl != null) query += '&lnurl=$lnurl';
@@ -175,29 +198,68 @@ class LnurlService {
   }
 
   /// Build + sign a NIP-57 kind-9734 zap request with the app's Nostr identity.
-  Future<NostrEvent> _buildZapRequest({
+  ///
+  /// [recipientPubkey] is the party being paid — the merchant, hex, resolved
+  /// from their NIP-05. It is NOT the provider's `nostrPubkey`: that key signs
+  /// the RECEIPT, and on a custodial wallet it is one key shared by every
+  /// account on the service. Both `agustin@lacrypta.ar` and
+  /// `barra@lacrypta.ar` advertise the same one, so putting it here made every
+  /// sale from every merchant look like a zap to La Crypta itself — invisible
+  /// in the merchant's own `#p` feed, and thrown out by the merchant panel,
+  /// which drops any receipt whose `p` is not the merchant.
+  /// What was sold rides along as tags, so the merchant's order list shows the
+  /// basket and not just an amount. The receipt copies the request verbatim into
+  /// its `description`, which is where the panel reads them back from.
+  @visibleForTesting
+  Future<NostrEvent> buildZapRequest({
     required String recipientPubkey,
     required int amountMsats,
     required List<String> relays,
     required String orderId,
     String? lnurl,
+    List<OrderItem> lines = const [],
+    List<DiscountEntry> discounts = const [],
+    String? couponId,
+    String? couponType,
+    String? couponName,
   }) async {
+    final base = <List<String>>[
+      ['relays', ...relays],
+      ['amount', amountMsats.toString()],
+      if (lnurl != null) ['lnurl', lnurl],
+      ['p', recipientPubkey],
+      ['e', orderId],
+    ];
+    var detail = orderTags(
+      lines: lines,
+      discounts: discounts,
+      couponId: couponId,
+      couponType: couponType,
+      couponName: couponName,
+    );
+
+    // This event is URL-ENCODED into the callback's query string, so a long
+    // basket does not merely bloat the request — it can push the GET past what
+    // the provider accepts and cost us the invoice entirely. The line detail is
+    // the first thing to go; the totals and the coupon stay.
+    if (jsonEncode([...base, ...detail]).length > _maxZapTagChars) {
+      detail = withoutLineDetail(detail);
+    }
+
     final priv = await nostrIdentity.privateKey();
     final unsigned = NostrEvent(
       pubkey: await nostrIdentity.publicKey(), // cached — no repeat derivation
       createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       kind: 9734,
       content: '',
-      tags: [
-        ['relays', ...relays],
-        ['amount', amountMsats.toString()],
-        if (lnurl != null) ['lnurl', lnurl],
-        ['p', recipientPubkey],
-        ['e', orderId],
-      ],
+      tags: [...base, ...detail],
     );
     return signEvent(unsigned, priv);
   }
+
+  /// Tag budget for a zap request, in JSON characters before URL-encoding.
+  /// Encoding roughly doubles it, leaving the whole GET comfortably under 2 KB.
+  static const _maxZapTagChars = 900;
 
   String _randomHex(int bytes) {
     final rng = Random.secure();

@@ -12,6 +12,7 @@ import '../../data/lnurl/lnurl_service.dart';
 import '../../data/mock/mock_data.dart';
 import '../../data/nostr/catalog_service.dart';
 import '../../data/nostr/coupon_events.dart';
+import '../../data/nostr/profile_service.dart';
 import '../../data/nostr/relay_pool.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
@@ -297,10 +298,19 @@ class _PaymentScreenState extends State<PaymentScreen> {
       _verifyUrl = null;
     });
     try {
+      // Who the zap request names as recipient. Cached after the first lookup.
+      final identity = await nostrProfile.resolveNip05(merchantAddress.value);
+      if (!mounted) return;
       final inv = await lnurl.requestInvoice(
         merchantAddress.value,
         _chargeSats,
         relays: appSettings.value.relays,
+        recipientPubkey: identity?.pubkey,
+        lines: currentOrderItems.value,
+        discounts: _discountEntries,
+        couponId: _coupon?.couponId,
+        couponType: _coupon?.benefit.type.name,
+        couponName: _coupon?.name,
       );
       if (!mounted) return;
       setState(() {
