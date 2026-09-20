@@ -70,7 +70,6 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
 
   final _startedAt = DateTime.now();
   bool _prizeBeatQueued = false;
-  bool _userTappedPrint = false;
   bool _prizeDismissed = false;
 
   static const _festive = [
@@ -124,7 +123,7 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     _prizeScale = Tween<double>(begin: 0.78, end: 1).animate(CurvedAnimation(
         parent: _prizeBeat,
         curve: const Interval(0.0, 0.85, curve: Curves.elasticOut)));
-    // Pop slightly then shrink to nothing after a successful print.
+    // Pop slightly then shrink to nothing when the cashier taps print.
     _prizeOut = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 360));
     _prizeOutScale = Tween<double>(begin: 1, end: 0).animate(CurvedAnimation(
@@ -142,6 +141,7 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     _burst.play();
     _rainL.play();
     _rainR.play();
+    if (widget.prizePrinted) _prizeDismissed = true;
     _schedulePrizeBeat();
   }
 
@@ -153,38 +153,18 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     if (_hasPrize && !hadPrize) {
       _schedulePrizeBeat();
     }
-    // Hide only after a cashier tap that actually printed. Auto-print keeps
-    // the card (Impreso). A failed print leaves prizePrinted false so the
-    // button stays for retry.
-    if (_userTappedPrint &&
-        widget.prizePrinted &&
-        !oldWidget.prizePrinted) {
+    // Auto-print: don't leave the locked Impreso card on screen.
+    if (widget.prizePrinted && !oldWidget.prizePrinted) {
       _dismissPrizeCard();
     }
   }
 
   void _onPrintPrizeTap() {
+    if (_prizeDismissed || _prizeOut.isAnimating) return;
     final printPrize = widget.onPrintPrize;
-    if (printPrize == null ||
-        widget.prizePrinted ||
-        widget.printingPrize ||
-        _prizeOut.isAnimating ||
-        _prizeDismissed) {
-      return;
-    }
-    _userTappedPrint = true;
-    _runPrintAndMaybeDismiss(printPrize);
-  }
-
-  Future<void> _runPrintAndMaybeDismiss(
-      Future<void> Function() printPrize) async {
-    await printPrize();
-    if (!mounted) return;
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    if (widget.prizePrinted) {
-      _dismissPrizeCard();
-    }
+    if (printPrize == null) return;
+    _dismissPrizeCard();
+    printPrize();
   }
 
   void _dismissPrizeCard() {
