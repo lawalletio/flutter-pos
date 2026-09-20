@@ -377,6 +377,8 @@ class MainActivity : FlutterActivity() {
         p.setPrintAppendString(
             "Presentá este cupón en caja",
             fmt(22, Layout.Alignment.ALIGN_CENTER))
+        // Extra blank lines so the slip feeds past the tear-off.
+        p.setPrintAppendString("\n\n", fmt(22, Layout.Alignment.ALIGN_CENTER))
         p.setPrintLine(40)
         return p.setPrintStart()
     }
