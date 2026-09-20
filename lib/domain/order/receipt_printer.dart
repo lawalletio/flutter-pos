@@ -63,3 +63,7 @@ Future<PrintResult> printOrderReceipt({
     'message': thankYouMessage,
   });
 }
+
+/// Prints a prize voucher slip (separate job from the payment receipt).
+Future<PrintResult> printPrizeCoupon({required String text}) =>
+    PrinterChannel.printCoupon({'text': text});

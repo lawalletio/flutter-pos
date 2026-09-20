@@ -44,6 +44,9 @@ class PrinterChannel {
   static Future<PrintResult> printOrder(Map<String, dynamic> order) =>
       _invoke('print', order);
 
+  static Future<PrintResult> printCoupon(Map<String, dynamic> coupon) =>
+      _invoke('printCoupon', coupon);
+
   static Future<PrintResult> _invoke(String method, [dynamic args]) async {
     try {
       final code = await _ch.invokeMethod<int>(method, args) ?? -1;

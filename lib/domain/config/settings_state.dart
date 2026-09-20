@@ -21,18 +21,58 @@ const List<String> kSuggestedRelays = [
   'wss://relay.masize.com',
 ];
 
+enum PrizePrintMode { auto, button }
+
+@immutable
+class PrizeCoupon {
+  final String id;
+  final String text;
+  final int chancePercent;
+
+  const PrizeCoupon({
+    required this.id,
+    required this.text,
+    required this.chancePercent,
+  });
+
+  PrizeCoupon copyWith({String? id, String? text, int? chancePercent}) =>
+      PrizeCoupon(
+        id: id ?? this.id,
+        text: text ?? this.text,
+        chancePercent: chancePercent ?? this.chancePercent,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'text': text,
+        'chancePercent': chancePercent,
+      };
+
+  factory PrizeCoupon.fromJson(Map<String, dynamic> json) => PrizeCoupon(
+        id: json['id'] as String? ?? '',
+        text: json['text'] as String? ?? '',
+        chancePercent: (json['chancePercent'] as num?)?.toInt() ?? 0,
+      );
+}
+
 @immutable
 class SettingsState {
   final bool tipEnabled;
   final bool tabEnabled;
   final List<String> relays;
   final String languageCode; // 'es' | 'en'
+  final bool prizePrintEnabled;
+  final PrizePrintMode prizePrintMode;
+  final List<PrizeCoupon> prizeCoupons;
 
   const SettingsState({
     this.tipEnabled = false, // webapp default: off
     this.tabEnabled = false, // webapp default: off
     this.relays = kDefaultRelays,
     this.languageCode = 'es',
+    this.prizePrintEnabled = false,
+    this.prizePrintMode = PrizePrintMode.auto,
+    this.prizeCoupons = const [],
   });
 
   SettingsState copyWith({
@@ -40,12 +80,18 @@ class SettingsState {
     bool? tabEnabled,
     List<String>? relays,
     String? languageCode,
+    bool? prizePrintEnabled,
+    PrizePrintMode? prizePrintMode,
+    List<PrizeCoupon>? prizeCoupons,
   }) =>
       SettingsState(
         tipEnabled: tipEnabled ?? this.tipEnabled,
         tabEnabled: tabEnabled ?? this.tabEnabled,
         relays: relays ?? this.relays,
         languageCode: languageCode ?? this.languageCode,
+        prizePrintEnabled: prizePrintEnabled ?? this.prizePrintEnabled,
+        prizePrintMode: prizePrintMode ?? this.prizePrintMode,
+        prizeCoupons: prizeCoupons ?? this.prizeCoupons,
       );
 }
 

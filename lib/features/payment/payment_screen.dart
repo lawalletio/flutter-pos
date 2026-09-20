@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,6 +25,7 @@ import '../../domain/order/current_order.dart';
 import '../../domain/order/order_reset.dart';
 import '../../domain/order/orders_store.dart';
 import '../../domain/order/receipt_printer.dart';
+import '../../domain/prize/prize_lottery.dart';
 import '../../platform/nfc_channel.dart';
 import '../orders/recheck_modal.dart';
 import 'coupon_detail_sheet.dart';
@@ -70,6 +72,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _verifyUrl; // LUD-21
   String? _invoiceError;
   bool _printed = false;
+  PrizeCoupon? _prizeWinner;
+  bool _prizePrinted = false;
+  bool _printingPrize = false;
+  final _prizeRng = Random();
   bool _collecting = false; // pulling payment from a tapped card
   bool _nfcAvailable = false;
   StreamSubscription<String>? _nfcSub;
@@ -174,6 +180,40 @@ class _PaymentScreenState extends State<PaymentScreen> {
       couponName: _coupon?.name ?? '',
       discountSats: _discountSats,
     );
+    await _rollAndMaybePrintPrize();
+  }
+
+  Future<void> _rollAndMaybePrintPrize() async {
+    final s = appSettings.value;
+    final winner = rollPrize(
+      enabled: s.prizePrintEnabled,
+      coupons: s.prizeCoupons,
+      roll: () => _prizeRng.nextInt(101),
+    );
+    if (winner == null) return;
+    if (!mounted) return;
+    setState(() => _prizeWinner = winner);
+    if (s.prizePrintMode == PrizePrintMode.auto) {
+      await _printPrizeCoupon();
+    }
+  }
+
+  Future<void> _printPrizeCoupon() async {
+    final prize = _prizeWinner;
+    if (prize == null || _prizePrinted || _printingPrize) return;
+    setState(() => _printingPrize = true);
+    final res = await printPrizeCoupon(text: prize.text);
+    if (!mounted) return;
+    setState(() {
+      _printingPrize = false;
+      if (res.ok) _prizePrinted = true;
+    });
+    if (!res.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(res.message),
+        backgroundColor: AppColors.error,
+      ));
+    }
   }
 
   /// The line items snapshotted on this screen's recorded order, if any.
@@ -599,6 +639,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
             arsStr: _arsStr,
             couponName: _coupon?.name,
             discountStr: _discountSats > 0 ? _satsOf(_discountSats) : null,
+            prizeText: _prizeWinner?.text,
+            prizePrinted: _prizePrinted,
+            printingPrize: _printingPrize,
+            onPrintPrize: _prizeWinner == null ? null : _printPrizeCoupon,
             onBack: _finishAndBack,
           ),
           title: null,

@@ -66,6 +66,23 @@ layout above. Method `print(Map order)` returns the ZCS status int. Bundle the v
 `android/app/build.gradle` (`implementation files('libs/SmartPos_1.9.4_R250117.jar')`, zxing).
 Port `getCurrentDate()` and the paper-out retry.
 
+**Prize coupon slip** — method `printCoupon(Map coupon)` (serialized on the same single-thread
+executor as `print`):
+
+1. Header bitmap (`receipt_logo`), blank line.
+2. Centered `¡FELICITACIONES!` (large).
+3. Centered prize `text` from Dart (largest line).
+4. Centered date `yyyy-MM-dd HH:mm`.
+5. Footer `Presentá este cupón en caja`, feed.
+
+Input schema:
+```json
+{ "text": "Un café gratis" }
+```
+
+Returns the ZCS status int (same codes as `print`). Dart: `PrinterChannel.printCoupon` /
+`printPrizeCoupon` in `receipt_printer.dart`.
+
 ## 2. NFC (Android NfcAdapter)
 
 Wrapper used standard `NfcAdapter` foreground dispatch; on a discovered tag it decoded the **first

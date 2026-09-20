@@ -9,6 +9,7 @@ import 'data/nostr/identity.dart';
 import 'data/pricing/block_service.dart';
 import 'data/pricing/pricing_service.dart';
 import 'domain/config/address_history.dart';
+import 'domain/config/settings_persistence.dart';
 import 'domain/config/session.dart';
 import 'domain/order/orders_store.dart';
 
@@ -26,6 +27,7 @@ Future<void> main() async {
   // Load the saved Lightning-address history + order history (empty on a fresh
   // install; both persist across restarts).
   addressHistory.load();
+  settingsPersistence.load();
   ordersStore.load();
   // Warm the invoice path so the FIRST charge is just the provider callback:
   // load + derive the Nostr identity (BIP-340 pubkey, done once) and pre-resolve

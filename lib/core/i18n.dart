@@ -218,6 +218,23 @@ const Map<String, String> _en = {
   'Imprimiendo prueba…': 'Printing test…',
   'relay': 'relay',
   'relays': 'relays',
+  'Cupones de premio': 'Prize coupons',
+  'CUPONES DE PREMIO': 'PRIZE COUPONS',
+  'Imprimir cupones de premio después del cobro':
+      'Print prize coupons after payment',
+  'Modo de impresión': 'Print mode',
+  'Automático': 'Automatic',
+  'Botón': 'Button',
+  'Premio': 'Prize',
+  'premio': 'prize',
+  'premios': 'prizes',
+  'Probabilidad %': 'Chance %',
+  'Editar premio': 'Edit prize',
+  'Texto inválido': 'Invalid text',
+  '¡Ganaste un premio!': 'You won a prize!',
+  'Imprimir cupón': 'Print coupon',
+  'Impreso': 'Printed',
+  'Imprimiendo cupón…': 'Printing coupon…',
 
   // Coupons
   'Escanear cupón': 'Scan coupon',

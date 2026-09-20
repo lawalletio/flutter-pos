@@ -20,6 +20,12 @@ class PaymentSuccessView extends StatefulWidget {
   final String? couponName;
   final String? discountStr;
 
+  /// Prize voucher won after payment (separate from discount coupons).
+  final String? prizeText;
+  final bool prizePrinted;
+  final bool printingPrize;
+  final Future<void> Function()? onPrintPrize;
+
   final VoidCallback onBack;
   const PaymentSuccessView({
     super.key,
@@ -28,6 +34,10 @@ class PaymentSuccessView extends StatefulWidget {
     required this.onBack,
     this.couponName,
     this.discountStr,
+    this.prizeText,
+    this.prizePrinted = false,
+    this.printingPrize = false,
+    this.onPrintPrize,
   });
 
   @override
@@ -42,9 +52,12 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
   late final ConfettiController _rainL; // top-left rain
   late final ConfettiController _rainR; // top-right rain
 
+  late final AnimationController _prizeBeat;
   late final Animation<double> _circleScale;
   late final Animation<double> _checkDraw;
   late final Animation<double> _contentT;
+  late final Animation<double> _prizeT;
+  late final ConfettiController _prizeBurst;
 
   static const _festive = [
     AppColors.primary,
@@ -76,12 +89,27 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
         parent: _intro,
         curve: const Interval(0.6, 1.0, curve: Curves.easeOut));
 
+    final hasPrize = widget.prizeText != null && widget.prizeText!.isNotEmpty;
+    _prizeBeat = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 900));
+    _prizeT = CurvedAnimation(parent: _prizeBeat, curve: Curves.easeOut);
+    _prizeBurst =
+        ConfettiController(duration: const Duration(milliseconds: 700));
+
     // Kick off the show.
     HapticFeedback.heavyImpact();
     _intro.forward();
     _burst.play();
     _rainL.play();
     _rainR.play();
+    if (hasPrize) {
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (!mounted) return;
+        HapticFeedback.mediumImpact();
+        _prizeBurst.play();
+        _prizeBeat.forward();
+      });
+    }
   }
 
   @override
@@ -91,6 +119,8 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     _burst.dispose();
     _rainL.dispose();
     _rainR.dispose();
+    _prizeBeat.dispose();
+    _prizeBurst.dispose();
     super.dispose();
   }
 
@@ -233,6 +263,90 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
                                     fontWeight: FontWeight.w700,
                                     fontSize: 14)),
                           ],
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (widget.prizeText != null &&
+                      widget.prizeText!.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    AnimatedBuilder(
+                      animation: _prizeT,
+                      builder: (_, child) => Opacity(
+                        opacity: _prizeT.value,
+                        child: Transform.translate(
+                          offset: Offset(0, 16 * (1 - _prizeT.value)),
+                          child: child,
+                        ),
+                      ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        clipBehavior: Clip.none,
+                        children: [
+                          ConfettiWidget(
+                            confettiController: _prizeBurst,
+                            blastDirectionality: BlastDirectionality.explosive,
+                            numberOfParticles: 18,
+                            maxBlastForce: 24,
+                            minBlastForce: 10,
+                            gravity: 0.25,
+                            colors: _festive,
+                          ),
+                          Container(
+                            width: 300,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 18, vertical: 16),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                  color: AppColors.primary.withValues(
+                                      alpha: 0.45)),
+                            ),
+                            child: Column(
+                              children: [
+                                Text(context.tr('¡Ganaste un premio!'),
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800)),
+                                const SizedBox(height: 10),
+                                Text(widget.prizeText!,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.primary)),
+                                const SizedBox(height: 14),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: FilledButton.icon(
+                                    onPressed: widget.prizePrinted ||
+                                            widget.printingPrize ||
+                                            widget.onPrintPrize == null
+                                        ? null
+                                        : () => widget.onPrintPrize!(),
+                                    icon: widget.printingPrize
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2.2,
+                                                color: AppColors.background),
+                                          )
+                                        : Icon(
+                                            widget.prizePrinted
+                                                ? Icons.check
+                                                : Icons.receipt_long,
+                                            size: 20),
+                                    label: Text(context.tr(widget.prizePrinted
+                                        ? 'Impreso'
+                                        : 'Imprimir cupón')),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
