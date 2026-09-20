@@ -57,16 +57,21 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
   late final ConfettiController _rainR; // top-right rain
 
   late final AnimationController _prizeBeat;
+  late final AnimationController _prizeOut;
   late final Animation<double> _circleScale;
   late final Animation<double> _checkDraw;
   late final Animation<double> _contentT;
   late final Animation<double> _prizeFade;
   late final Animation<double> _prizeScale;
+  late final Animation<double> _prizeOutScale;
+  late final Animation<double> _prizeOutFade;
   late final ConfettiController _prizeBurst;
   late final ConfettiController _prizeRain;
 
   final _startedAt = DateTime.now();
   bool _prizeBeatQueued = false;
+  bool _userTappedPrint = false;
+  bool _prizeDismissed = false;
 
   static const _festive = [
     AppColors.primary,
@@ -119,6 +124,14 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     _prizeScale = Tween<double>(begin: 0.78, end: 1).animate(CurvedAnimation(
         parent: _prizeBeat,
         curve: const Interval(0.0, 0.85, curve: Curves.elasticOut)));
+    // Pop slightly then shrink to nothing after a successful print.
+    _prizeOut = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 360));
+    _prizeOutScale = Tween<double>(begin: 1, end: 0).animate(CurvedAnimation(
+        parent: _prizeOut, curve: Curves.easeInBack));
+    _prizeOutFade = Tween<double>(begin: 1, end: 0).animate(CurvedAnimation(
+        parent: _prizeOut,
+        curve: const Interval(0.0, 0.75, curve: Curves.easeIn)));
     _prizeBurst =
         ConfettiController(duration: const Duration(milliseconds: 1400));
     _prizeRain = ConfettiController(duration: const Duration(milliseconds: 2400));
@@ -140,6 +153,49 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     if (_hasPrize && !hadPrize) {
       _schedulePrizeBeat();
     }
+    // Hide only after a cashier tap that actually printed. Auto-print keeps
+    // the card (Impreso). A failed print leaves prizePrinted false so the
+    // button stays for retry.
+    if (_userTappedPrint &&
+        widget.prizePrinted &&
+        !oldWidget.prizePrinted) {
+      _dismissPrizeCard();
+    }
+  }
+
+  void _onPrintPrizeTap() {
+    final printPrize = widget.onPrintPrize;
+    if (printPrize == null ||
+        widget.prizePrinted ||
+        widget.printingPrize ||
+        _prizeOut.isAnimating ||
+        _prizeDismissed) {
+      return;
+    }
+    _userTappedPrint = true;
+    _runPrintAndMaybeDismiss(printPrize);
+  }
+
+  Future<void> _runPrintAndMaybeDismiss(
+      Future<void> Function() printPrize) async {
+    await printPrize();
+    if (!mounted) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    if (widget.prizePrinted) {
+      _dismissPrizeCard();
+    }
+  }
+
+  void _dismissPrizeCard() {
+    if (_prizeDismissed || _prizeOut.isAnimating || _prizeOut.isCompleted) {
+      return;
+    }
+    HapticFeedback.mediumImpact();
+    _prizeOut.forward().whenComplete(() {
+      if (!mounted) return;
+      setState(() => _prizeDismissed = true);
+    });
   }
 
   /// Lottery runs after the ticket prints, so the prize usually lands on a
@@ -174,6 +230,7 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     _rainL.dispose();
     _rainR.dispose();
     _prizeBeat.dispose();
+    _prizeOut.dispose();
     _prizeBurst.dispose();
     _prizeRain.dispose();
     super.dispose();
@@ -353,7 +410,7 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
                               ),
                             ),
                           ],
-                          if (_hasPrize) ...[
+                          if (_hasPrize && !_prizeDismissed) ...[
                             const SizedBox(height: 18),
                             AnimatedBuilder(
                               animation: _prizeBeat,
@@ -364,15 +421,25 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
                                   child: child,
                                 ),
                               ),
-                              child: _PrizeGrantCard(
-                                text: widget.prizeText!,
-                                printed: widget.prizePrinted,
-                                printing: widget.printingPrize,
-                                onPrint: widget.prizePrinted ||
-                                        widget.printingPrize ||
-                                        widget.onPrintPrize == null
-                                    ? null
-                                    : () => widget.onPrintPrize!(),
+                              child: AnimatedBuilder(
+                                animation: _prizeOut,
+                                builder: (_, child) => Opacity(
+                                  opacity: _prizeOutFade.value,
+                                  child: Transform.scale(
+                                    scale: max(0.0, _prizeOutScale.value),
+                                    child: child,
+                                  ),
+                                ),
+                                child: _PrizeGrantCard(
+                                  text: widget.prizeText!,
+                                  printed: widget.prizePrinted,
+                                  printing: widget.printingPrize,
+                                  onPrint: widget.prizePrinted ||
+                                          widget.printingPrize ||
+                                          widget.onPrintPrize == null
+                                      ? null
+                                      : _onPrintPrizeTap,
+                                ),
                               ),
                             ),
                           ],
@@ -419,6 +486,7 @@ class _PrizeGrantCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      key: const Key('prize-grant-card'),
       width: double.infinity,
       constraints: const BoxConstraints(maxWidth: 360),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),

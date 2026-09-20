@@ -92,6 +92,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 1100));
 
+    expect(find.byKey(const Key('prize-grant-card')), findsOneWidget);
     expect(find.byKey(const Key('prize-print-button')), findsOneWidget);
     expect(find.text('Impreso'), findsOneWidget);
     final button = tester.widget<FilledButton>(
@@ -116,5 +117,61 @@ void main() {
     await tester.tap(find.byKey(const Key('prize-print-button')));
     await tester.pump();
     expect(taps, 1);
+    expect(find.byKey(const Key('prize-grant-card')), findsOneWidget);
+    expect(find.text('Imprimir cupón'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byKey(const Key('prize-grant-card')), findsOneWidget);
+    expect(find.byKey(const Key('prize-print-button')), findsOneWidget);
+  });
+
+  testWidgets('successful print zooms the grant card out and removes it',
+      (tester) async {
+    tester.view.physicalSize = const Size(720, 1280);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    var printed = false;
+    late StateSetter setHost;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildAppTheme(),
+      home: Scaffold(
+        backgroundColor: AppColors.background,
+        body: StatefulBuilder(
+          builder: (context, setState) {
+            setHost = setState;
+            return PaymentSuccessView(
+              satsStr: '1.000',
+              arsStr: '15.000',
+              prizeText: 'Café gratis',
+              prizePrinted: printed,
+              onPrintPrize: () async {
+                setHost(() => printed = true);
+              },
+              onBack: () {},
+            );
+          },
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1100));
+
+    expect(find.byKey(const Key('prize-grant-card')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('prize-print-button')));
+    await tester.pump(); // process tap + parent prizePrinted
+    await tester.pump(); // start zoom-out ticker
+    expect(find.byKey(const Key('prize-grant-card')), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(); // remove after animation
+    expect(find.byKey(const Key('prize-grant-card')), findsNothing);
+    expect(find.byKey(const Key('prize-print-button')), findsNothing);
+    expect(find.text('¡Ganaste un premio!'), findsNothing);
   });
 }
