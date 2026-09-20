@@ -75,6 +75,11 @@ class MainActivity : FlutterActivity() {
                         val args = call.arguments as? Map<String, Any?> ?: emptyMap()
                         runAsync(result) { printOrder(args) }
                     }
+                    "printCoupon" -> {
+                        @Suppress("UNCHECKED_CAST")
+                        val args = call.arguments as? Map<String, Any?> ?: emptyMap()
+                        runAsync(result) { printCoupon(args) }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -346,6 +351,34 @@ class MainActivity : FlutterActivity() {
             p.setPrintLine(10)
             p.setPrintAppendQRCode(qr, 500, 500, Layout.Alignment.ALIGN_CENTER)
         }
+        p.setPrintLine(40)
+        return p.setPrintStart()
+    }
+
+    private fun printCoupon(coupon: Map<String, Any?>): Int {
+        if (!ensureInit()) throw RuntimeException("Impresora no disponible")
+        val p = printer!!
+        val status = p.getPrinterStatus()
+        if (status == SdkResult.SDK_PRN_STATUS_PAPEROUT) return status
+
+        val prizeText = coupon["text"]?.toString()?.trim().orEmpty()
+        if (prizeText.isEmpty()) return STATUS_ERROR
+
+        printLogo(p)
+        p.setPrintLine(8)
+        p.setPrintAppendString(
+            "¡FELICITACIONES!",
+            fmt(32, Layout.Alignment.ALIGN_CENTER))
+        p.setPrintLine(12)
+        p.setPrintAppendString(prizeText, fmt(36, Layout.Alignment.ALIGN_CENTER))
+        p.setPrintLine(12)
+        p.setPrintAppendString(currentDate(), fmt(22, Layout.Alignment.ALIGN_CENTER))
+        p.setPrintLine(8)
+        p.setPrintAppendString(
+            "Presentá este cupón en caja",
+            fmt(22, Layout.Alignment.ALIGN_CENTER))
+        // Extra blank lines so the slip feeds past the tear-off.
+        p.setPrintAppendString("\n\n", fmt(22, Layout.Alignment.ALIGN_CENTER))
         p.setPrintLine(40)
         return p.setPrintStart()
     }

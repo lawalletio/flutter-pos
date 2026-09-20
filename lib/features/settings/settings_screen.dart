@@ -6,6 +6,7 @@ import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/session.dart';
+import '../../domain/config/settings_persistence.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/order/order_reset.dart';
 import '../../platform/printer_channel.dart';
@@ -162,6 +163,15 @@ class SettingsScreen extends StatelessWidget {
                   ],
                 ),
               )),
+              const SizedBox(height: 20),
+              _sectionHeader(context, 'Cupones de premio',
+                  trailing:
+                      '${s.prizeCoupons.length} ${context.tr(s.prizeCoupons.length == 1 ? 'premio' : 'premios')}'),
+              _PrizeCouponsCard(
+                enabled: s.prizePrintEnabled,
+                mode: s.prizePrintMode,
+                coupons: s.prizeCoupons,
+              ),
               const SizedBox(height: 8),
             ],
           ),
@@ -448,5 +458,268 @@ class _RelaysCardState extends State<_RelaysCard> {
         ),
       ),
     );
+  }
+}
+
+/// Prize coupons: enable toggle, auto/button mode, editable text + chance list.
+class _PrizeCouponsCard extends StatefulWidget {
+  final bool enabled;
+  final PrizePrintMode mode;
+  final List<PrizeCoupon> coupons;
+  const _PrizeCouponsCard({
+    required this.enabled,
+    required this.mode,
+    required this.coupons,
+  });
+  @override
+  State<_PrizeCouponsCard> createState() => _PrizeCouponsCardState();
+}
+
+class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
+  final _textCtrl = TextEditingController();
+  final _chanceCtrl = TextEditingController(text: '10');
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    _chanceCtrl.dispose();
+    super.dispose();
+  }
+
+  void _snack(String msgKey) => ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.tr(msgKey)), backgroundColor: AppColors.error));
+
+  int _parseChance(String raw) {
+    final v = int.tryParse(raw.trim());
+    if (v == null) return 0;
+    return v.clamp(0, 100);
+  }
+
+  void _submitAdd() {
+    final text = _textCtrl.text;
+    if (text.trim().isEmpty) {
+      _snack('Texto inválido');
+      return;
+    }
+    if (addPrizeCoupon(text, _parseChance(_chanceCtrl.text))) {
+      _textCtrl.clear();
+      _chanceCtrl.text = '10';
+      FocusScope.of(context).unfocus();
+    } else {
+      _snack('Texto inválido');
+    }
+  }
+
+  Future<void> _editCoupon(PrizeCoupon coupon) async {
+    final textCtrl = TextEditingController(text: coupon.text);
+    final chanceCtrl =
+        TextEditingController(text: coupon.chancePercent.toString());
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text(context.tr('Editar premio')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: textCtrl,
+              autofocus: true,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: AppColors.background,
+                labelText: context.tr('Premio'),
+                border: const OutlineInputBorder(
+                    borderSide: BorderSide.none,
+                    borderRadius: BorderRadius.all(Radius.circular(12))),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: chanceCtrl,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: AppColors.background,
+                labelText: context.tr('Probabilidad %'),
+                border: const OutlineInputBorder(
+                    borderSide: BorderSide.none,
+                    borderRadius: BorderRadius.all(Radius.circular(12))),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(context.tr('Cancelar'),
+                style: const TextStyle(color: AppColors.muted)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(context.tr('Guardar')),
+          ),
+        ],
+      ),
+    );
+    if (result == true) {
+      if (!updatePrizeCoupon(
+          coupon.id, textCtrl.text, _parseChance(chanceCtrl.text))) {
+        _snack('Texto inválido');
+      }
+    }
+    textCtrl.dispose();
+    chanceCtrl.dispose();
+  }
+
+  Widget _modeChip(String label, PrizePrintMode mode) {
+    final selected = widget.mode == mode;
+    return Material(
+      color: selected ? AppColors.primary : AppColors.background,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => setPrizePrintMode(mode),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: selected ? AppColors.background : AppColors.onDark)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final coupons = widget.coupons;
+    return _card(Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          activeTrackColor: AppColors.primary,
+          title: Text(context.tr('Cupones de premio')),
+          subtitle: Text(
+              context.tr('Imprimir cupones de premio después del cobro'),
+              style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          value: widget.enabled,
+          onChanged: setPrizePrintEnabled,
+        ),
+        if (widget.enabled) ...[
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Row(
+              children: [
+                Expanded(
+                    child: Text(context.tr('Modo de impresión'),
+                        style: const TextStyle(fontSize: 15))),
+                _modeChip(context.tr('Automático'), PrizePrintMode.auto),
+                const SizedBox(width: 8),
+                _modeChip(context.tr('Botón'), PrizePrintMode.button),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          for (var i = 0; i < coupons.length; i++) ...[
+            if (i > 0) const Divider(height: 1),
+            InkWell(
+              onTap: () => _editCoupon(coupons[i]),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.emoji_events_outlined,
+                        size: 18, color: AppColors.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(coupons[i].text,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 14)),
+                    ),
+                    Text('${coupons[i].chancePercent}%',
+                        style: const TextStyle(
+                            color: AppColors.muted,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13)),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.edit_outlined,
+                          size: 18, color: AppColors.muted),
+                      onPressed: () => _editCoupon(coupons[i]),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.close_rounded,
+                          size: 18, color: AppColors.error),
+                      onPressed: () => removePrizeCoupon(coupons[i].id),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: TextField(
+                  controller: _textCtrl,
+                  style: const TextStyle(fontSize: 14),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: AppColors.background,
+                    hintText: context.tr('Premio'),
+                    hintStyle:
+                        const TextStyle(color: AppColors.muted, fontSize: 13),
+                    border: const OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.all(Radius.circular(12))),
+                  ),
+                  onSubmitted: (_) => _submitAdd(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 72,
+                child: TextField(
+                  controller: _chanceCtrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(fontSize: 14),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: AppColors.background,
+                    hintText: '%',
+                    hintStyle:
+                        const TextStyle(color: AppColors.muted, fontSize: 13),
+                    border: const OutlineInputBorder(
+                        borderSide: BorderSide.none,
+                        borderRadius: BorderRadius.all(Radius.circular(12))),
+                  ),
+                  onSubmitted: (_) => _submitAdd(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                ),
+                onPressed: _submitAdd,
+                child: Text(context.tr('Agregar')),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ],
+    ));
   }
 }
