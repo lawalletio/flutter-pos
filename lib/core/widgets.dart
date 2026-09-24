@@ -21,6 +21,9 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// Screen-specific buttons, before the sync indicator and the gear.
   final List<Widget> actions;
 
+  /// Opens the on-device log of every generated invoice.
+  final bool showInvoiceDebug;
+
   const PosAppBar({
     super.key,
     this.title,
@@ -28,6 +31,7 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.showSettings = true,
     this.showSync = true,
     this.actions = const [],
+    this.showInvoiceDebug = true,
   });
 
   @override
@@ -66,6 +70,12 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
                   const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
       actions: [
         ...actions,
+        if (showInvoiceDebug)
+          IconButton(
+            tooltip: context.tr('Invoices generadas'),
+            icon: const Icon(Icons.bug_report_outlined, size: 26),
+            onPressed: () => context.push('/invoice-debug'),
+          ),
         if (showSync) const _SyncAction(),
         if (showSettings)
           Padding(

@@ -188,8 +188,9 @@ class LnurlService {
           data?['reason']?.toString() ??
               'El proveedor no devolvió una invoice');
     }
+    final pr = data['pr'] as String;
     return LnurlInvoice(
-      pr: data['pr'] as String,
+      pr: pr,
       verify: data['verify'] as String?,
       zapPubkey: useZap ? zapPubkey : null,
       zapRelays: useZap ? relays : const [],

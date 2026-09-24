@@ -19,12 +19,12 @@ const Color _kPendingAmber = Color(0xFFE0A82E);
 /// The barrier is not dismissible while the check runs; once finished the user
 /// gets a "Cerrar" button. On a confirmed payment the order is marked paid in
 /// [ordersStore].
-Future<void> showRecheckModal(BuildContext context, OrderRecord order) {
-  return showDialog<void>(
+Future<bool> showRecheckModal(BuildContext context, OrderRecord order) {
+  return showDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (_) => _RecheckDialog(order: order),
-  );
+  ).then((paid) => paid ?? false);
 }
 
 class _RecheckDialog extends StatefulWidget {
@@ -213,7 +213,8 @@ class _RecheckDialogState extends State<_RecheckDialog>
                             foregroundColor: AppColors.onDark,
                             minimumSize: const Size.fromHeight(52),
                           ),
-                          onPressed: () => Navigator.of(context).pop(),
+                          onPressed: () => Navigator.of(context)
+                              .pop(_phase == _Phase.success),
                           child: Text(context.tr('Cerrar')),
                         ),
                       )

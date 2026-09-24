@@ -64,6 +64,7 @@ class SettingsState {
   final bool prizePrintEnabled;
   final PrizePrintMode prizePrintMode;
   final List<PrizeCoupon> prizeCoupons;
+  final String paidSoundId;
 
   const SettingsState({
     this.tipEnabled = false, // webapp default: off
@@ -73,6 +74,7 @@ class SettingsState {
     this.prizePrintEnabled = false,
     this.prizePrintMode = PrizePrintMode.auto,
     this.prizeCoupons = const [],
+    this.paidSoundId = 'arpeggio',
   });
 
   SettingsState copyWith({
@@ -83,6 +85,7 @@ class SettingsState {
     bool? prizePrintEnabled,
     PrizePrintMode? prizePrintMode,
     List<PrizeCoupon>? prizeCoupons,
+    String? paidSoundId,
   }) =>
       SettingsState(
         tipEnabled: tipEnabled ?? this.tipEnabled,
@@ -92,6 +95,7 @@ class SettingsState {
         prizePrintEnabled: prizePrintEnabled ?? this.prizePrintEnabled,
         prizePrintMode: prizePrintMode ?? this.prizePrintMode,
         prizeCoupons: prizeCoupons ?? this.prizeCoupons,
+        paidSoundId: paidSoundId ?? this.paidSoundId,
       );
 }
 

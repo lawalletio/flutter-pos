@@ -145,6 +145,20 @@ class _MenuScreenState extends State<MenuScreen> {
     catalog.revalidate(address).ignore();
   }
 
+  bool _refreshing = false;
+
+  /// Ask the relays for this merchant's catalog again. The current menu stays
+  /// on screen until the answer arrives.
+  Future<void> _refresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      await catalog.revalidate(merchantAddress.value);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
   Future<void> _adoptAsync(CatalogResult result) async {
     // A live catalog wins; so does a cached one during an outage — the service
     // hands those over already populated, flagged `fromCache`, and the banner
@@ -235,7 +249,22 @@ class _MenuScreenState extends State<MenuScreen> {
     final catName = {for (final c in _categories) c.id: c.name};
 
     return Scaffold(
-      appBar: PosAppBar(title: context.tr('Menú')),
+      appBar: PosAppBar(
+        title: context.tr('Menú'),
+        actions: [
+          IconButton(
+            tooltip: context.tr('Actualizar menú'),
+            onPressed: _refreshing ? null : _refresh,
+            icon: _refreshing
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  )
+                : const Icon(Icons.refresh, size: 26),
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _products.isEmpty

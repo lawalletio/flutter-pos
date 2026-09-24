@@ -8,6 +8,7 @@ import '../features/cart/menu_screen.dart';
 import '../features/paydesk/paydesk_screen.dart';
 import '../features/tip/tip_screen.dart';
 import '../features/payment/payment_screen.dart';
+import '../features/orders/invoice_debug_screen.dart';
 import '../features/orders/orders_screen.dart';
 import '../features/tab/tab_screen.dart';
 import '../features/relays/relay_sync_screen.dart';
@@ -86,6 +87,10 @@ final appRouter = GoRouter(
       },
     ),
     GoRoute(path: '/orders', pageBuilder: (c, s) => _page(const OrdersScreen())),
+    GoRoute(
+      path: '/invoice-debug',
+      pageBuilder: (c, s) => _page(const InvoiceDebugScreen()),
+    ),
     GoRoute(path: '/tab', pageBuilder: (c, s) => _page(const TabScreen())),
     GoRoute(path: '/settings', pageBuilder: (c, s) => _page(const SettingsScreen())),
     GoRoute(path: '/relays', pageBuilder: (c, s) => _page(const RelaySyncScreen())),
