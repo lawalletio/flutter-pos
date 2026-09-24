@@ -16,10 +16,27 @@ void pushCheckout(BuildContext context, String location) {
   // has its own path, and a second tap there must see that payment is open.
   if (GoRouter.of(context).state.uri.path == dest) return;
   _checkoutPushLock = true;
-  context.push(location);
-  WidgetsBinding.instance.addPostFrameCallback((_) {
+  final router = GoRouter.of(context);
+  try {
+    context.push(location);
+  } catch (_) {
     _checkoutPushLock = false;
-  });
+    rethrow;
+  }
+  // The path is still the screen underneath until the push is committed, so a
+  // lock that drops on the next frame lets a second tap mint another invoice.
+  var frames = 0;
+  void release(Duration _) {
+    frames++;
+    final arrived = router.state.uri.path == dest;
+    if (arrived || frames >= 45) {
+      _checkoutPushLock = false;
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback(release);
+  }
+
+  WidgetsBinding.instance.addPostFrameCallback(release);
 }
 
 /// Routes a checkout to the tip screen first when tips are enabled, otherwise

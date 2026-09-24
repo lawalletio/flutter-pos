@@ -250,7 +250,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (mounted) setState(() {});
     await NfcChannel.startSession();
     _nfcSub = NfcChannel.tags().listen((cardUrl) {
-      if (!mounted || _view != _View.waiting || _collecting) return;
+      // A coupon quote is rewriting the amount. Charging the bolt11 still on
+      // screen would ignore that discount.
+      if (!mounted ||
+          _view != _View.waiting ||
+          _collecting ||
+          _applyingCoupon) {
+        return;
+      }
+      if (ModalRoute.of(context)?.isCurrent == false) return;
       AppSounds.play(AppSound.card);
       _collectFromCard(cardUrl);
     });
@@ -599,6 +607,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// The nonce is NOT given back — `POST claim` consumed it and there is no
   /// un-claim. The sheet says so before this runs.
   Future<void> _removeCoupon() async {
+    if (_collecting) return;
     setState(() {
       _coupon = null;
       _discountSats = 0;
@@ -704,13 +713,19 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
-  Widget _scaffold(Widget body, {String? title = 'Cobrar'}) => Scaffold(
-        appBar: PosAppBar(
-          title: title != null ? context.tr(title) : null,
-          showSettings: false,
-          actions: _couponActions(),
+  Widget _scaffold(Widget body, {String? title = 'Cobrar'}) => PopScope(
+        // Leaving mid-charge drops the widget while the card can still pay,
+        // so the order would stay unpaid and the till could charge it again.
+        canPop: !_collecting,
+        child: Scaffold(
+          appBar: PosAppBar(
+            title: title != null ? context.tr(title) : null,
+            showSettings: false,
+            showBack: !_collecting,
+            actions: _couponActions(),
+          ),
+          body: PosBody(child: body),
         ),
-        body: PosBody(child: body),
       );
 
   /// The coupon button, top right.
