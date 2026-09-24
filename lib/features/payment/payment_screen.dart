@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/i18n.dart';
+import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/coupon/coupon_service.dart';
@@ -22,6 +23,7 @@ import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/coupon/coupon.dart';
 import '../../domain/order/current_order.dart';
+import '../../domain/order/invoice_debug_store.dart';
 import '../../domain/order/order_reset.dart';
 import '../../domain/order/orders_store.dart';
 import '../../domain/order/receipt_printer.dart';
@@ -83,6 +85,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
   ZapWatcher? _zap; // NIP-57 zap-receipt subscription (live relay connection)
   String? _orderId; // recorded order in the persisted store
   int? _orderCreatedAt; // kept across re-quotes so the order keeps its identity
+  static int _liveScreens = 0;
+  final int _screenId = DateTime.now().microsecondsSinceEpoch;
+  /// Bumped on every invoice request. A reply whose generation is older is
+  /// dropped, so a slow response cannot replace the QR the customer is scanning.
+  int _invoiceGen = 0;
 
   // Coupons. `_service` non-null is the whole condition for the app-bar button:
   // it means this merchant authorised a claim endpoint on nostr.
@@ -91,10 +98,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
   int _discountSats = 0;
   List<DiscountEntry> _discountEntries = const [];
   bool _applyingCoupon = false;
-
-  // Card-charging animation state.
-  double _collectProgress = 0;
-  int _collectStepIndex = 0; // active task in the NFC charging checklist
 
   String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
   String _arsOf(int sats) => formatToPreference(
@@ -120,6 +123,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void initState() {
     super.initState();
+    _liveScreens++;
     pricing.ensureLoaded();
     pricing.notifier.addListener(_onRates);
     // The announcement rides along with the catalog read. Cheap when the menu
@@ -128,7 +132,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _onCatalog();
     catalog.ensureLoaded(merchantAddress.value);
     if (!widget.initiallyPaid && widget.amountSats > 0) {
-      _fetchInvoice();
+      _fetchInvoice(reason: 'init');
     }
     if (widget.openAddTab && widget.amountSats > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openAddToTab());
@@ -141,6 +145,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// Transition to the paid state and print the receipt (once).
   void _markPaid() {
     if (_view == _View.paid) return;
+    AppSounds.play(AppSound.paid);
     _stopNfc();
     _poll?.cancel();
     if (_orderId != null) ordersStore.markPaid(_orderId!);
@@ -228,6 +233,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   void dispose() {
+    _liveScreens--;
     _poll?.cancel();
     _stopNfc();
     pricing.notifier.removeListener(_onRates);
@@ -245,56 +251,34 @@ class _PaymentScreenState extends State<PaymentScreen> {
     await NfcChannel.startSession();
     _nfcSub = NfcChannel.tags().listen((cardUrl) {
       if (!mounted || _view != _View.waiting || _collecting) return;
+      AppSounds.play(AppSound.card);
       _collectFromCard(cardUrl);
     });
   }
 
-  /// A card was tapped: show the NFC charging animation while pulling the
-  /// payment (LNURL-withdraw), updating the step label + progress bar.
+  /// A card was tapped. The charging screen runs its own timeline; this keeps
+  /// pulling the payment and cuts that timeline the moment it settles.
   Future<void> _collectFromCard(String cardUrl) async {
     final inv = _invoice;
     if (inv == null) return;
-    setState(() {
-      _collecting = true;
-      _collectStepIndex = 0;
-      _collectProgress = 0.18;
-    });
+    setState(() => _collecting = true);
     try {
-      if (mounted) {
-        setState(() {
-          _collectStepIndex = 1;
-          _collectProgress = 0.42;
-        });
-      }
       await lnurl.payWithCard(cardUrl, inv);
-      // Submitted — confirm settlement (a few seconds), else leave it to polling.
-      if (mounted) {
-        setState(() {
-          _collectStepIndex = 2;
-          _collectProgress = 0.66;
-        });
-      }
       final url = _verifyUrl;
       var settled = false;
       if (url != null) {
-        for (var i = 0; i < 12 && mounted; i++) {
+        for (var i = 0;
+            i < 30 && mounted && _view == _View.waiting && _invoice == inv;
+            i++) {
           if (await lnurl.checkSettled(url)) {
             settled = true;
             break;
           }
-          if (mounted) {
-            setState(() =>
-                _collectProgress = (0.66 + i * 0.024).clamp(0.0, 0.95));
-          }
           await Future<void>.delayed(const Duration(milliseconds: 800));
         }
       }
-      if (!mounted) return;
-      if (settled) {
-        setState(() {
-          _collectProgress = 1;
-          _collectStepIndex = 3; // all tasks done
-        });
+      if (!mounted || _view != _View.waiting || _invoice != inv) return;
+      if (settled && _verifyUrl == url) {
         _markPaid();
       } else {
         setState(() => _collecting = false);
@@ -307,7 +291,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
     } catch (_) {
-      if (mounted) setState(() => _collecting = false);
+      if (mounted && _view == _View.waiting) {
+        setState(() => _collecting = false);
+      }
     }
   }
 
@@ -328,7 +314,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// the bolt11 first is not cosmetic: [_collectFromCard] pays whatever
   /// `_invoice` holds, and a tapped card during the round trip would otherwise
   /// pay the old, undiscounted invoice.
-  Future<void> _fetchInvoice() async {
+  ///
+  /// Each call takes a generation. A reply from an older call is kept in the
+  /// debug log and otherwise ignored, so it cannot replace the QR, the verify
+  /// URL, or the order Check event reads.
+  Future<void> _fetchInvoice({required String reason}) async {
+    final gen = ++_invoiceGen;
     _poll?.cancel();
     _zap?.dispose();
     _zap = null;
@@ -340,7 +331,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
     try {
       // Who the zap request names as recipient. Cached after the first lookup.
       final identity = await nostrProfile.resolveNip05(merchantAddress.value);
-      if (!mounted) return;
+      // A newer request owns the screen. Don't ask the provider for an invoice
+      // nobody will show.
+      if (!mounted || gen != _invoiceGen) return;
       final inv = await lnurl.requestInvoice(
         merchantAddress.value,
         _chargeSats,
@@ -352,22 +345,30 @@ class _PaymentScreenState extends State<PaymentScreen> {
         couponType: _coupon?.benefit.type.name,
         couponName: _coupon?.name,
       );
-      if (!mounted) return;
+      final stale = gen != _invoiceGen;
+      if (!mounted || stale) {
+        // The provider already minted this bolt11. Keep it in the debug log,
+        // but do not let it replace the invoice now on screen.
+        _rememberInvoice(inv,
+            reason: reason, gen: gen, stale: stale, applied: false);
+        return;
+      }
       setState(() {
         _invoice = inv.pr;
         _verifyUrl = inv.verify;
       });
       _recordOrder(inv); // persist a pending order (re-checkable later)
+      _rememberInvoice(inv, reason: reason, gen: gen, stale: false, applied: true);
       _startPolling();
       _startZapWatch(inv); // NIP-57: watch relays for the zap receipt
       _startAutoNfc(); // arm the card reader while pending
     } on LnurlException catch (e) {
-      if (!mounted) return;
+      if (!mounted || gen != _invoiceGen) return;
       setState(() {
         _invoiceError = e.message;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || gen != _invoiceGen) return;
       setState(() {
         _invoiceError = 'No se pudo generar la invoice';
       });
@@ -382,7 +383,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (!mounted || _view != _View.waiting) return;
       try {
         if (await lnurl.checkSettled(url)) {
-          if (!mounted) return;
+          // The invoice may have been replaced while this request was in flight.
+          if (!mounted || _verifyUrl != url || _view != _View.waiting) return;
           t.cancel();
           _markPaid();
         }
@@ -402,9 +404,50 @@ class _PaymentScreenState extends State<PaymentScreen> {
       invoice: inv.pr,
       orderId: inv.zapOrderId,
       onPaid: () {
-        if (mounted && _view == _View.waiting) _markPaid();
+        if (mounted && _view == _View.waiting && _invoice == inv.pr) {
+          _markPaid();
+        }
       },
     )..start();
+  }
+
+  /// Keep every provider response, including a reply the screen then replaced.
+  void _rememberInvoice(
+    LnurlInvoice inv, {
+    required String reason,
+    required int gen,
+    required bool stale,
+    required bool applied,
+  }) {
+    invoiceDebugStore.add(GeneratedInvoice(
+      id: 'i${DateTime.now().microsecondsSinceEpoch}',
+      createdAt: DateTime.now().millisecondsSinceEpoch,
+      invoice: inv.pr,
+      verifyUrl: inv.verify,
+      zapPubkey: inv.zapPubkey,
+      zapRelays: inv.zapRelays,
+      zapOrderId: inv.zapOrderId,
+      amountSats: _chargeSats,
+      summary: _debugSummary(),
+      items: currentOrderItems.value.toList(),
+      couponId: _coupon?.couponId,
+      couponName: _coupon?.name,
+      discountSats: _discountSats,
+      reason: reason,
+      generation: gen,
+      latestGeneration: _invoiceGen,
+      screenId: _screenId,
+      liveScreens: _liveScreens,
+      applied: applied,
+      stale: stale,
+      orderId: _orderId,
+    ));
+  }
+
+  String _debugSummary() {
+    final items = currentOrderItems.value;
+    if (items.isEmpty) return 'Cobro manual';
+    return items.map((it) => '${it.qty}× ${it.name}').join(', ');
   }
 
   /// Persist the pending order carrying everything needed to re-verify it later
@@ -531,7 +574,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (_chargeSats <= 0) {
         _settleFree();
       } else {
-        await _fetchInvoice();
+        await _fetchInvoice(reason: 'coupon');
       }
     } on CouponException catch (e) {
       _couponError(e.message);
@@ -554,7 +597,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       _discountSats = 0;
       _discountEntries = const [];
     });
-    await _fetchInvoice();
+    await _fetchInvoice(reason: 'remove-coupon');
   }
 
   /// A coupon covered the whole order.
@@ -732,13 +775,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   /// Shown while a tapped card is being charged (LNURL-withdraw in progress).
   Widget _collectingView() => NfcChargingView(
-        progress: _collectProgress,
-        currentStep: _collectStepIndex,
-        steps: [
-          context.tr('Leyendo la tarjeta…'),
-          context.tr('Solicitando el pago…'),
-          context.tr('Confirmando el pago…'),
-        ],
         amountLabel: '$_satsStr sats · ≈ $_arsStr ARS',
       );
 
@@ -763,7 +799,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton(
-                    onPressed: _fetchInvoice,
+                    onPressed: () => _fetchInvoice(reason: 'retry'),
                     child: Text(context.tr('Reintentar'))),
               ),
             ],

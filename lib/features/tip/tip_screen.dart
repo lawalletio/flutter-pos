@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../core/checkout.dart';
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -25,7 +25,8 @@ class TipScreen extends StatelessWidget {
   void _go(BuildContext context, int finalSats) {
     final b = back == null ? '' : '&back=${Uri.encodeComponent(back!)}';
     final tip = finalSats - amountSats;
-    context.push('/payment?sats=$finalSats${tip > 0 ? '&tip=$tip' : ''}$b');
+    pushCheckout(
+        context, '/payment?sats=$finalSats${tip > 0 ? '&tip=$tip' : ''}$b');
   }
 
   @override

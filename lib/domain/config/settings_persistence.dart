@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/sounds.dart';
 import 'settings_state.dart';
 
 /// Persists prize-coupon settings only (tip/tab/relays stay in-memory).
@@ -9,6 +10,7 @@ class SettingsPersistence {
   static const _keyEnabled = 'prizePrintEnabled';
   static const _keyMode = 'prizePrintMode';
   static const _keyCoupons = 'prizeCoupons';
+  static const _keyPaidSound = 'paidSoundId';
 
   SharedPreferences? _prefs;
 
@@ -23,11 +25,18 @@ class SettingsPersistence {
         ? PrizePrintMode.button
         : PrizePrintMode.auto;
     final coupons = _decodeCoupons(p.getString(_keyCoupons));
+    final paidSoundId = paidSoundById(p.getString(_keyPaidSound)).id;
     appSettings.value = appSettings.value.copyWith(
       prizePrintEnabled: enabled,
       prizePrintMode: mode,
       prizeCoupons: coupons,
+      paidSoundId: paidSoundId,
     );
+  }
+
+  Future<void> savePaidSound(String id) async {
+    final p = await _p;
+    await p.setString(_keyPaidSound, id);
   }
 
   Future<void> savePrizeSettings(SettingsState s) async {
@@ -57,6 +66,11 @@ final settingsPersistence = SettingsPersistence();
 
 void _persistPrizeSlice() {
   settingsPersistence.savePrizeSettings(appSettings.value).ignore();
+}
+
+void setPaidSound(String id) {
+  appSettings.value = appSettings.value.copyWith(paidSoundId: id);
+  settingsPersistence.savePaidSound(id).ignore();
 }
 
 void setPrizePrintEnabled(bool v) {

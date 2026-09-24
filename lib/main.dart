@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'core/sounds.dart';
 import 'data/lnurl/lnurl_service.dart';
 import 'data/nostr/catalog_service.dart';
 import 'data/nostr/identity.dart';
@@ -11,6 +12,7 @@ import 'data/pricing/pricing_service.dart';
 import 'domain/config/address_history.dart';
 import 'domain/config/settings_persistence.dart';
 import 'domain/config/session.dart';
+import 'domain/order/invoice_debug_store.dart';
 import 'domain/order/orders_store.dart';
 
 Future<void> main() async {
@@ -29,6 +31,7 @@ Future<void> main() async {
   addressHistory.load();
   settingsPersistence.load();
   ordersStore.load();
+  invoiceDebugStore.load();
   // Warm the invoice path so the FIRST charge is just the provider callback:
   // load + derive the Nostr identity (BIP-340 pubkey, done once) and pre-resolve
   // the merchant LUD-16 address — both otherwise happen inline on that first
@@ -39,5 +42,9 @@ Future<void> main() async {
   // catalog now, so opening the menu paints instead of spinning. Serves the
   // persisted copy first, then revalidates against the relays.
   catalog.ensureLoaded(merchantAddress.value).ignore();
+  await AppSounds.prepare();
   runApp(const ProviderScope(child: LaWalletPosApp()));
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    AppSounds.play(AppSound.start);
+  });
 }

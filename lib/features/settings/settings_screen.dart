@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/i18n.dart';
+import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/session.dart';
@@ -131,6 +132,66 @@ class SettingsScreen extends StatelessWidget {
                     value: s.tabEnabled,
                     onChanged: setTabEnabled,
                   ),
+                ],
+              )),
+              const SizedBox(height: 20),
+              _sectionHeader(context, 'Sonido'),
+              _card(Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 12, 0, 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.music_note_outlined,
+                            size: 20, color: AppColors.primary),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(context.tr('Pago exitoso'),
+                                  style: const TextStyle(fontSize: 15)),
+                              Text(
+                                  context.tr(
+                                      'Se reproduce al confirmar el pago'),
+                                  style: const TextStyle(
+                                      color: AppColors.muted, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  for (final option in paidSoundOptions) ...[
+                    const Divider(height: 1),
+                    InkWell(
+                      onTap: () {
+                        setPaidSound(option.id);
+                        AppSounds.play(AppSound.paid);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Row(
+                          children: [
+                            Icon(
+                              s.paidSoundId == option.id
+                                  ? Icons.radio_button_checked
+                                  : Icons.radio_button_off,
+                              size: 20,
+                              color: s.paidSoundId == option.id
+                                  ? AppColors.primary
+                                  : AppColors.muted,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(context.tr(option.label),
+                                  style: const TextStyle(fontSize: 15)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               )),
               const SizedBox(height: 20),

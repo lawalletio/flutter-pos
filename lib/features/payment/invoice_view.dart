@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/i18n.dart';
+import '../../core/sounds.dart';
 import '../../core/theme.dart';
 
 /// The invoice / QR screen shown while charging.
@@ -56,6 +57,15 @@ class _InvoiceViewState extends State<InvoiceView>
       vsync: this,
       duration: const Duration(milliseconds: 450),
     )..forward();
+    if (widget.invoice != null) AppSounds.play(AppSound.invoice);
+  }
+
+  @override
+  void didUpdateWidget(InvoiceView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.invoice != null && widget.invoice != oldWidget.invoice) {
+      AppSounds.play(AppSound.invoice);
+    }
   }
 
   @override

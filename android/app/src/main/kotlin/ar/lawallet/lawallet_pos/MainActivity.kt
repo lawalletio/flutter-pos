@@ -2,6 +2,9 @@ package ar.lawallet.lawallet_pos
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.nfc.NdefMessage
 import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
@@ -43,11 +46,16 @@ class MainActivity : FlutterActivity() {
     // Dart; the payment screen decides when to act on it.
     private val nfcChannelName = "pos/nfc"
     private val nfcEventsName = "pos/nfc/tags"
+    private val soundsChannelName = "pos/sounds"
+    private val soundTracks = HashMap<String, AudioTrack>()
     private var nfcEvents: EventChannel.EventSink? = null
     private var nfcActive = false
 
     override fun onResume() {
         super.onResume()
+        // Flutter plays Android's click (FX_KEY_CLICK) on every control via the
+        // decor view. The till has its own cues, so that system sound stays off.
+        window.decorView.isSoundEffectsEnabled = false
         enableReader() // always capture every tap while foregrounded
     }
 
@@ -107,6 +115,77 @@ class MainActivity : FlutterActivity() {
                     nfcEvents = null
                 }
             })
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, soundsChannelName)
+            .setMethodCallHandler { call, result ->
+                val args = call.arguments as? Map<*, *>
+                val name = args?.get("name") as? String
+                if (name == null) {
+                    result.error("SOUND", "missing name", null)
+                    return@setMethodCallHandler
+                }
+                try {
+                    when (call.method) {
+                        "load" -> {
+                            val pcm = args["pcm"] as ByteArray
+                            val rate = (args["rate"] as Number).toInt()
+                            val channels = (args["channels"] as Number).toInt()
+                            loadSound(name, pcm, rate, channels)
+                            result.success(null)
+                        }
+                        "play" -> {
+                            playSound(name)
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (e: Throwable) {
+                    Log.e(TAG, "sound $name failed", e)
+                    result.error("SOUND", e.message ?: e.toString(), null)
+                }
+            }
+    }
+
+    // ---- sounds ----
+
+    private fun loadSound(name: String, pcm: ByteArray, rate: Int, channels: Int) {
+        soundTracks.remove(name)?.release()
+        val mask = if (channels == 1) {
+            AudioFormat.CHANNEL_OUT_MONO
+        } else {
+            AudioFormat.CHANNEL_OUT_STEREO
+        }
+        val min = AudioTrack.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_16BIT)
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(rate)
+                    .setChannelMask(mask)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .setBufferSizeInBytes(maxOf(pcm.size, min))
+            .build()
+        val written = track.write(pcm, 0, pcm.size)
+        if (written < 0 || track.state != AudioTrack.STATE_INITIALIZED) {
+            track.release()
+            throw IllegalStateException("AudioTrack $name write=$written state=${track.state}")
+        }
+        soundTracks[name] = track
+    }
+
+    private fun playSound(name: String) {
+        val track = soundTracks[name] ?: return
+        if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.stop()
+        track.reloadStaticData()
+        track.play()
     }
 
     // ---- NFC ----
