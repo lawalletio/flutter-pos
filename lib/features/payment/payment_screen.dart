@@ -277,7 +277,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
           await Future<void>.delayed(const Duration(milliseconds: 800));
         }
       }
-      if (!mounted || _view != _View.waiting || _invoice != inv) return;
+      if (!mounted || _view != _View.waiting) return;
+      if (_invoice != inv) {
+        setState(() => _collecting = false);
+        return;
+      }
       if (settled && _verifyUrl == url) {
         _markPaid();
       } else {
@@ -286,7 +290,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             content: Text(context.tr('Pago enviado, esperando confirmación…'))));
       }
     } on LnurlException catch (e) {
-      if (!mounted) return;
+      if (!mounted || _view != _View.waiting) return;
       setState(() => _collecting = false);
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
@@ -319,6 +323,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// debug log and otherwise ignored, so it cannot replace the QR, the verify
   /// URL, or the order Check event reads.
   Future<void> _fetchInvoice({required String reason}) async {
+    // A card charge is already paying the invoice on screen. A new mint would
+    // drop that bolt11 and leave the charging view with nothing to settle.
+    if (_collecting) return;
     final gen = ++_invoiceGen;
     _poll?.cancel();
     _zap?.dispose();
@@ -711,7 +718,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// Absent unless this merchant authorised a claim endpoint on nostr — a till
   /// that offers to scan coupons nobody can issue is worse than no button.
   List<Widget> _couponActions() {
-    if (_couponService == null || _view != _View.waiting) return const [];
+    if (_couponService == null || _view != _View.waiting || _collecting) {
+      return const [];
+    }
     if (_applyingCoupon) {
       return const [
         Padding(

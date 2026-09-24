@@ -42,7 +42,11 @@ Future<void> main() async {
   // catalog now, so opening the menu paints instead of spinning. Serves the
   // persisted copy first, then revalidates against the relays.
   catalog.ensureLoaded(merchantAddress.value).ignore();
-  await AppSounds.prepare();
+  try {
+    await AppSounds.prepare();
+  } catch (e) {
+    debugPrint('AppSounds: $e');
+  }
   runApp(const ProviderScope(child: LaWalletPosApp()));
   WidgetsBinding.instance.addPostFrameCallback((_) {
     AppSounds.play(AppSound.start);
