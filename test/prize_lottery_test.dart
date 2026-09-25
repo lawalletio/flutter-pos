@@ -47,7 +47,7 @@ void main() {
         },
       );
       expect(winner, a);
-      expect(calls, 2); // skip zero, win on a — b never rolled
+      expect(calls, 1); // 0% is skipped without a roll; b is never reached
     });
 
     test('at most one winner', () {

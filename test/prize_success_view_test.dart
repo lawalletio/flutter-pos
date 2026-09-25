@@ -27,6 +27,40 @@ void main() {
     );
   }
 
+  testWidgets('spin button shows only when the payment offers the wheel',
+      (tester) async {
+    var taps = 0;
+    await tester.pumpWidget(host());
+    await tester.pump();
+    expect(find.byKey(const Key('spin-wheel-button')), findsNothing);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildAppTheme(),
+      home: Scaffold(
+        backgroundColor: AppColors.background,
+        body: PaymentSuccessView(
+          satsStr: '1.000',
+          arsStr: '15.000',
+          onSpinWheel: () => taps++,
+          onBack: () {},
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(find.text('Tirar ruleta'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('spin-wheel-button')));
+    await tester.pump();
+    expect(taps, 1);
+
+    await tester.pump(const Duration(milliseconds: 1000));
+    final spin = tester.getRect(find.byKey(const Key('spin-wheel-button')));
+    final back = tester.getRect(find.text('Volver'));
+    expect(spin.width, greaterThan(500));
+    expect(spin.height, greaterThan(56));
+    expect(back.top, greaterThan(spin.bottom));
+    expect(back.width, lessThan(spin.width));
+  });
+
   testWidgets(
       'print-coupon button appears when the prize arrives after first frame',
       (tester) async {

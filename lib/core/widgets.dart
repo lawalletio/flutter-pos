@@ -24,6 +24,9 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// Opens the on-device log of every generated invoice.
   final bool showInvoiceDebug;
 
+  /// Replaces the default pop. The payment wheel uses this to skip success.
+  final VoidCallback? onBack;
+
   const PosAppBar({
     super.key,
     this.title,
@@ -32,6 +35,7 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.showSync = true,
     this.actions = const [],
     this.showInvoiceDebug = true,
+    this.onBack,
   });
 
   @override
@@ -52,8 +56,9 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
                 shape: const CircleBorder(),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
-                  onTap: () =>
-                      context.canPop() ? context.pop() : context.go('/hub'),
+                  onTap: onBack ??
+                      () =>
+                          context.canPop() ? context.pop() : context.go('/hub'),
                   child: const SizedBox(
                     width: 48,
                     height: 48,
@@ -167,7 +172,6 @@ class PosBody extends StatelessWidget {
     );
   }
 }
-
 
 /// Relay replication status in the app bar.
 ///

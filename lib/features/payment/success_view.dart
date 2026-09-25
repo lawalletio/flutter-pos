@@ -30,6 +30,9 @@ class PaymentSuccessView extends StatefulWidget {
   final bool printingPrize;
   final Future<void> Function()? onPrintPrize;
 
+  /// Opens the fortune wheel. Null hides the button.
+  final VoidCallback? onSpinWheel;
+
   final VoidCallback onBack;
   const PaymentSuccessView({
     super.key,
@@ -42,6 +45,7 @@ class PaymentSuccessView extends StatefulWidget {
     this.prizePrinted = false,
     this.printingPrize = false,
     this.onPrintPrize,
+    this.onSpinWheel,
   });
 
   @override
@@ -67,10 +71,14 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
   late final Animation<double> _prizeOutFade;
   late final ConfettiController _prizeBurst;
   late final ConfettiController _prizeRain;
+  late final AnimationController _wheelIn;
+  late final AnimationController _wheelLoop;
+  late final AnimationController _pull;
 
   final _startedAt = DateTime.now();
   bool _prizeBeatQueued = false;
   bool _prizeDismissed = false;
+  bool _wheelArmed = false;
 
   static const _festive = [
     AppColors.primary,
@@ -134,6 +142,12 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     _prizeBurst =
         ConfettiController(duration: const Duration(milliseconds: 1400));
     _prizeRain = ConfettiController(duration: const Duration(milliseconds: 2400));
+    _wheelIn = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 880));
+    _wheelLoop = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 1200));
+    _pull = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 2600));
 
     // Kick off the show.
     HapticFeedback.heavyImpact();
@@ -143,6 +157,7 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     _rainR.play();
     if (widget.prizePrinted) _prizeDismissed = true;
     _schedulePrizeBeat();
+    _armWheel();
   }
 
   @override
@@ -157,6 +172,17 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     if (widget.prizePrinted && !oldWidget.prizePrinted) {
       _dismissPrizeCard();
     }
+    if (widget.onSpinWheel != null && oldWidget.onSpinWheel == null) {
+      _armWheel();
+    }
+  }
+
+  void _armWheel() {
+    if (_wheelArmed || widget.onSpinWheel == null) return;
+    _wheelArmed = true;
+    _pull.repeat();
+    _wheelLoop.repeat();
+    _wheelIn.forward();
   }
 
   void _onPrintPrizeTap() {
@@ -213,14 +239,28 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
     _prizeOut.dispose();
     _prizeBurst.dispose();
     _prizeRain.dispose();
+    _wheelIn.dispose();
+    _wheelLoop.dispose();
+    _pull.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final offerWheel = widget.onSpinWheel != null;
     return Stack(
       fit: StackFit.expand,
       children: [
+        if (offerWheel)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: RepaintBoundary(
+                child: CustomPaint(
+                  painter: _CenterPullPainter(repaint: _pull),
+                ),
+              ),
+            ),
+          ),
         Align(
           alignment: Alignment.topLeft,
           child: ConfettiWidget(
@@ -283,18 +323,22 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisAlignment: offerWheel
+                      ? MainAxisAlignment.start
+                      : MainAxisAlignment.center,
                   children: [
+                    if (offerWheel) const SizedBox(height: 8),
                     SizedBox(
-                      width: _hasPrize ? 160 : 200,
-                      height: _hasPrize ? 160 : 200,
+                      width: _hasPrize ? 160 : (offerWheel ? 132 : 200),
+                      height: _hasPrize ? 160 : (offerWheel ? 132 : 200),
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
                           AnimatedBuilder(
                             animation: _pulse,
                             builder: (_, __) => CustomPaint(
-                              size: Size.square(_hasPrize ? 160 : 200),
+                              size: Size.square(
+                                  _hasPrize ? 160 : (offerWheel ? 132 : 200)),
                               painter: _RipplePainter(_pulse.value),
                             ),
                           ),
@@ -310,8 +354,8 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
                           ScaleTransition(
                             scale: _circleScale,
                             child: Container(
-                              width: _hasPrize ? 100 : 120,
-                              height: _hasPrize ? 100 : 120,
+                              width: _hasPrize ? 100 : (offerWheel ? 84 : 120),
+                              height: _hasPrize ? 100 : (offerWheel ? 84 : 120),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: AppColors.primary,
@@ -423,15 +467,17 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
                               ),
                             ),
                           ],
-                          const SizedBox(height: 28),
-                          SizedBox(
-                            width: 260,
-                            child: FilledButton(
-                              onPressed: widget.onBack,
-                              child: Text(context.tr('Volver')),
+                          if (!offerWheel) ...[
+                            const SizedBox(height: 28),
+                            SizedBox(
+                              width: 260,
+                              child: FilledButton(
+                                onPressed: widget.onBack,
+                                child: Text(context.tr('Volver')),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 12),
+                            const SizedBox(height: 12),
+                          ],
                         ],
                       ),
                     ),
@@ -441,9 +487,156 @@ class _PaymentSuccessViewState extends State<PaymentSuccessView>
             );
           },
         ),
+        if (offerWheel) ...[
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: Listenable.merge([_wheelIn, _wheelLoop]),
+              builder: (context, _) {
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    final h = constraints.maxHeight;
+                    const buttonH = 64.0;
+                    final eased = Curves.easeOutBack.transform(_wheelIn.value);
+                    final travel = (1 - eased).clamp(-0.06, 1.0).toDouble();
+                    final wave = sin(_wheelLoop.value * 2 * pi);
+                    final restTop = (h - buttonH) / 2;
+                    final maxTop = max(12.0, h - buttonH - 56);
+                    final top = (restTop + h * 0.34 * travel + wave * 5)
+                        .clamp(12.0, maxTop)
+                        .toDouble();
+                    final glow = (wave + 1) / 2;
+                    return Stack(
+                      children: [
+                        Positioned(
+                          left: 4,
+                          right: 4,
+                          top: top,
+                          child: Transform.scale(
+                            scale: 1 + wave * 0.02,
+                            alignment: Alignment.center,
+                            child: _SpinCue(
+                              glow: glow,
+                              label: context.tr('Tirar ruleta'),
+                              onPressed: widget.onSpinWheel,
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 2,
+            child: Center(
+              child: TextButton(
+                onPressed: widget.onBack,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.muted,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  textStyle: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.w600),
+                ),
+                child: Text(context.tr('Volver')),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
+}
+
+class _SpinCue extends StatelessWidget {
+  const _SpinCue({
+    required this.glow,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final double glow;
+  final String label;
+  final VoidCallback? onPressed;
+
+  static const _gold = Color(0xFFD4AF37);
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: _gold.withValues(alpha: 0.25 + glow * 0.5),
+            blurRadius: 14 + glow * 22,
+            spreadRadius: glow * 1.5,
+          ),
+        ],
+      ),
+      child: FilledButton.icon(
+        key: const Key('spin-wheel-button'),
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor: _gold,
+          foregroundColor: const Color(0xFF1C1C1C),
+          minimumSize: const Size.fromHeight(64),
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          textStyle:
+              const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18)),
+        ),
+        icon: const Icon(Icons.casino_outlined, size: 28),
+        label: Text(label),
+      ),
+    );
+  }
+}
+
+class _CenterPullPainter extends CustomPainter {
+  _CenterPullPainter({required this.repaint}) : super(repaint: repaint);
+
+  final Animation<double> repaint;
+
+  static const _colors = <Color>[
+    Color(0xFFFFD166),
+    Color(0xFFFFF3B0),
+    Color(0xFFFFFFFF),
+    Color(0xFFD4AF37),
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final t = repaint.value;
+    final center = Offset(size.width / 2, size.height / 2);
+    final reach = max(size.width, size.height) * 0.75;
+    const count = 46;
+    final paint = Paint()..strokeCap = StrokeCap.round;
+    for (var i = 0; i < count; i++) {
+      final angle = i * 2.399963;
+      final lane = (t + i / count) % 1.0;
+      final travel = lane * lane;
+      final radius = reach * (1 - travel);
+      final dir = Offset(cos(angle), sin(angle));
+      final pos = center + dir * radius;
+      final fade = sin(lane * pi);
+      paint
+        ..color = _colors[i % _colors.length].withValues(alpha: 0.2 + 0.75 * fade)
+        ..strokeWidth = 1.4;
+      canvas.drawLine(pos + dir * 14, pos, paint);
+      canvas.drawCircle(pos, 1.8 + (i % 4) * 0.85, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_CenterPullPainter old) => old.repaint != repaint;
 }
 
 class _PrizeGrantCard extends StatelessWidget {

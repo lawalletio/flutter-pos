@@ -23,6 +23,25 @@ const List<String> kSuggestedRelays = [
 
 enum PrizePrintMode { auto, button }
 
+/// When the success screen offers the fortune wheel.
+enum WheelOffer { always, tipOnly }
+
+/// Wheel spin length the merchant can pick in Coupons. Whole seconds.
+const kWheelDurationMinMs = 2000;
+const kWheelDurationMaxMs = 15000;
+const kWheelDurationDefaultMs = 6000;
+
+const kWheelPaceMin = 0.5;
+const kWheelPaceMax = 2.0;
+
+double clampWheelPace(double value) {
+  if (value.isNaN) return 1;
+  return value.clamp(kWheelPaceMin, kWheelPaceMax);
+}
+
+int clampWheelDurationMs(int milliseconds) =>
+    milliseconds.clamp(kWheelDurationMinMs, kWheelDurationMaxMs);
+
 @immutable
 class PrizeCoupon {
   final String id;
@@ -65,6 +84,27 @@ class SettingsState {
   final PrizePrintMode prizePrintMode;
   final List<PrizeCoupon> prizeCoupons;
   final String paidSoundId;
+  final bool soundEnabled;
+
+  /// Master level, 0–1. Touch and payment cues multiply this by their own level.
+  final double soundVolume;
+  final double touchVolume;
+  final double paidVolume;
+
+  /// How long the fortune wheel spins, in milliseconds.
+  final int wheelDurationMs;
+
+  /// Multiplier on the wheel's cruise speed. 1 is the default pace.
+  final double wheelSpeed;
+
+  /// How hard the wheel launches and then settles. 1 is the default curve.
+  final double wheelAcceleration;
+
+  /// When trying the wheel from settings, print the winning ticket.
+  final bool wheelPracticePrint;
+
+  /// [WheelOffer.tipOnly] shows the spin button only after a tip.
+  final WheelOffer wheelOffer;
 
   const SettingsState({
     this.tipEnabled = false, // webapp default: off
@@ -75,6 +115,15 @@ class SettingsState {
     this.prizePrintMode = PrizePrintMode.auto,
     this.prizeCoupons = const [],
     this.paidSoundId = 'arpeggio',
+    this.soundEnabled = true,
+    this.soundVolume = 1,
+    this.touchVolume = 1,
+    this.paidVolume = 1,
+    this.wheelDurationMs = kWheelDurationDefaultMs,
+    this.wheelSpeed = 1,
+    this.wheelAcceleration = 1,
+    this.wheelPracticePrint = false,
+    this.wheelOffer = WheelOffer.tipOnly,
   });
 
   SettingsState copyWith({
@@ -86,6 +135,15 @@ class SettingsState {
     PrizePrintMode? prizePrintMode,
     List<PrizeCoupon>? prizeCoupons,
     String? paidSoundId,
+    bool? soundEnabled,
+    double? soundVolume,
+    double? touchVolume,
+    double? paidVolume,
+    int? wheelDurationMs,
+    double? wheelSpeed,
+    double? wheelAcceleration,
+    bool? wheelPracticePrint,
+    WheelOffer? wheelOffer,
   }) =>
       SettingsState(
         tipEnabled: tipEnabled ?? this.tipEnabled,
@@ -96,6 +154,15 @@ class SettingsState {
         prizePrintMode: prizePrintMode ?? this.prizePrintMode,
         prizeCoupons: prizeCoupons ?? this.prizeCoupons,
         paidSoundId: paidSoundId ?? this.paidSoundId,
+        soundEnabled: soundEnabled ?? this.soundEnabled,
+        soundVolume: soundVolume ?? this.soundVolume,
+        touchVolume: touchVolume ?? this.touchVolume,
+        paidVolume: paidVolume ?? this.paidVolume,
+        wheelDurationMs: wheelDurationMs ?? this.wheelDurationMs,
+        wheelSpeed: wheelSpeed ?? this.wheelSpeed,
+        wheelAcceleration: wheelAcceleration ?? this.wheelAcceleration,
+        wheelPracticePrint: wheelPracticePrint ?? this.wheelPracticePrint,
+        wheelOffer: wheelOffer ?? this.wheelOffer,
       );
 }
 
