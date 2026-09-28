@@ -977,37 +977,9 @@ class _RelaysCardState extends State<_RelaysCard> {
   }
 
   Future<void> _editRelay(int index, String current) async {
-    final ctrl = TextEditingController(text: current);
     final result = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text(context.tr('Editar relay')),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            filled: true,
-            fillColor: AppColors.background,
-            hintText: 'wss://relay.example.com',
-            border: OutlineInputBorder(
-                borderSide: BorderSide.none,
-                borderRadius: BorderRadius.all(Radius.circular(12))),
-          ),
-          onSubmitted: (v) => Navigator.of(ctx).pop(v),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(context.tr('Cancelar'),
-                style: const TextStyle(color: AppColors.muted)),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(ctrl.text),
-            child: Text(context.tr('Guardar')),
-          ),
-        ],
-      ),
+      builder: (ctx) => _EditRelayDialog(initial: current),
     );
     if (result != null && result.trim().isNotEmpty) {
       if (!updateRelay(index, result)) _snack('URL inválida o repetida');
@@ -1140,6 +1112,86 @@ class _EditedPrize {
 
   final String text;
   final int chance;
+}
+
+/// Closes a focused text dialog only after the field drops its overlay, so
+/// the route can deactivate without the `_dependents.isEmpty` assertion.
+Future<void> _closeFocusedDialog(BuildContext context, Object? result) async {
+  FocusManager.instance.primaryFocus?.unfocus();
+  await WidgetsBinding.instance.endOfFrame;
+  if (!context.mounted) return;
+  Navigator.of(context).pop(result);
+}
+
+class _EditRelayDialog extends StatefulWidget {
+  const _EditRelayDialog({required this.initial});
+
+  final String initial;
+
+  @override
+  State<_EditRelayDialog> createState() => _EditRelayDialogState();
+}
+
+class _EditRelayDialogState extends State<_EditRelayDialog> {
+  late final TextEditingController _text;
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _text = TextEditingController(text: widget.initial);
+  }
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  Future<void> _close(String? value) async {
+    if (_closing) return;
+    setState(() => _closing = true);
+    await _closeFocusedDialog(context, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: _closing,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _close(null);
+      },
+      child: AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text(context.tr('Editar relay')),
+        content: TextField(
+          controller: _text,
+          autofocus: true,
+          decoration: const InputDecoration(
+            filled: true,
+            fillColor: AppColors.background,
+            hintText: 'wss://relay.example.com',
+            border: OutlineInputBorder(
+                borderSide: BorderSide.none,
+                borderRadius: BorderRadius.all(Radius.circular(12))),
+          ),
+          onSubmitted: (value) => _close(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => _close(null),
+            child: Text(context.tr('Cancelar'),
+                style: const TextStyle(color: AppColors.muted)),
+          ),
+          FilledButton(
+            onPressed: () => _close(_text.text),
+            child: Text(context.tr('Guardar')),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Owns the fields so they unfocus before the route goes away. Closing a
