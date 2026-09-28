@@ -47,7 +47,10 @@ class MainActivity : FlutterActivity() {
     private val nfcChannelName = "pos/nfc"
     private val nfcEventsName = "pos/nfc/tags"
     private val soundsChannelName = "pos/sounds"
+    private val soundExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val soundTracks = HashMap<String, AudioTrack>()
+    private val soundBytes = HashMap<String, Int>()
+    private val soundLooping = HashSet<String>()
     private var nfcEvents: EventChannel.EventSink? = null
     private var nfcActive = false
 
@@ -67,6 +70,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         printExecutor.shutdown()
+        soundExecutor.shutdown()
         super.onDestroy()
     }
 
@@ -126,17 +130,18 @@ class MainActivity : FlutterActivity() {
                 }
                 try {
                     when (call.method) {
-                        "load" -> {
+                        "load" -> runSound(result) {
                             val pcm = args["pcm"] as ByteArray
                             val rate = (args["rate"] as Number).toInt()
                             val channels = (args["channels"] as Number).toInt()
                             loadSound(name, pcm, rate, channels)
-                            result.success(null)
                         }
-                        "play" -> {
-                            playSound(name)
-                            result.success(null)
+                        "play" -> runSound(result) {
+                            val volume = (args["volume"] as? Number)?.toFloat() ?: 1f
+                            val loop = args["loop"] as? Boolean ?: false
+                            playSound(name, volume, loop)
                         }
+                        "stop" -> runSound(result) { stopSound(name) }
                         else -> result.notImplemented()
                     }
                 } catch (e: Throwable) {
@@ -148,8 +153,35 @@ class MainActivity : FlutterActivity() {
 
     // ---- sounds ----
 
+    private fun runSound(result: MethodChannel.Result, block: () -> Unit) {
+        soundExecutor.execute {
+            try {
+                block()
+                runOnUiThread { result.success(null) }
+            } catch (e: Throwable) {
+                Log.e(TAG, "sound op failed", e)
+                runOnUiThread {
+                    result.error("SOUND", e.message ?: e.toString(), null)
+                }
+            }
+        }
+    }
+
     private fun loadSound(name: String, pcm: ByteArray, rate: Int, channels: Int) {
-        soundTracks.remove(name)?.release()
+        val existing = soundTracks[name]
+        if (existing != null &&
+            existing.state == AudioTrack.STATE_INITIALIZED &&
+            soundBytes[name] == pcm.size
+        ) {
+            return
+        }
+        if (existing != null) {
+            if (existing.playState == AudioTrack.PLAYSTATE_PLAYING) existing.stop()
+            existing.release()
+            soundTracks.remove(name)
+            soundBytes.remove(name)
+            soundLooping.remove(name)
+        }
         val mask = if (channels == 1) {
             AudioFormat.CHANNEL_OUT_MONO
         } else {
@@ -179,13 +211,34 @@ class MainActivity : FlutterActivity() {
             throw IllegalStateException("AudioTrack $name write=$written state=${track.state}")
         }
         soundTracks[name] = track
+        soundBytes[name] = pcm.size
     }
 
-    private fun playSound(name: String) {
+    private fun playSound(name: String, volume: Float, loop: Boolean = false) {
+        val track = soundTracks[name] ?: return
+        val gain = volume.coerceIn(0f, 1f)
+        if (gain <= 0f) return
+        val playing = track.playState == AudioTrack.PLAYSTATE_PLAYING
+        // Peg clicks arrive faster than the clip. Restarting the track each
+        // time stalls the audio server on this device.
+        if (playing && !loop && name == "tick") return
+        if (playing) track.stop()
+        track.reloadStaticData()
+        val wasLoop = soundLooping.contains(name)
+        if (loop || wasLoop) {
+            val frames = track.bufferSizeInFrames
+            if (frames > 0) {
+                track.setLoopPoints(0, frames, if (loop) -1 else 0)
+            }
+        }
+        if (loop) soundLooping.add(name) else soundLooping.remove(name)
+        track.setVolume(gain)
+        track.play()
+    }
+
+    private fun stopSound(name: String) {
         val track = soundTracks[name] ?: return
         if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.stop()
-        track.reloadStaticData()
-        track.play()
     }
 
     // ---- NFC ----

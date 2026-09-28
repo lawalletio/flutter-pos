@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,7 +26,7 @@ import '../../domain/order/invoice_debug_store.dart';
 import '../../domain/order/order_reset.dart';
 import '../../domain/order/orders_store.dart';
 import '../../domain/order/receipt_printer.dart';
-import '../../domain/prize/prize_lottery.dart';
+import '../../domain/prize/prize_wheel.dart';
 import '../../platform/nfc_channel.dart';
 import '../orders/recheck_modal.dart';
 import 'coupon_detail_sheet.dart';
@@ -74,10 +73,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _verifyUrl; // LUD-21
   String? _invoiceError;
   bool _printed = false;
-  PrizeCoupon? _prizeWinner;
-  bool _prizePrinted = false;
-  bool _printingPrize = false;
-  final _prizeRng = Random();
   bool _collecting = false; // pulling payment from a tapped card
   bool _nfcAvailable = false;
   StreamSubscription<String>? _nfcSub;
@@ -87,6 +82,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   int? _orderCreatedAt; // kept across re-quotes so the order keeps its identity
   static int _liveScreens = 0;
   final int _screenId = DateTime.now().microsecondsSinceEpoch;
+
   /// Bumped on every invoice request. A reply whose generation is older is
   /// dropped, so a slow response cannot replace the QR the customer is scanning.
   int _invoiceGen = 0;
@@ -102,6 +98,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
   String _arsOf(int sats) => formatToPreference(
       Currency.ars, pricing.satsToFiat(sats, Currency.ars) ?? 0);
+
   /// What is actually being charged: the order minus whatever a coupon took
   /// off. Every amount on screen, on the invoice and on the ticket reads this —
   /// it is the single leverage point that keeps them from disagreeing.
@@ -185,40 +182,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
       couponName: _coupon?.name ?? '',
       discountSats: _discountSats,
     );
-    await _rollAndMaybePrintPrize();
-  }
-
-  Future<void> _rollAndMaybePrintPrize() async {
-    final s = appSettings.value;
-    final winner = rollPrize(
-      enabled: s.prizePrintEnabled,
-      coupons: s.prizeCoupons,
-      roll: () => _prizeRng.nextInt(101),
-    );
-    if (winner == null) return;
-    if (!mounted) return;
-    setState(() => _prizeWinner = winner);
-    if (s.prizePrintMode == PrizePrintMode.auto) {
-      await _printPrizeCoupon();
-    }
-  }
-
-  Future<void> _printPrizeCoupon() async {
-    final prize = _prizeWinner;
-    if (prize == null || _prizePrinted || _printingPrize) return;
-    setState(() => _printingPrize = true);
-    final res = await printPrizeCoupon(text: prize.text);
-    if (!mounted) return;
-    setState(() {
-      _printingPrize = false;
-      if (res.ok) _prizePrinted = true;
-    });
-    if (!res.ok) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(res.message),
-        backgroundColor: AppColors.error,
-      ));
-    }
   }
 
   /// The line items snapshotted on this screen's recorded order, if any.
@@ -295,7 +258,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
       } else {
         setState(() => _collecting = false);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(context.tr('Pago enviado, esperando confirmación…'))));
+            content:
+                Text(context.tr('Pago enviado, esperando confirmación…'))));
       }
     } on LnurlException catch (e) {
       if (!mounted || _view != _View.waiting) return;
@@ -373,7 +337,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _verifyUrl = inv.verify;
       });
       _recordOrder(inv); // persist a pending order (re-checkable later)
-      _rememberInvoice(inv, reason: reason, gen: gen, stale: false, applied: true);
+      _rememberInvoice(inv,
+          reason: reason, gen: gen, stale: false, applied: true);
       _startPolling();
       _startZapWatch(inv); // NIP-57: watch relays for the zap receipt
       _startAutoNfc(); // arm the card reader while pending
@@ -517,8 +482,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   void _couponError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(message), backgroundColor: AppColors.error));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppColors.error));
   }
 
   /// Scan a QR and apply what it holds.
@@ -692,16 +657,28 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
     switch (_view) {
       case _View.paid:
+        final settings = appSettings.value;
+        final offerSpin = offerWheelSpin(
+          prizesEnabled: settings.prizePrintEnabled,
+          hasPrizes: wheelHasPrizes(settings.prizeCoupons),
+          offer: settings.wheelOffer,
+          tipSats: widget.tipSats,
+        );
         return _scaffold(
           PaymentSuccessView(
             satsStr: _satsStr,
             arsStr: _arsStr,
             couponName: _coupon?.name,
             discountStr: _discountSats > 0 ? _satsOf(_discountSats) : null,
-            prizeText: _prizeWinner?.text,
-            prizePrinted: _prizePrinted,
-            printingPrize: _printingPrize,
-            onPrintPrize: _prizeWinner == null ? null : _printPrizeCoupon,
+            onSpinWheel: offerSpin
+                ? () {
+                    final back = widget.back;
+                    final target =
+                        back != null && back.isNotEmpty ? back : '/hub';
+                    context.push(
+                        '/ruleta?back=${Uri.encodeQueryComponent(target)}');
+                  }
+                : null,
             onBack: _finishAndBack,
           ),
           title: null,
@@ -769,7 +746,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
           const Icon(Icons.error_outline, color: AppColors.error, size: 48),
           const SizedBox(height: 14),
           Text(context.tr('No se pudo generar la invoice.'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Text(context.tr('La orden no tiene monto.'),
               style: const TextStyle(color: AppColors.muted)),
@@ -808,7 +786,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
           const Icon(Icons.error_outline, color: AppColors.error, size: 48),
           const SizedBox(height: 14),
           Text(context.tr('No se pudo generar la invoice.'),
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Text(_invoiceError ?? '',
               textAlign: TextAlign.center,
@@ -977,7 +956,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
                                           fontWeight: FontWeight.w700)),
                                   Text('${_arsOf(t.amountSats)} ARS',
                                       style: const TextStyle(
-                                          color: AppColors.muted, fontSize: 12)),
+                                          color: AppColors.muted,
+                                          fontSize: 12)),
                                 ],
                               ),
                               const SizedBox(width: 6),

@@ -14,6 +14,7 @@ void main() {
     setPrizePrintEnabled(true);
     setPrizePrintMode(PrizePrintMode.button);
     addPrizeCoupon('Café gratis', 25);
+    await flushPrizeSettings();
 
     appSettings.value = const SettingsState();
     await settingsPersistence.load();
@@ -24,5 +25,19 @@ void main() {
     expect(s.prizeCoupons.length, 1);
     expect(s.prizeCoupons.first.text, 'Café gratis');
     expect(s.prizeCoupons.first.chancePercent, 25);
+  });
+
+  test('wheel offer round-trips', () async {
+    SharedPreferences.setMockInitialValues({});
+    appSettings.value = const SettingsState();
+    await settingsPersistence.load();
+    expect(appSettings.value.wheelOffer, WheelOffer.tipOnly);
+
+    appSettings.value =
+        appSettings.value.copyWith(wheelOffer: WheelOffer.always);
+    await settingsPersistence.savePrizeSettings(appSettings.value);
+    appSettings.value = const SettingsState();
+    await settingsPersistence.load();
+    expect(appSettings.value.wheelOffer, WheelOffer.always);
   });
 }

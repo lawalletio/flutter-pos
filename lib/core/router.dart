@@ -12,6 +12,7 @@ import '../features/orders/invoice_debug_screen.dart';
 import '../features/orders/orders_screen.dart';
 import '../features/tab/tab_screen.dart';
 import '../features/relays/relay_sync_screen.dart';
+import '../features/prize/prize_wheel_screen.dart';
 import '../features/settings/settings_screen.dart';
 
 /// A fast, smooth transition applied to every route change: the incoming page
@@ -64,12 +65,24 @@ final appRouter = GoRouter(
         demo: s.uri.queryParameters['demo'] == '1',
       )),
     ),
-    GoRoute(path: '/paydesk', pageBuilder: (c, s) => _page(const PaydeskScreen())),
+    GoRoute(
+        path: '/paydesk', pageBuilder: (c, s) => _page(const PaydeskScreen())),
     GoRoute(
       path: '/tip',
       pageBuilder: (c, s) {
         final sats = int.tryParse(s.uri.queryParameters['sats'] ?? '') ?? 0;
-        return _page(TipScreen(amountSats: sats, back: s.uri.queryParameters['back']));
+        return _page(
+            TipScreen(amountSats: sats, back: s.uri.queryParameters['back']));
+      },
+    ),
+    GoRoute(
+      path: '/ruleta',
+      pageBuilder: (c, s) {
+        final back = s.uri.queryParameters['back'];
+        return _page(PrizeWheelScreen(
+          singleSpin: true,
+          returnTo: back != null && back.isNotEmpty ? back : '/hub',
+        ));
       },
     ),
     GoRoute(
@@ -86,13 +99,45 @@ final appRouter = GoRouter(
         ));
       },
     ),
-    GoRoute(path: '/orders', pageBuilder: (c, s) => _page(const OrdersScreen())),
+    GoRoute(
+        path: '/orders', pageBuilder: (c, s) => _page(const OrdersScreen())),
     GoRoute(
       path: '/invoice-debug',
       pageBuilder: (c, s) => _page(const InvoiceDebugScreen()),
     ),
     GoRoute(path: '/tab', pageBuilder: (c, s) => _page(const TabScreen())),
-    GoRoute(path: '/settings', pageBuilder: (c, s) => _page(const SettingsScreen())),
-    GoRoute(path: '/relays', pageBuilder: (c, s) => _page(const RelaySyncScreen())),
+    GoRoute(
+      path: '/settings',
+      pageBuilder: (c, s) => _page(const SettingsScreen()),
+      routes: [
+        for (final section in SettingsSection.values)
+          if (section != SettingsSection.coupons)
+            GoRoute(
+              path: section.path,
+              pageBuilder: (c, s) =>
+                  _page(SettingsSectionScreen(section: section)),
+            ),
+        GoRoute(
+          path: SettingsSection.coupons.path,
+          pageBuilder: (c, s) => _page(
+              const SettingsSectionScreen(section: SettingsSection.coupons)),
+          routes: [
+            GoRoute(
+              path: 'ruleta',
+              pageBuilder: (c, s) => _page(const WheelSettingsScreen()),
+              routes: [
+                GoRoute(
+                  path: 'probar',
+                  pageBuilder: (c, s) =>
+                      _page(const PrizeWheelScreen(practice: true)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    ),
+    GoRoute(
+        path: '/relays', pageBuilder: (c, s) => _page(const RelaySyncScreen())),
   ],
 );
