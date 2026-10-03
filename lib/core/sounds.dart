@@ -7,7 +7,7 @@ import '../domain/config/settings_state.dart';
 
 /// Short cues for the till. Each event has its own file so they stay distinct
 /// even when two happen close together.
-enum AppSound { start, button, invoice, card, paid, tick, win, miss, casino, heartbeat }
+enum AppSound { start, button, invoice, card, paid, tick, win, miss, casino, heartbeat, tip15 }
 
 /// Choices for the successful-payment cue. [id] is what gets persisted.
 class PaidSoundOption {
@@ -44,6 +44,7 @@ class AppSounds {
     AppSound.card: 'sounds/card.wav',
     AppSound.win: 'sounds/prize_loquita.wav',
     AppSound.miss: 'sounds/miss_life.wav',
+    AppSound.tip15: 'sounds/tip_hermoso.wav',
   };
 
   /// Decode each cue and hand the PCM to Android. Safe to call more than once.

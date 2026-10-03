@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/i18n.dart';
+import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -81,6 +82,7 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
   int _heard = 0;
   bool _printing = false;
   bool _printed = false;
+  bool _printGate = false;
   bool _built = false;
   double _laidDiameter = -1;
   List<_LaidLabel> _labels = const [];
@@ -318,22 +320,33 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
 
   Future<void> _claim() async {
     final prize = _slices[_shown].prize;
-    if (prize == null || _printed) return;
-    if (!_printing) setState(() => _printing = true);
-    final res = await printPrizeCoupon(text: prize.text);
+    if (prize == null || _printed || _printGate) return;
+    setState(() {
+      _printing = true;
+      _printGate = true;
+    });
+    final printed = await printOrAskToContinue(
+      context,
+      print: () => printPrizeCoupon(text: prize.text),
+    );
     if (!mounted) return;
+    if (!printed) {
+      setState(() {
+        _printing = false;
+        _printGate = false;
+      });
+      _leave();
+      return;
+    }
     setState(() {
       _printing = false;
-      if (res.ok) _printed = true;
+      _printed = true;
+      _printGate = false;
     });
-    if (res.ok) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(res.message),
-      backgroundColor: AppColors.error,
-    ));
   }
 
   void _leave() {
+    if (_printGate) return;
     AppSounds.stop(AppSound.win);
     AppSounds.stop(AppSound.miss);
     final destination = widget.returnTo;
@@ -381,7 +394,7 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
     final leavePayment = widget.returnTo != null && widget.returnTo!.isNotEmpty;
     if (!_hasPrizes) {
       return PopScope(
-        canPop: !leavePayment,
+        canPop: !leavePayment && !_printGate,
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) _leave();
         },
@@ -404,7 +417,7 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
     _layoutLabels(diameter);
     final slice = _slices[_shown];
     return PopScope(
-      canPop: !leavePayment,
+      canPop: !leavePayment && !_printGate,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _leave();
       },

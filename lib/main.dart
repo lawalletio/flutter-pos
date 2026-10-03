@@ -37,11 +37,14 @@ Future<void> main() async {
   // the merchant LUD-16 address — both otherwise happen inline on that first
   // invoice request. Fire-and-forget; errors are irrelevant here.
   nostrIdentity.publicKey().ignore();
-  lnurl.resolve(merchantAddress.value).ignore();
-  // Same idea for the menu: resolve NIP-05 and pull the merchant's NIP-99
-  // catalog now, so opening the menu paints instead of spinning. Serves the
-  // persisted copy first, then revalidates against the relays.
-  catalog.ensureLoaded(merchantAddress.value).ignore();
+  final address = merchantAddress.value.trim();
+  if (address.isNotEmpty) {
+    lnurl.resolve(address).ignore();
+    // Same idea for the menu: resolve NIP-05 and pull the merchant's NIP-99
+    // catalog now, so opening the menu paints instead of spinning. Serves the
+    // persisted copy first, then revalidates against the relays.
+    catalog.ensureLoaded(address).ignore();
+  }
   try {
     await AppSounds.prepare();
   } catch (e) {

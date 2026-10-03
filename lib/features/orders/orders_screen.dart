@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/i18n.dart';
+import '../../core/print_error.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/pricing/pricing_service.dart';
@@ -176,17 +177,23 @@ class _OrderCard extends StatelessWidget {
     final paidNow =
         ordersStore.notifier.value.any((o) => o.id == order.id && o.isPaid);
     if (!paidNow) return;
-    final result = await printOrderReceipt(
-      amountSats: order.amountSats,
-      items: order.items,
-      thankYouMessage: thankYou,
-      couponName: order.couponName ?? '',
-      discountSats: order.discountSats,
+    if (!context.mounted) return;
+    final printed = await printOrAskToContinue(
+      context,
+      print: () => printOrderReceipt(
+        amountSats: order.amountSats,
+        items: order.items,
+        thankYouMessage: thankYou,
+        couponName: order.couponName ?? '',
+        discountSats: order.discountSats,
+      ),
     );
+    if (!context.mounted || !printed) return;
     messenger.showSnackBar(
       SnackBar(
-          content: Text(result.message),
-          duration: const Duration(seconds: 2)),
+        content: Text(context.tr('Impreso correctamente')),
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 
