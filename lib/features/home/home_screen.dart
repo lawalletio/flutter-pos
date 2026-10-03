@@ -95,7 +95,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _ctrl = TextEditingController(text: 'barra@lacrypta.ar');
+  final _ctrl = TextEditingController();
   final _focus = FocusNode();
   bool _loading = false;
   String? _error;
@@ -103,6 +103,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _ctrl.text = merchantAddress.value;
+    merchantAddress.addListener(_onSession);
     addressHistory.load();
     // Flip the suffix arrow when the field gains/loses focus.
     _focus.addListener(() {
@@ -114,8 +116,16 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _onSession() {
+    if (!mounted) return;
+    final next = merchantAddress.value;
+    if (_ctrl.text == next) return;
+    _ctrl.text = next;
+  }
+
   @override
   void dispose() {
+    merchantAddress.removeListener(_onSession);
     _focus.dispose();
     _ctrl.dispose();
     super.dispose();

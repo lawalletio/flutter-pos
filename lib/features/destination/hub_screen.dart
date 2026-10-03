@@ -22,7 +22,7 @@ class HubScreen extends StatefulWidget {
   final bool openMenu; // preview affordance: auto-open the address dropdown
   const HubScreen({
     super.key,
-    this.address = 'barra@lacrypta.ar',
+    this.address = '',
     this.openMenu = false,
   });
 
@@ -68,6 +68,7 @@ class _HubScreenState extends State<HubScreen> {
     // its default, so the menu would come from one merchant while
     // PaymentScreen charges another.
     merchantAddress.value = address;
+    if (address.trim().isEmpty) return;
 
     // Re-ask the relays rather than ensureLoaded: a different merchant is
     // exactly when the previous catalog is worthless, and switching back to one
@@ -222,6 +223,7 @@ class _HubScreenState extends State<HubScreen> {
             OutlinedButton.icon(
               onPressed: () {
                 resetOrder();
+                endSession();
                 context.go('/');
               },
               style: OutlinedButton.styleFrom(
@@ -381,6 +383,7 @@ class _HubScreenState extends State<HubScreen> {
       onTap: () {
         _closeDropdown();
         resetOrder();
+        endSession();
         context.go('/');
       },
       child: Padding(

@@ -6,7 +6,7 @@ import 'package:lawallet_pos/domain/config/session.dart';
 /// into an invoice — so getting this wrong charges into the wrong wallet.
 
 void main() {
-  tearDown(() => merchantAddress.value = 'barra@lacrypta.ar');
+  tearDown(() => merchantAddress.value = '');
 
   test('the route wins when it names a merchant', () {
     merchantAddress.value = 'barra@lacrypta.ar';

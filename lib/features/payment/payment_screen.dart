@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/i18n.dart';
+import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -61,10 +62,10 @@ class PaymentScreen extends StatefulWidget {
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
 
-enum _View { waiting, paid, addedToTab }
+enum _View { waiting, printing, paid, addedToTab }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  late _View _view = widget.initiallyPaid ? _View.paid : _View.waiting;
+  late _View _view = widget.initiallyPaid ? _View.printing : _View.waiting;
   String? _tabName;
   int? _tabTotalSats;
 
@@ -72,7 +73,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _invoice; // bolt11
   String? _verifyUrl; // LUD-21
   String? _invoiceError;
-  bool _printed = false;
+  bool _printStarted = false;
   bool _collecting = false; // pulling payment from a tapped card
   bool _nfcAvailable = false;
   StreamSubscription<String>? _nfcSub;
@@ -135,13 +136,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openAddToTab());
     }
     if (widget.initiallyPaid) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _printReceipt());
+      WidgetsBinding.instance.addPostFrameCallback((_) => _finishPrint());
     }
   }
 
   /// Transition to the paid state and print the receipt (once).
   void _markPaid() {
-    if (_view == _View.paid) return;
+    if (_view == _View.paid || _view == _View.printing) return;
     AppSounds.play(AppSound.paid);
     _stopNfc();
     _poll?.cancel();
@@ -152,9 +153,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
     resetOrder();
     setState(() {
       _collecting = false;
-      _view = _View.paid;
+      _view = _View.printing;
     });
-    _printReceipt();
+    _finishPrint();
   }
 
   void _stopNfc() {
@@ -166,22 +167,26 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _zap = null;
   }
 
-  /// Auto-print the receipt on the ZCS printer. No-op where there's no printer
-  /// (e.g. web preview) — the channel returns gracefully.
-  Future<void> _printReceipt() async {
-    if (_printed) return;
-    _printed = true;
-    // Print from the order snapshot (the live cart is already cleared by
-    // resetOrder() at this point); fall back to the live cart for the preview
-    // `initiallyPaid` path, which never records an order.
-    final items = _recordedItems() ?? currentOrderItems.value;
-    await printOrderReceipt(
-      amountSats: _chargeSats,
-      items: items,
-      thankYouMessage: context.tr('Gracias por su pago'),
-      couponName: _coupon?.name ?? '',
-      discountSats: _discountSats,
+  /// Prints the receipt before the success screen. A failure keeps that screen
+  /// waiting until the cashier retries or chooses to continue.
+  Future<void> _finishPrint() async {
+    if (_printStarted) return;
+    _printStarted = true;
+    await printOrAskToContinue(
+      context,
+      print: () {
+        final items = _recordedItems() ?? currentOrderItems.value;
+        return printOrderReceipt(
+          amountSats: _chargeSats,
+          items: items,
+          thankYouMessage: context.tr('Gracias por su pago'),
+          couponName: _coupon?.name ?? '',
+          discountSats: _discountSats,
+        );
+      },
     );
+    if (!mounted) return;
+    setState(() => _view = _View.paid);
   }
 
   /// The line items snapshotted on this screen's recorded order, if any.
@@ -656,6 +661,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
       return _scaffold(_collectingView());
     }
     switch (_view) {
+      case _View.printing:
+        return _scaffold(_printingView(), title: 'Imprimiendo…');
       case _View.paid:
         final settings = appSettings.value;
         final offerSpin = offerWheelSpin(
@@ -693,12 +700,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Widget _scaffold(Widget body, {String? title = 'Cobrar'}) => PopScope(
         // Leaving mid-charge drops the widget while the card can still pay,
         // so the order would stay unpaid and the till could charge it again.
-        canPop: !_collecting,
+        canPop: !_collecting && _view != _View.printing,
         child: Scaffold(
           appBar: PosAppBar(
             title: title != null ? context.tr(title) : null,
             showSettings: false,
-            showBack: !_collecting,
+            showBack: !_collecting && _view != _View.printing,
             actions: _couponActions(),
           ),
           body: PosBody(child: body),
@@ -778,6 +785,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// Shown while a tapped card is being charged (LNURL-withdraw in progress).
   Widget _collectingView() => NfcChargingView(
         amountLabel: '$_satsStr sats · ≈ $_arsStr ARS',
+      );
+
+  Widget _printingView() => const Center(
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: CircularProgressIndicator(strokeWidth: 3),
+        ),
       );
 
   Widget _invoiceErrorView() => Column(

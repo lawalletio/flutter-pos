@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/i18n.dart';
+import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -132,48 +133,73 @@ class SettingsSectionScreen extends StatelessWidget {
     switch (section) {
       case SettingsSection.account:
         return [
-          _card(Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Row(
-                  children: [
-                    const Icon(Icons.storefront_outlined,
-                        size: 20, color: AppColors.primary),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(merchantAddress.value,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 15)),
+          ValueListenableBuilder<String>(
+            valueListenable: merchantAddress,
+            builder: (context, address, _) {
+              final signedIn = address.trim().isNotEmpty;
+              return _card(Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      children: [
+                        Icon(
+                          signedIn
+                              ? Icons.storefront_outlined
+                              : Icons.person_off_outlined,
+                          size: 20,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            signedIn ? address : context.tr('Sin sesión'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 15),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              InkWell(
-                onTap: () {
-                  resetOrder();
-                  context.go('/');
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.logout, size: 20, color: AppColors.error),
-                      const SizedBox(width: 10),
-                      Text(context.tr('Cerrar sesión'),
-                          style: const TextStyle(
-                              color: AppColors.error,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600)),
-                    ],
                   ),
-                ),
-              ),
-            ],
-          )),
+                  const Divider(height: 1),
+                  InkWell(
+                    onTap: () {
+                      resetOrder();
+                      endSession();
+                      context.go('/');
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Row(
+                        children: [
+                          Icon(
+                            signedIn ? Icons.logout : Icons.login,
+                            size: 20,
+                            color: signedIn
+                                ? AppColors.error
+                                : AppColors.primary,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            context.tr(signedIn ? 'Cerrar sesión' : 'Ingresar'),
+                            style: TextStyle(
+                              color: signedIn
+                                  ? AppColors.error
+                                  : AppColors.primary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ));
+            },
+          ),
         ];
       case SettingsSection.general:
         return [
@@ -352,21 +378,24 @@ class SettingsSectionScreen extends StatelessWidget {
             enabled: s.prizePrintEnabled,
             coupons: s.prizeCoupons,
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () => context.push('/settings/cupones/ruleta'),
-              icon: const Icon(Icons.casino_outlined),
-              label: Text(context.tr('Configurar Ruleta')),
+          if (s.prizePrintEnabled) ...[
+            const SizedBox(height: 16),
+            _WheelOfferCard(offer: s.wheelOffer),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => context.push('/settings/cupones/ruleta'),
+                icon: const Icon(Icons.casino_outlined),
+                label: Text(context.tr('Configurar Ruleta')),
+              ),
             ),
-          ),
+          ],
         ];
     }
   }
 }
 
-/// Wheel timing, when it appears, and the try button. Opened from Cupones.
+/// Wheel timing and the try button. When the wheel appears is set in Cupones.
 class WheelSettingsScreen extends StatelessWidget {
   const WheelSettingsScreen({super.key});
 
@@ -385,7 +414,6 @@ class WheelSettingsScreen extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
-                _WheelOfferCard(offer: s.wheelOffer),
                 _WheelDurationSlider(milliseconds: s.wheelDurationMs),
                 _WheelPaceSlider(
                   label: context.tr('Aceleración'),
@@ -872,17 +900,20 @@ class _VersionFooter extends StatelessWidget {
 }
 
 Future<void> _testPrint(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(SnackBar(
-        content: Text(context.tr('Imprimiendo prueba…')),
-        duration: const Duration(seconds: 1)));
-    final res = await PrinterChannel.testPrint();
-    if (!context.mounted) return;
-    messenger.showSnackBar(SnackBar(
-      content: Text(res.message),
-      backgroundColor: res.ok ? AppColors.primary : AppColors.error,
-    ));
-  }
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.showSnackBar(SnackBar(
+      content: Text(context.tr('Imprimiendo prueba…')),
+      duration: const Duration(seconds: 1)));
+  final printed = await printOrAskToContinue(
+    context,
+    print: PrinterChannel.testPrint,
+  );
+  if (!context.mounted || !printed) return;
+  messenger.showSnackBar(SnackBar(
+    content: Text(context.tr('Impreso correctamente')),
+    backgroundColor: AppColors.primary,
+  ));
+}
 
 Widget _card(Widget child) => Material(
       color: AppColors.surface,

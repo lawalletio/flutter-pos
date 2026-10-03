@@ -170,8 +170,99 @@ class SettingsState {
 final ValueNotifier<SettingsState> appSettings =
     ValueNotifier<SettingsState>(const SettingsState());
 
-void setTipEnabled(bool v) =>
-    appSettings.value = appSettings.value.copyWith(tipEnabled: v);
+/// Installed by persistence. Merchant-scoped edits (tip, coupons, wheel) call it.
+void Function()? persistTillSettings;
+
+/// Tip, coupons, and the wheel, stored per Lightning address.
+@immutable
+class MerchantTillSettings {
+  final bool tipEnabled;
+  final bool prizePrintEnabled;
+  final PrizePrintMode prizePrintMode;
+  final List<PrizeCoupon> prizeCoupons;
+  final int wheelDurationMs;
+  final double wheelSpeed;
+  final double wheelAcceleration;
+  final bool wheelPracticePrint;
+  final WheelOffer wheelOffer;
+
+  const MerchantTillSettings({
+    this.tipEnabled = false,
+    this.prizePrintEnabled = false,
+    this.prizePrintMode = PrizePrintMode.auto,
+    this.prizeCoupons = const [],
+    this.wheelDurationMs = kWheelDurationDefaultMs,
+    this.wheelSpeed = 1,
+    this.wheelAcceleration = 1,
+    this.wheelPracticePrint = false,
+    this.wheelOffer = WheelOffer.tipOnly,
+  });
+
+  factory MerchantTillSettings.fromSettings(SettingsState s) =>
+      MerchantTillSettings(
+        tipEnabled: s.tipEnabled,
+        prizePrintEnabled: s.prizePrintEnabled,
+        prizePrintMode: s.prizePrintMode,
+        prizeCoupons: s.prizeCoupons,
+        wheelDurationMs: s.wheelDurationMs,
+        wheelSpeed: s.wheelSpeed,
+        wheelAcceleration: s.wheelAcceleration,
+        wheelPracticePrint: s.wheelPracticePrint,
+        wheelOffer: s.wheelOffer,
+      );
+
+  factory MerchantTillSettings.fromJson(Map<String, dynamic> json) =>
+      MerchantTillSettings(
+        tipEnabled: json['tipEnabled'] as bool? ?? false,
+        prizePrintEnabled: json['prizePrintEnabled'] as bool? ?? false,
+        prizePrintMode: json['prizePrintMode'] == PrizePrintMode.button.name
+            ? PrizePrintMode.button
+            : PrizePrintMode.auto,
+        prizeCoupons: (json['prizeCoupons'] as List<dynamic>? ?? const [])
+            .map((e) => PrizeCoupon.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        wheelDurationMs: clampWheelDurationMs(
+          (json['wheelDurationMs'] as num?)?.toInt() ?? kWheelDurationDefaultMs,
+        ),
+        wheelSpeed: clampWheelPace((json['wheelSpeed'] as num?)?.toDouble() ?? 1),
+        wheelAcceleration: clampWheelPace(
+          (json['wheelAcceleration'] as num?)?.toDouble() ?? 1,
+        ),
+        wheelPracticePrint: json['wheelPracticePrint'] as bool? ?? false,
+        wheelOffer: json['wheelOffer'] == WheelOffer.always.name
+            ? WheelOffer.always
+            : WheelOffer.tipOnly,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'tipEnabled': tipEnabled,
+        'prizePrintEnabled': prizePrintEnabled,
+        'prizePrintMode': prizePrintMode.name,
+        'prizeCoupons': prizeCoupons.map((c) => c.toJson()).toList(),
+        'wheelDurationMs': wheelDurationMs,
+        'wheelSpeed': wheelSpeed,
+        'wheelAcceleration': wheelAcceleration,
+        'wheelPracticePrint': wheelPracticePrint,
+        'wheelOffer': wheelOffer.name,
+      };
+
+  SettingsState applyTo(SettingsState s) => s.copyWith(
+        tipEnabled: tipEnabled,
+        prizePrintEnabled: prizePrintEnabled,
+        prizePrintMode: prizePrintMode,
+        prizeCoupons: prizeCoupons,
+        wheelDurationMs: wheelDurationMs,
+        wheelSpeed: wheelSpeed,
+        wheelAcceleration: wheelAcceleration,
+        wheelPracticePrint: wheelPracticePrint,
+        wheelOffer: wheelOffer,
+      );
+}
+
+void setTipEnabled(bool v) {
+  appSettings.value = appSettings.value.copyWith(tipEnabled: v);
+  persistTillSettings?.call();
+}
 void setTabEnabled(bool v) =>
     appSettings.value = appSettings.value.copyWith(tabEnabled: v);
 void setLanguage(String code) =>
