@@ -13,7 +13,9 @@ import '../features/orders/orders_screen.dart';
 import '../features/tab/tab_screen.dart';
 import '../features/relays/relay_sync_screen.dart';
 import '../features/prize/prize_wheel_screen.dart';
+import '../features/settings/pin_settings_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/miniapps/zape_screen.dart';
 
 /// A fast, smooth transition applied to every route change: the incoming page
 /// fades in while easing up from a slight scale/offset — snappy enough for a POS
@@ -118,6 +120,10 @@ final appRouter = GoRouter(
                   _page(SettingsSectionScreen(section: section)),
             ),
         GoRoute(
+          path: 'pin',
+          pageBuilder: (c, s) => _page(const PinSettingsScreen()),
+        ),
+        GoRoute(
           path: SettingsSection.coupons.path,
           pageBuilder: (c, s) => _page(
               const SettingsSectionScreen(section: SettingsSection.coupons)),
@@ -137,6 +143,7 @@ final appRouter = GoRouter(
         ),
       ],
     ),
+    GoRoute(path: '/zape', pageBuilder: (c, s) => _page(const ZapeScreen())),
     GoRoute(
         path: '/relays', pageBuilder: (c, s) => _page(const RelaySyncScreen())),
   ],

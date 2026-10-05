@@ -10,6 +10,7 @@ import 'data/nostr/identity.dart';
 import 'data/pricing/block_service.dart';
 import 'data/pricing/pricing_service.dart';
 import 'domain/config/address_history.dart';
+import 'domain/config/miniapp_pin.dart';
 import 'domain/config/settings_persistence.dart';
 import 'domain/config/session.dart';
 import 'domain/order/invoice_debug_store.dart';
@@ -30,6 +31,7 @@ Future<void> main() async {
   // install; both persist across restarts).
   addressHistory.load();
   settingsPersistence.load();
+  loadMiniappPin();
   ordersStore.load();
   invoiceDebugStore.load();
   // Warm the invoice path so the FIRST charge is just the provider callback:

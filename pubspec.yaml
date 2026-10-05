@@ -67,3 +67,8 @@ flutter:
     - assets/images/
     - assets/sounds/
     - assets/lottie/
+  fonts:
+    # OFL, see assets/fonts/ClimateCrisis-OFL.txt. Also drawn natively for the ZAPE print.
+    - family: ClimateCrisis
+      fonts:
+        - asset: assets/fonts/ClimateCrisis.ttf

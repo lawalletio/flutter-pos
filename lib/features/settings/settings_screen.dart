@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/i18n.dart';
+import '../../core/pin_dialog.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
@@ -28,7 +29,8 @@ enum SettingsSection {
   sound('sonido', 'Sonido', Icons.volume_up_outlined),
   relays('relays', 'Relays', Icons.podcasts_rounded),
   printer('impresora', 'Impresora', Icons.print_outlined),
-  coupons('cupones', 'Cupones', Icons.local_activity_outlined);
+  coupons('cupones', 'Cupones', Icons.local_activity_outlined),
+  miniapps('miniapps', 'Miniapps', Icons.apps_rounded);
 
   const SettingsSection(this.path, this.titleKey, this.icon);
 
@@ -37,7 +39,7 @@ enum SettingsSection {
   final IconData icon;
 }
 
-/// Settings home: six large tiles. Each one opens its own section.
+/// Settings home: one large tile per section. Each one opens its own section.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -231,6 +233,17 @@ class SettingsSectionScreen extends StatelessWidget {
                 value: s.tabEnabled,
                 onChanged: setTabEnabled,
               ),
+              const Divider(height: 1),
+              ListTile(
+                key: const Key('pin-settings'),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.lock_outline, color: AppColors.primary),
+                title: Text(context.tr('Configuración de PIN')),
+                subtitle: Text(context.tr('Bloqueo de las miniapps'),
+                    style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+                onTap: () => _openPinSettings(context),
+              ),
             ],
           )),
         ];
@@ -369,6 +382,15 @@ class SettingsSectionScreen extends StatelessWidget {
               ],
             ),
           )),
+        ];
+      case SettingsSection.miniapps:
+        return [
+          PosCard(
+            icon: Icons.celebration_outlined,
+            label: 'ZAPE',
+            sublabel: context.tr('Modo kiosco'),
+            onTap: () => context.go('/zape'),
+          ),
         ];
       case SettingsSection.coupons:
         return [
@@ -553,6 +575,12 @@ Future<void> _selectWheelOffer(BuildContext context, WheelOffer value) async {
   if (enable != true || !context.mounted) return;
   setTipEnabled(true);
   setWheelOffer(WheelOffer.tipOnly);
+}
+
+/// Asks for the PIN first, but only once one has been set.
+Future<void> _openPinSettings(BuildContext context) async {
+  if (!await confirmMiniappPin(context, action: 'Entrar')) return;
+  if (context.mounted) context.push('/settings/pin');
 }
 
 Future<void> _onTipChanged(

@@ -62,6 +62,7 @@ class AppSounds {
     await _loadPcm(AppSound.tick.name, _tickPcm());
     await _loadPcm(AppSound.casino.name, _casinoPcm());
     await _loadPcm(AppSound.heartbeat.name, _heartbeatPcm());
+    await _loadZape();
     _ready = true;
   }
 
@@ -85,16 +86,58 @@ class AppSounds {
     });
   }
 
-  static void play(AppSound sound, {bool loop = false}) {
-    if (!_ready) return;
+  static double _gain(AppSound sound) {
     final settings = appSettings.value;
-    if (!settings.soundEnabled) return;
+    if (!settings.soundEnabled) return 0;
     final specific = switch (sound) {
       AppSound.button => settings.touchVolume,
       AppSound.paid => settings.paidVolume,
       _ => 1.0,
     };
-    final gain = (settings.soundVolume * specific).clamp(0.0, 1.0);
+    return (settings.soundVolume * specific).clamp(0.0, 1.0);
+  }
+
+  /// "Zapeee" whose "e" holds until [stopZape], then ends naturally. The
+  /// parts come from `tool/zape_sustain.py`.
+  static void startZape() {
+    if (!_ready) return;
+    final gain = _gain(AppSound.paid);
+    if (gain <= 0) return;
+    _invokeQuiet('startSustain', {'name': 'zape', 'volume': gain});
+  }
+
+  static void stopZape() {
+    if (!_ready) return;
+    _invokeQuiet('stopSustain', {'name': 'zape'});
+  }
+
+  static void _invokeQuiet(String method, Map<String, Object> args) {
+    _channel.invokeMethod<void>(method, args).then(
+      (_) {},
+      onError: (Object e) {
+        debugPrint('AppSounds: $e');
+      },
+    );
+  }
+
+  static Future<void> _loadZape() async {
+    Future<_WavPcm> part(String name) async =>
+        _WavPcm.parse(await rootBundle.load('assets/sounds/zape_$name.wav'));
+    final intro = await part('intro');
+    await _channel.invokeMethod<void>('loadSustain', {
+      'name': 'zape',
+      'rate': intro.sampleRate,
+      'channels': intro.channels,
+      'intro': intro.pcm,
+      'loop': (await part('loop')).pcm,
+      'release': (await part('release')).pcm,
+    });
+  }
+
+  static void play(AppSound sound, {bool loop = false}) {
+    if (!_ready) return;
+    final settings = appSettings.value;
+    final gain = _gain(sound);
     if (gain <= 0) return;
     if (sound == AppSound.button) {
       final now = DateTime.now();
