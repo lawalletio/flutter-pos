@@ -2,6 +2,11 @@ package ar.lawallet.lawallet_pos
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -18,6 +23,7 @@ import com.zcs.sdk.SdkResult
 import com.zcs.sdk.Sys
 import com.zcs.sdk.print.PrnStrFormat
 import com.zcs.sdk.print.PrnTextFont
+import io.flutter.FlutterInjector
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -51,6 +57,8 @@ class MainActivity : FlutterActivity() {
     private val soundTracks = HashMap<String, AudioTrack>()
     private val soundBytes = HashMap<String, Int>()
     private val soundLooping = HashSet<String>()
+    private val sustains = HashMap<String, SustainClip>()
+    private var sustainPlayer: SustainPlayer? = null
     private var nfcEvents: EventChannel.EventSink? = null
     private var nfcActive = false
 
@@ -91,6 +99,10 @@ class MainActivity : FlutterActivity() {
                         @Suppress("UNCHECKED_CAST")
                         val args = call.arguments as? Map<String, Any?> ?: emptyMap()
                         runAsync(result) { printCoupon(args) }
+                    }
+                    "printZape" -> {
+                        val points = ((call.arguments as? Map<*, *>)?.get("points") as? Number)?.toInt() ?: 10
+                        runAsync(result) { printZape(points) }
                     }
                     else -> result.notImplemented()
                 }
@@ -142,6 +154,23 @@ class MainActivity : FlutterActivity() {
                             playSound(name, volume, loop)
                         }
                         "stop" -> runSound(result) { stopSound(name) }
+                        "loadSustain" -> runSound(result) {
+                            sustains[name] = SustainClip(
+                                (args["rate"] as Number).toInt(),
+                                (args["channels"] as Number).toInt(),
+                                shorts(args["intro"] as ByteArray),
+                                shorts(args["loop"] as ByteArray),
+                                shorts(args["release"] as ByteArray),
+                            )
+                        }
+                        "startSustain" -> runSound(result) {
+                            val clip = sustains[name] ?: return@runSound
+                            val volume = (args["volume"] as? Number)?.toFloat() ?: 1f
+                            sustainPlayer?.abort = true
+                            sustainPlayer = SustainPlayer(clip, volume.coerceIn(0f, 1f))
+                                .also { it.start() }
+                        }
+                        "stopSustain" -> runSound(result) { sustainPlayer?.stopping = true }
                         else -> result.notImplemented()
                     }
                 } catch (e: Throwable) {
@@ -239,6 +268,93 @@ class MainActivity : FlutterActivity() {
     private fun stopSound(name: String) {
         val track = soundTracks[name] ?: return
         if (track.playState == AudioTrack.PLAYSTATE_PLAYING) track.stop()
+    }
+
+    private fun shorts(pcm: ByteArray): ShortArray {
+        val out = ShortArray(pcm.size / 2)
+        java.nio.ByteBuffer.wrap(pcm).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .asShortBuffer().get(out)
+        return out
+    }
+
+    /** Interleaved 16-bit PCM. [loop] must repeat seamlessly; the intro ends where it begins. */
+    private class SustainClip(
+        val rate: Int,
+        val channels: Int,
+        val intro: ShortArray,
+        val loop: ShortArray,
+        val release: ShortArray,
+    )
+
+    /**
+     * Streams intro, then the loop until [stopping], then the release, crossfaded
+     * out of wherever the loop was. Static tracks can't change loop points while
+     * playing, so this one is fed live.
+     */
+    private class SustainPlayer(val clip: SustainClip, val volume: Float) : Thread("sustain") {
+        @Volatile var stopping = false
+        @Volatile var abort = false
+
+        override fun run() {
+            val mask = if (clip.channels == 1) {
+                AudioFormat.CHANNEL_OUT_MONO
+            } else {
+                AudioFormat.CHANNEL_OUT_STEREO
+            }
+            val min = AudioTrack.getMinBufferSize(clip.rate, mask, AudioFormat.ENCODING_PCM_16BIT)
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(clip.rate)
+                        .setChannelMask(mask)
+                        .build()
+                )
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .setBufferSizeInBytes(min * 2)
+                .build()
+            try {
+                track.setVolume(volume)
+                track.play()
+                var written = write(track, clip.intro, 0, clip.intro.size)
+                val loop = clip.loop
+                val chunk = 1024 * clip.channels
+                var p = 0
+                while (!stopping && !abort) {
+                    val n = minOf(chunk, loop.size - p)
+                    written += write(track, loop, p, n)
+                    p = (p + n) % loop.size
+                }
+                if (abort) return
+                // 40 ms equal-power crossfade from the loop into the natural ending.
+                val tail = clip.release.copyOf()
+                val fadeFrames = minOf(clip.rate * 40 / 1000, tail.size / clip.channels)
+                for (i in 0 until fadeFrames * clip.channels) {
+                    val w = Math.sin((i / clip.channels).toDouble() / fadeFrames * Math.PI / 2)
+                    val from = loop[(p + i) % loop.size]
+                    tail[i] = (tail[i] * w + from * Math.sqrt(1 - w * w)).toInt().toShort()
+                }
+                written += write(track, tail, 0, tail.size)
+                val frames = written / clip.channels
+                while (!abort && track.playbackHeadPosition < frames) sleep(10)
+            } finally {
+                track.pause()
+                track.flush()
+                track.release()
+            }
+        }
+
+        private fun write(track: AudioTrack, pcm: ShortArray, from: Int, count: Int): Int {
+            val n = track.write(pcm, from, count)
+            check(n >= 0) { "sustain write=$n" }
+            return n
+        }
     }
 
     // ---- NFC ----
@@ -515,6 +631,68 @@ class MainActivity : FlutterActivity() {
         return p.setPrintStart()
     }
 
+    private val zapeTypeface: Typeface by lazy {
+        val key = FlutterInjector.instance().flutterLoader()
+            .getLookupKeyForAsset("assets/fonts/ClimateCrisis.ttf")
+        Typeface.createFromAsset(assets, key)
+    }
+
+    /**
+     * A ZAPE strip [points] × 1.7 cm long: the La Crypta mark across the full width,
+     * then a black band (80% wide) with "ZAPEEE…" in white Climate Crisis, turned
+     * 90° clockwise to run down the roll. Enough E's are added to pass that, and
+     * the image is cut there, mid-letter if need be, then [ZAPE_BOTTOM_MARGIN]
+     * blank dots and no feed.
+     */
+    private fun printZape(points: Int): Int {
+        if (!ensureInit()) throw RuntimeException("Impresora no disponible")
+        val p = printer!!
+        val status = p.getPrinterStatus()
+        if (status == SdkResult.SDK_PRN_STATUS_PAPEROUT) return status
+
+        val length = points.coerceIn(1, 40) * ZAPE_DOTS_PER_CM * 17 / 10
+        val strip = Bitmap.createBitmap(ZAPE_DOTS, length + ZAPE_BOTTOM_MARGIN, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(strip)
+        canvas.drawColor(Color.WHITE)
+        canvas.clipRect(0, 0, ZAPE_DOTS, length) // the margin stays blank even mid-logo
+
+        val logo = BitmapFactory.decodeResource(resources, R.drawable.zape_logo)
+        val logoHeight = logo.height * ZAPE_DOTS / logo.width
+        canvas.drawBitmap(logo, null, Rect(0, 0, ZAPE_DOTS, logoHeight), Paint(Paint.FILTER_BITMAP_FLAG))
+
+        val top = logoHeight + ZAPE_LOGO_GAP
+        if (top < length) {
+            val bandWidth = Math.round(ZAPE_DOTS * ZAPE_BAND_WIDTH)
+            val left = (ZAPE_DOTS - bandWidth) / 2f
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = zapeTypeface }
+            val ink = Rect()
+            paint.textSize = 100f
+            paint.getTextBounds("ZAPE", 0, 4, ink)
+            paint.textSize = 100f * ZAPE_LETTER_DOTS / ink.height()
+            paint.getTextBounds("ZAPE", 0, 4, ink)
+            val margin = (bandWidth - ink.height()) / 2f
+
+            var text = "ZAPE"
+            while (top + margin + paint.measureText(text) < length) text += "E"
+
+            paint.color = Color.BLACK
+            canvas.drawRect(left, top.toFloat(), left + bandWidth, length.toFloat(), paint)
+            canvas.translate(left + bandWidth, top.toFloat())
+            canvas.rotate(90f) // clockwise: the top of the letters faces the right edge
+            paint.color = Color.WHITE
+            canvas.drawText(text, margin - ink.left, margin - ink.top, paint)
+        }
+
+        // Sent in slices: one bitmap that long is more than the printer buffer likes.
+        var y = 0
+        while (y < strip.height) {
+            val h = minOf(ZAPE_SLICE, strip.height - y)
+            p.setPrintAppendBitmap(Bitmap.createBitmap(strip, 0, y, ZAPE_DOTS, h), Layout.Alignment.ALIGN_CENTER)
+            y += h
+        }
+        return p.setPrintStart()
+    }
+
     private fun currentDate(): String =
         java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
             .format(java.util.Date())
@@ -523,5 +701,15 @@ class MainActivity : FlutterActivity() {
         private const val TAG = "PosPrinter"
         private const val STATUS_UNAVAILABLE = -100
         private const val STATUS_ERROR = -101
+
+        // ponytail: 58 mm head, 203 dpi = 384 dots and 80 dots/cm. Adjust if the
+        // strip prints narrow, cropped, or a different length than asked.
+        private const val ZAPE_DOTS = 384
+        private const val ZAPE_DOTS_PER_CM = 80
+        private const val ZAPE_LOGO_GAP = 2
+        private const val ZAPE_BAND_WIDTH = 0.80f
+        private const val ZAPE_LETTER_DOTS = 184
+        private const val ZAPE_SLICE = 256
+        private const val ZAPE_BOTTOM_MARGIN = 14
     }
 }

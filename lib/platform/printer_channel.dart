@@ -47,6 +47,10 @@ class PrinterChannel {
   static Future<PrintResult> printCoupon(Map<String, dynamic> coupon) =>
       _invoke('printCoupon', coupon);
 
+  /// La Crypta mark plus "ZAPEEE…" along the roll, cut at [points] × 1.7 cm.
+  static Future<PrintResult> printZape(int points) =>
+      _invoke('printZape', {'points': points});
+
   static Future<PrintResult> _invoke(String method, [dynamic args]) async {
     try {
       final code = await _ch.invokeMethod<int>(method, args) ?? -1;
