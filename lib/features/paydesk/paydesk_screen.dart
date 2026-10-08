@@ -1,9 +1,8 @@
-import 'package:flutter/material.dart';
-
 import '../../core/checkout.dart';
 import '../../core/i18n.dart';
 import '../../core/numpad.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
@@ -103,17 +102,32 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
               value: _currency,
               onChanged: _switchCurrency,
             ),
-            const Spacer(),
-            Text(
-              _currency == Currency.sat ? '$display sats' : '${_currency.code} $display',
-              style: const TextStyle(fontSize: 44, fontWeight: FontWeight.w700),
+            // The amount takes what the numpad leaves and shrinks on short
+            // screens rather than pushing the Cobrar button off.
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      _currency == Currency.sat
+                          ? '$display sats'
+                          : '${_currency.code} $display',
+                      style: const TextStyle(
+                          fontSize: 44, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Flexible(
+                    child: Text(
+                      _currency == Currency.sat ? '≈ …' : '≈ $satsStr sats',
+                      style:
+                          const TextStyle(color: AppColors.muted, fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              _currency == Currency.sat ? '≈ …' : '≈ $satsStr sats',
-              style: const TextStyle(color: AppColors.muted, fontSize: 16),
-            ),
-            const Spacer(),
             Numpad(onDigit: _digit, onBackspace: _back),
             const SizedBox(height: 16),
             SizedBox(

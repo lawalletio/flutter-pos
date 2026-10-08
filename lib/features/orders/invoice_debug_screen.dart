@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../domain/order/current_order.dart';
 import '../../domain/order/invoice_debug_store.dart';
@@ -25,7 +25,8 @@ class InvoiceDebugScreen extends StatelessWidget {
         backgroundColor: AppColors.surface,
         title: Text(context.tr('¿Borrar el historial de invoices?')),
         content: Text(context.tr(
-            'Se borran solo las invoices de depuración. Las órdenes no se tocan.')),
+            'Se borran solo las invoices de depuración. Las órdenes no se tocan.'),
+            softWrap: true),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -64,6 +65,7 @@ class InvoiceDebugScreen extends StatelessWidget {
                 Text(
                   context.tr(
                       'Cada respuesta del proveedor queda acá, aunque el QR haya pasado a otra.'),
+                  softWrap: true,
                   style: const TextStyle(color: AppColors.muted, fontSize: 13),
                 ),
                 const SizedBox(height: 12),

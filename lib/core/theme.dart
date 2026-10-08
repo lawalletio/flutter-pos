@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
-
 import 'sounds.dart';
+import 'ui.dart';
 
 /// Palette ported from the webapp (`src/styles/theme.ts`): dark background with the
 /// LaWallet green accent.

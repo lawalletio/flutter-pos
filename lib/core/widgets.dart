@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/nostr/relay_sync_service.dart';
 import 'i18n.dart';
 import 'theme.dart';
+import 'ui.dart';
 
 /// Shared UI building blocks for the POS screens.
 
@@ -77,7 +77,7 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
         ...actions,
         if (showInvoiceDebug)
           IconButton(
-            tooltip: context.tr('Invoices generadas'),
+            tooltip: context.tr('Invoices generadas').toUpperCase(),
             icon: const Icon(Icons.bug_report_outlined, size: 26),
             onPressed: () => context.push('/invoice-debug'),
           ),
@@ -195,7 +195,7 @@ class _SyncAction extends StatelessWidget {
         // ignore this icon.
         final failed = r.phase == SyncPhase.failed;
         return IconButton(
-          tooltip: context.tr('Relays'),
+          tooltip: context.tr('Relays').toUpperCase(),
           onPressed: () => context.push('/relays'),
           icon: r.isRunning
               ? const SizedBox(

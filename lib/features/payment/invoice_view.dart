@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/i18n.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 
 /// The invoice / QR screen shown while charging.
 ///
@@ -133,7 +133,7 @@ class _InvoiceViewState extends State<InvoiceView>
                   : const SizedBox.shrink(key: ValueKey('empty')),
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 8),
           _stagger(
             1,
             Text('${widget.satsStr} sats',
@@ -146,9 +146,9 @@ class _InvoiceViewState extends State<InvoiceView>
             Text('≈ ${widget.arsStr} ARS',
                 style: const TextStyle(color: AppColors.muted)),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
           _stagger(3, _qrCard(ready)),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           _stagger(
             4,
             TextButton.icon(
@@ -157,10 +157,10 @@ class _InvoiceViewState extends State<InvoiceView>
               label: Text(context.tr('Copiar invoice')),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 2),
           // Tap-to-pay hint appears with the live invoice.
           SizedBox(
-            height: 30,
+            height: 26,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 400),
               child: (ready && widget.nfcAvailable)
@@ -189,7 +189,7 @@ class _InvoiceViewState extends State<InvoiceView>
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           _stagger(
             6,
             Row(

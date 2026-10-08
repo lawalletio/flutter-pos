@@ -1,8 +1,7 @@
-import 'package:flutter/material.dart';
-
 import '../../core/checkout.dart';
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../data/mock/mock_data.dart';
 import '../../data/pricing/pricing_service.dart';

@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
-
 import '../domain/config/miniapp_pin.dart';
 import 'i18n.dart';
+import 'ui.dart';
 
 /// Asks for a PIN and returns it once [check] accepts it, or null on cancel.
 /// [check] returns the (Spanish) error to show, or null to accept.
@@ -79,7 +78,7 @@ class _PinDialogState extends State<_PinDialog> {
         textAlign: TextAlign.center,
         style: const TextStyle(fontSize: 28, letterSpacing: 8),
         decoration: InputDecoration(
-          errorText: _error == null ? null : context.tr(_error!),
+          errorText: _error == null ? null : context.tr(_error!).toUpperCase(),
         ),
         onSubmitted: (_) => _submit(),
       ),

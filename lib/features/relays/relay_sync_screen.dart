@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
-
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../data/nostr/relay_list.dart';
 import '../../data/nostr/relay_sync_service.dart';
@@ -109,6 +108,7 @@ class RelaySyncScreen extends StatelessWidget {
             Text(
               context.tr(
                   'Los rechazos son política del relay (eventos viejos, antispam). No se reintentan.'),
+              softWrap: true,
               style: const TextStyle(color: AppColors.muted, fontSize: 12),
             ),
           ],
@@ -200,6 +200,7 @@ class RelaySyncScreen extends StatelessWidget {
                           color: AppColors.muted, fontSize: 11)),
                 Text(
                   l.message,
+                  softWrap: true,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: l.isNote ? FontWeight.w600 : FontWeight.w400,

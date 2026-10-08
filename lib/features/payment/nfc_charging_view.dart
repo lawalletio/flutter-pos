@@ -1,8 +1,8 @@
-import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 
 /// Cinematic NFC charge. The timeline is staged so the cashier always sees
 /// the process moving; a real settlement disposes this widget and cuts it off.

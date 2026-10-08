@@ -1,10 +1,10 @@
 import 'dart:ui' show ImageFilter;
 
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../data/nostr/catalog_service.dart';
 import '../../data/nostr/profile_service.dart';
@@ -367,7 +367,7 @@ class _HubScreenState extends State<HubScreen> {
           ),
         ),
         IconButton(
-          tooltip: context.tr('Eliminar del historial'),
+          tooltip: context.tr('Eliminar del historial').toUpperCase(),
           icon: const Icon(Icons.close, size: 18, color: AppColors.muted),
           onPressed: () => addressHistory.remove(addr),
         ),

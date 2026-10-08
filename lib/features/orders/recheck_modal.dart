@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../data/lnurl/lnurl_service.dart';
 import '../../data/nostr/relay_pool.dart';
 import '../../domain/order/orders_store.dart';

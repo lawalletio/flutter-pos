@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/i18n.dart';
 import 'core/router.dart';
 import 'core/theme.dart';
+import 'core/ui.dart';
 import 'domain/config/settings_state.dart';
 
 /// Root app. Routing via go_router; screens under `features/`.
@@ -21,6 +21,16 @@ class LaWalletPosApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: buildAppTheme(),
         routerConfig: appRouter,
+        // Big letters everywhere. Single-line texts shrink back to fit the
+        // width (see core/ui.dart), so this never cuts a word off.
+        builder: (context, child) {
+          final mq = MediaQuery.of(context);
+          return MediaQuery(
+            data: mq.copyWith(
+                textScaler: TextScaler.linear(mq.textScaler.scale(1) * 1.3)),
+            child: child!,
+          );
+        },
         locale: Locale(AppLanguage.fromCode(s.languageCode).code),
         supportedLocales:
             AppLanguage.values.map((l) => Locale(l.code)).toList(),

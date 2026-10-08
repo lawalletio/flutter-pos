@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -7,6 +6,7 @@ import '../../core/pin_dialog.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/session.dart';
 import '../../domain/config/settings_persistence.dart';
@@ -370,8 +370,10 @@ class SettingsSectionScreen extends StatelessWidget {
                     const Icon(Icons.print_outlined,
                         size: 20, color: AppColors.primary),
                     const SizedBox(width: 8),
-                    Text(context.tr('Impresora ZCS SmartPos'),
-                        style: const TextStyle(fontSize: 15)),
+                    Flexible(
+                      child: Text(context.tr('Impresora ZCS SmartPos'),
+                          style: const TextStyle(fontSize: 15)),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -552,7 +554,8 @@ Future<void> _selectWheelOffer(BuildContext context, WheelOffer value) async {
       backgroundColor: AppColors.surface,
       title: Text(context.tr('Activar propina')),
       content: Text(context.tr(
-          'Para mostrar la ruleta solo con propina, hay que activar la pantalla de propina.')),
+          'Para mostrar la ruleta solo con propina, hay que activar la pantalla de propina.'),
+          softWrap: true),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(false),
@@ -591,7 +594,8 @@ Future<void> _onTipChanged(
     builder: (ctx) => AlertDialog(
       backgroundColor: AppColors.surface,
       content: Text(context.tr(
-          'Si desactivás la propina, la ruleta deja de mostrarse. ¿Querés mostrarla siempre?')),
+          'Si desactivás la propina, la ruleta deja de mostrarse. ¿Querés mostrarla siempre?'),
+          softWrap: true),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(),
@@ -869,6 +873,7 @@ class _VolumeSlider extends StatelessWidget {
                         fontSize: 15,
                         color: enabled ? AppColors.onDark : AppColors.muted)),
               ),
+              const SizedBox(width: 12),
               Text('$shown%',
                   style: const TextStyle(
                       color: AppColors.muted,
@@ -962,12 +967,15 @@ class _LanguageSelector extends StatelessWidget {
             child: Text(context.tr('Idioma'),
                 style: const TextStyle(fontSize: 15))),
         for (final l in AppLanguage.values)
-          Padding(
-            padding: EdgeInsets.only(left: l == AppLanguage.values.first ? 0 : 8),
-            child: _chip(
-              label: l.label,
-              selected: current == l.code,
-              onTap: () => setLanguage(l.code),
+          Flexible(
+            child: Padding(
+              padding:
+                  EdgeInsets.only(left: l == AppLanguage.values.first ? 0 : 8),
+              child: _chip(
+                label: l.label,
+                selected: current == l.code,
+                onTap: () => setLanguage(l.code),
+              ),
             ),
           ),
       ],
@@ -1064,7 +1072,7 @@ class _RelaysCardState extends State<_RelaysCard> {
                   isDense: true,
                   filled: true,
                   fillColor: AppColors.background,
-                  hintText: 'wss://relay.example.com',
+                  hint: const Text('wss://relay.example.com'),
                   hintStyle:
                       const TextStyle(color: AppColors.muted, fontSize: 13),
                   border: const OutlineInputBorder(
@@ -1224,7 +1232,7 @@ class _EditRelayDialogState extends State<_EditRelayDialog> {
           decoration: const InputDecoration(
             filled: true,
             fillColor: AppColors.background,
-            hintText: 'wss://relay.example.com',
+            hint: Text('wss://relay.example.com'),
             border: OutlineInputBorder(
                 borderSide: BorderSide.none,
                 borderRadius: BorderRadius.all(Radius.circular(12))),
@@ -1316,7 +1324,7 @@ class _EditPrizeDialogState extends State<_EditPrizeDialog> {
               decoration: InputDecoration(
                 filled: true,
                 fillColor: AppColors.background,
-                labelText: context.tr('Premio'),
+                label: Text(context.tr('Premio')),
                 border: const OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(12))),
@@ -1329,7 +1337,7 @@ class _EditPrizeDialogState extends State<_EditPrizeDialog> {
               decoration: InputDecoration(
                 filled: true,
                 fillColor: AppColors.background,
-                labelText: context.tr('Probabilidad %'),
+                label: Text(context.tr('Probabilidad %')),
                 border: const OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(12))),
@@ -1480,7 +1488,7 @@ class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
                     isDense: true,
                     filled: true,
                     fillColor: AppColors.background,
-                    hintText: context.tr('Premio'),
+                    hint: Text(context.tr('Premio')),
                     hintStyle:
                         const TextStyle(color: AppColors.muted, fontSize: 13),
                     border: const OutlineInputBorder(
@@ -1501,7 +1509,7 @@ class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
                     isDense: true,
                     filled: true,
                     fillColor: AppColors.background,
-                    hintText: '%',
+                    hint: const Text('%'),
                     hintStyle:
                         const TextStyle(color: AppColors.muted, fontSize: 13),
                     border: const OutlineInputBorder(
@@ -1512,13 +1520,16 @@ class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
                 ),
               ),
               const SizedBox(width: 8),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(0, 48),
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+              Flexible(
+                flex: 2,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                  ),
+                  onPressed: _submitAdd,
+                  child: Text(context.tr('Agregar')),
                 ),
-                onPressed: _submitAdd,
-                child: Text(context.tr('Agregar')),
               ),
             ],
           ),

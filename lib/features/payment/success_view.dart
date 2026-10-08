@@ -1,11 +1,11 @@
 import 'dart:math';
 
 import 'package:confetti/confetti.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 
 /// Spectacular "payment credited" celebration: confetti burst + rain, an
 /// elastic pop-in check circle with expanding ripples, a stroke-drawn checkmark,
