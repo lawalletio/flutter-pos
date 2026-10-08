@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../domain/coupon/coupon.dart';
 
@@ -184,9 +184,9 @@ class _ManualCouponDialogState extends State<_ManualCouponDialog> {
             onChanged: (_) => setState(() {}),
             onSubmitted: (_) => _submit(),
             decoration: InputDecoration(
-              hintText: context.tr('Pegá o escribí el código'),
+              hint: Text(context.tr('Pegá o escribí el código')),
               suffixIcon: IconButton(
-                tooltip: context.tr('Pegar'),
+                tooltip: context.tr('Pegar').toUpperCase(),
                 icon: const Icon(Icons.content_paste),
                 onPressed: _paste,
               ),

@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import 'package:confetti/confetti.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
@@ -9,6 +8,7 @@ import '../../core/i18n.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/order/order_reset.dart';
@@ -185,7 +185,7 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
       final font = (width / 3.4).clamp(10.0, 15.0);
       final painter = TextPainter(
         text: TextSpan(
-          text: _slices[i].label.replaceAll('\n', ' ').trim(),
+          text: _slices[i].label.replaceAll('\n', ' ').trim().toUpperCase(),
           style: TextStyle(
             color: Colors.white,
             fontSize: font,

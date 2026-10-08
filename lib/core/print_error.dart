@@ -1,8 +1,7 @@
-import 'package:flutter/material.dart';
-
 import 'i18n.dart';
 import 'theme.dart';
 import '../platform/printer_channel.dart';
+import 'ui.dart';
 
 enum _PrintErrorAction { retry, proceed }
 
@@ -28,7 +27,7 @@ Future<bool> printOrAskToContinue(
         child: AlertDialog(
           backgroundColor: AppColors.surface,
           title: Text(ctx.tr('Error de impresión')),
-          content: Text(result.message),
+          content: Text(result.message, softWrap: true),
           actions: [
             TextButton(
               onPressed: () =>

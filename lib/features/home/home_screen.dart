@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../data/lnurl/lnurl_service.dart';
 import '../../domain/config/address_history.dart';
@@ -228,7 +228,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       decoration: InputDecoration(
                         filled: true,
                         fillColor: AppColors.surface,
-                        hintText: 'user@lawallet.io',
+                        hint: const Text('user@lawallet.io'),
                         border: const OutlineInputBorder(
                             borderSide: BorderSide.none,
                             borderRadius:
@@ -304,7 +304,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                 visualDensity:
                                                     VisualDensity.compact,
                                                 tooltip: context.tr(
-                                                    'Eliminar del historial'),
+                                                    'Eliminar del historial').toUpperCase(),
                                                 onPressed: () => addressHistory
                                                     .remove(opt),
                                               ),

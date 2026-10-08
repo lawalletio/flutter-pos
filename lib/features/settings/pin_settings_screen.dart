@@ -1,8 +1,7 @@
-import 'package:flutter/material.dart';
-
 import '../../core/i18n.dart';
 import '../../core/pin_dialog.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/miniapp_pin.dart';
 

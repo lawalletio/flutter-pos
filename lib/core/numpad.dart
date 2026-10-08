@@ -1,6 +1,5 @@
-import 'package:flutter/material.dart';
-
 import 'theme.dart';
+import 'ui.dart';
 
 /// POS numpad. Emits digit strings ('0'–'9') and a backspace signal.
 class Numpad extends StatelessWidget {

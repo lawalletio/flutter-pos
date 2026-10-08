@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
-
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../data/coupon/coupon_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
@@ -55,7 +54,8 @@ class _CouponDetail extends StatelessWidget {
         // consumed the nonce and there is no un-claim. Removing it here
         // restores the full price and the customer is left with nothing.
         content: Text(context.tr(
-            'Se cobra el precio completo. El cupón ya fue canjeado y no se puede volver a usar.')),
+            'Se cobra el precio completo. El cupón ya fue canjeado y no se puede volver a usar.'),
+            softWrap: true),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(ctx).pop(false),

@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/checkout.dart';
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../data/nostr/catalog_service.dart';
 import '../../data/pricing/pricing_service.dart';
@@ -253,7 +253,7 @@ class _MenuScreenState extends State<MenuScreen> {
         title: context.tr('Menú'),
         actions: [
           IconButton(
-            tooltip: context.tr('Actualizar menú'),
+            tooltip: context.tr('Actualizar menú').toUpperCase(),
             onPressed: _refreshing ? null : _refresh,
             icon: _refreshing
                 ? const SizedBox(

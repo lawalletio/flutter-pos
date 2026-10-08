@@ -1,10 +1,10 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/i18n.dart';
 import '../../core/print_error.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
@@ -30,7 +30,8 @@ class OrdersScreen extends StatelessWidget {
         title: Text(context.tr('¿Eliminar todas las órdenes?')),
         content: Text(context.tr(
             'Se borrará el historial de órdenes de esta sesión. '
-            'Esta acción no se puede deshacer.')),
+            'Esta acción no se puede deshacer.'),
+            softWrap: true),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),

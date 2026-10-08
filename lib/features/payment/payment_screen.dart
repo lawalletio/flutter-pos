@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
@@ -8,6 +7,7 @@ import '../../core/i18n.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../data/coupon/coupon_service.dart';
 import '../../data/lnurl/lnurl_service.dart';
@@ -28,8 +28,8 @@ import '../../domain/order/order_reset.dart';
 import '../../domain/order/orders_store.dart';
 import '../../domain/order/receipt_printer.dart';
 import '../../domain/prize/prize_wheel.dart';
-import '../../platform/nfc_channel.dart';
 import '../orders/recheck_modal.dart';
+import 'card_charge.dart';
 import 'coupon_detail_sheet.dart';
 import 'coupon_scan_screen.dart';
 import 'invoice_view.dart';
@@ -74,9 +74,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _verifyUrl; // LUD-21
   String? _invoiceError;
   bool _printStarted = false;
-  bool _collecting = false; // pulling payment from a tapped card
-  bool _nfcAvailable = false;
-  StreamSubscription<String>? _nfcSub;
+  late final _card = CardCharge(
+    invoice: () => _invoice,
+    verifyUrl: () => _verifyUrl,
+    waiting: () => mounted && _view == _View.waiting,
+    // A coupon quote is rewriting the amount. Charging the bolt11 still on
+    // screen would ignore that discount.
+    canTap: () =>
+        !_applyingCoupon && ModalRoute.of(context)?.isCurrent != false,
+    onChange: () {
+      if (mounted) setState(() {});
+    },
+    onPaid: _markPaid,
+    onPending: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(context.tr('Pago enviado, esperando confirmación…')))),
+    onError: (message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message, softWrap: true),
+        backgroundColor: AppColors.error)),
+  );
+  bool get _collecting => _card.collecting; // pulling payment from a tapped card
   Timer? _poll;
   ZapWatcher? _zap; // NIP-57 zap-receipt subscription (live relay connection)
   String? _orderId; // recorded order in the persisted store
@@ -151,17 +167,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
     // the "Volver" button, the app bar back, or the Android hardware back — always
     // shows an empty cart (go_router keeps the menu page alive otherwise).
     resetOrder();
-    setState(() {
-      _collecting = false;
-      _view = _View.printing;
-    });
+    setState(() => _view = _View.printing);
     _finishPrint();
   }
 
   void _stopNfc() {
-    _nfcSub?.cancel();
-    _nfcSub = null;
-    NfcChannel.stopSession();
+    _card.stop();
     // Also tear down the NIP-57 relay subscription (shared teardown point).
     _zap?.dispose();
     _zap = null;
@@ -209,75 +220,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
     super.dispose();
   }
 
-  /// Arm the card reader while the payment is pending. No button — reader mode
-  /// stays active and each tap is delivered via the tag stream.
-  Future<void> _startAutoNfc() async {
-    if (_nfcSub != null) return;
-    _nfcAvailable = await NfcChannel.isAvailable();
-    if (!_nfcAvailable) return;
-    if (mounted) setState(() {});
-    await NfcChannel.startSession();
-    _nfcSub = NfcChannel.tags().listen((cardUrl) {
-      // A coupon quote is rewriting the amount. Charging the bolt11 still on
-      // screen would ignore that discount.
-      if (!mounted ||
-          _view != _View.waiting ||
-          _collecting ||
-          _applyingCoupon) {
-        return;
-      }
-      if (ModalRoute.of(context)?.isCurrent == false) return;
-      AppSounds.play(AppSound.card);
-      _collectFromCard(cardUrl);
-    });
-  }
-
-  /// A card was tapped. The charging screen runs its own timeline; this keeps
-  /// pulling the payment and cuts that timeline the moment it settles.
-  Future<void> _collectFromCard(String cardUrl) async {
-    final inv = _invoice;
-    if (inv == null) return;
-    setState(() => _collecting = true);
-    try {
-      await lnurl.payWithCard(cardUrl, inv);
-      final url = _verifyUrl;
-      var settled = false;
-      if (url != null) {
-        for (var i = 0;
-            i < 30 && mounted && _view == _View.waiting && _invoice == inv;
-            i++) {
-          if (await lnurl.checkSettled(url)) {
-            settled = true;
-            break;
-          }
-          await Future<void>.delayed(const Duration(milliseconds: 800));
-        }
-      }
-      if (!mounted || _view != _View.waiting) return;
-      if (_invoice != inv) {
-        setState(() => _collecting = false);
-        return;
-      }
-      if (settled && _verifyUrl == url) {
-        _markPaid();
-      } else {
-        setState(() => _collecting = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text(context.tr('Pago enviado, esperando confirmación…'))));
-      }
-    } on LnurlException catch (e) {
-      if (!mounted || _view != _View.waiting) return;
-      setState(() => _collecting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message), backgroundColor: AppColors.error));
-    } catch (_) {
-      if (mounted && _view == _View.waiting) {
-        setState(() => _collecting = false);
-      }
-    }
-  }
-
   void _onRates() {
     if (mounted) setState(() {});
   }
@@ -292,7 +234,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// Request (or re-request) the invoice for [_chargeSats].
   ///
   /// Called again after a coupon lands, so it has to be safe twice. Clearing
-  /// the bolt11 first is not cosmetic: [_collectFromCard] pays whatever
+  /// the bolt11 first is not cosmetic: a tapped card pays whatever
   /// `_invoice` holds, and a tapped card during the round trip would otherwise
   /// pay the old, undiscounted invoice.
   ///
@@ -346,7 +288,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           reason: reason, gen: gen, stale: false, applied: true);
       _startPolling();
       _startZapWatch(inv); // NIP-57: watch relays for the zap receipt
-      _startAutoNfc(); // arm the card reader while pending
+      _card.arm(); // arm the card reader while pending
     } on LnurlException catch (e) {
       if (!mounted || gen != _invoiceGen) return;
       setState(() {
@@ -488,7 +430,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   void _couponError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), backgroundColor: AppColors.error));
+        SnackBar(content: Text(message, softWrap: true), backgroundColor: AppColors.error));
   }
 
   /// Scan a QR and apply what it holds.
@@ -736,7 +678,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
     final applied = _coupon != null;
     return [
       IconButton(
-        tooltip: context.tr(applied ? 'Cupón aplicado' : 'Escanear cupón'),
+        tooltip: context
+            .tr(applied ? 'Cupón aplicado' : 'Escanear cupón')
+            .toUpperCase(),
         icon: Icon(
           applied ? Icons.local_offer : Icons.qr_code_scanner,
           size: 26,
@@ -773,7 +717,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       satsStr: _satsStr,
       arsStr: _arsStr,
       invoice: _invoice, // null → shows the loading template + QR scramble
-      nfcAvailable: _nfcAvailable,
+      nfcAvailable: _card.available,
       tabEnabled: appSettings.value.tabEnabled,
       onCancel: _goBack,
       onCopy: _copyInvoice,
@@ -1004,7 +948,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
               decoration: InputDecoration(
                 filled: true,
                 fillColor: AppColors.surface,
-                hintText: context.tr('Nombre del nuevo cliente'),
+                hint: Text(context.tr('Nombre del nuevo cliente')),
                 border: const OutlineInputBorder(
                     borderSide: BorderSide.none,
                     borderRadius: BorderRadius.all(Radius.circular(12))),
