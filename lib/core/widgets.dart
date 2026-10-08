@@ -101,7 +101,7 @@ class PosCard extends StatelessWidget {
   final String label;
   final String? sublabel;
   final Color? color;
-  final VoidCallback onTap;
+  final VoidCallback? onTap; // null: disabled
   const PosCard({
     super.key,
     required this.icon,

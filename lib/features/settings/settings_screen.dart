@@ -14,6 +14,7 @@ import '../../domain/config/settings_state.dart';
 import '../../domain/order/order_reset.dart';
 import '../../domain/prize/prize_wheel.dart';
 import '../../platform/printer_channel.dart';
+import '../miniapps/miniapps.dart';
 
 /// Loaded once and reused across rebuilds.
 final Future<PackageInfo> _packageInfo = PackageInfo.fromPlatform();
@@ -384,14 +385,7 @@ class SettingsSectionScreen extends StatelessWidget {
           )),
         ];
       case SettingsSection.miniapps:
-        return [
-          PosCard(
-            icon: Icons.celebration_outlined,
-            label: 'ZAPE',
-            sublabel: context.tr('Modo kiosco'),
-            onTap: () => context.go('/zape'),
-          ),
-        ];
+        return [for (final app in miniapps) MiniappTile(app: app)];
       case SettingsSection.coupons:
         return [
           _countLine(context, s.prizeCoupons.length,
