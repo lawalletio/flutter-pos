@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lawallet_pos/data/pricing/pricing_service.dart';
 import 'package:lawallet_pos/domain/config/miniapp_pin.dart';
 import 'package:lawallet_pos/features/miniapps/zape_screen.dart';
 import 'package:lawallet_pos/features/settings/pin_settings_screen.dart';
@@ -27,6 +28,26 @@ void main() {
     await tester.tap(find.byKey(const Key('miniapp-close')));
     await tester.pumpAndSettle();
   }
+
+  test('bigger tips print longer strips, capped at 40 points', () {
+    expect(zapePresets.map(zapePoints), [4, 10, 19, 40]);
+    expect(zapePoints(1), 1);
+    expect(zapePoints(1000000), 40);
+  });
+
+  testWidgets('first screen offers the tip amounts', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 2.75;
+    addTearDown(tester.view.reset);
+    pricing.seedRates(const Rates(0.05, 0.0001));
+    await tester.pumpWidget(const MaterialApp(home: ZapeScreen()));
+    for (final sats in zapePresets) {
+      expect(find.byKey(Key('zape-$sats')), findsOneWidget);
+    }
+    await tester.tap(find.byKey(const Key('zape-custom')));
+    await tester.pump();
+    expect(find.text('1'), findsOneWidget, reason: 'numpad is up');
+  });
 
   testWidgets('without a PIN, ZAPE closes straight to Home', (tester) async {
     await openZape(tester);
