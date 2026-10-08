@@ -638,7 +638,7 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * A ZAPE strip [points] × 1.7 cm long: the La Crypta mark across the full width,
+     * A ZAPE strip [points] × 1.275 cm long: the La Crypta mark across the full width,
      * then a black band (80% wide) with "ZAPEEE…" in white Climate Crisis, turned
      * 90° clockwise to run down the roll. Enough E's are added to pass that, and
      * the image is cut there, mid-letter if need be, then [ZAPE_BOTTOM_MARGIN]
@@ -650,7 +650,7 @@ class MainActivity : FlutterActivity() {
         val status = p.getPrinterStatus()
         if (status == SdkResult.SDK_PRN_STATUS_PAPEROUT) return status
 
-        val length = points.coerceIn(1, 40) * ZAPE_DOTS_PER_CM * 17 / 10
+        val length = points.coerceIn(1, 40) * ZAPE_DOTS_PER_CM * 1275 / 1000
         val strip = Bitmap.createBitmap(ZAPE_DOTS, length + ZAPE_BOTTOM_MARGIN, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(strip)
         canvas.drawColor(Color.WHITE)

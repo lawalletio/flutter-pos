@@ -47,7 +47,7 @@ class PrinterChannel {
   static Future<PrintResult> printCoupon(Map<String, dynamic> coupon) =>
       _invoke('printCoupon', coupon);
 
-  /// La Crypta mark plus "ZAPEEE…" along the roll, cut at [points] × 1.7 cm.
+  /// La Crypta mark plus "ZAPEEE…" along the roll, cut at [points] × 1.275 cm.
   static Future<PrintResult> printZape(int points) =>
       _invoke('printZape', {'points': points});
 

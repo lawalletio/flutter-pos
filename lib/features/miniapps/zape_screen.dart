@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,6 +9,7 @@ import '../../core/pin_dialog.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
+import '../../core/ui.dart';
 import '../../data/lnurl/lnurl_service.dart';
 import '../../data/nostr/profile_service.dart';
 import '../../data/nostr/relay_pool.dart';
@@ -19,19 +19,22 @@ import '../../domain/config/formatter.dart';
 import '../../domain/config/session.dart';
 import '../../domain/config/settings_state.dart';
 import '../../platform/printer_channel.dart';
+import '../payment/card_charge.dart';
 import '../payment/invoice_view.dart';
+import '../payment/nfc_charging_view.dart';
 
 /// Tip amounts offered on the first screen.
 const zapePresets = [2100, 5000, 10000, 21000];
 
 /// Strip length for a tip: 21000 sats prints the longest strip (40 points,
-/// 1 point = 1.7 cm) and the "e" holds as long as the printer runs, so a
+/// 1 point = 1.275 cm) and the "e" holds as long as the printer runs, so a
 /// bigger tip prints and sounds longer.
 // ponytail: linear and capped at 40, bigger custom tips all max out.
 int zapePoints(int sats) => (sats * 40 / 21000).round().clamp(1, 40);
 
-/// Kiosk miniapp for tips: pick an amount, pay the QR to the logged Lightning
-/// Address, and a ZAPE strip prints with a sound as long as the tip is big.
+/// Kiosk miniapp for tips: pick an amount, pay the QR or tap a card (same
+/// [CardCharge] as the charge screen) to the logged Lightning Address, and a
+/// ZAPE strip prints with a sound as long as the tip is big.
 ///
 /// No back, settings, relay or debug buttons. The only way out is the X,
 /// which asks for the miniapp PIN.
@@ -53,6 +56,21 @@ class _ZapeScreenState extends State<ZapeScreen> {
   String? _error;
   Timer? _poll;
   ZapWatcher? _zap;
+  late final _card = CardCharge(
+    invoice: () => _invoice,
+    verifyUrl: () => _verifyUrl,
+    waiting: () => mounted && _step == _Step.invoice && _error == null,
+    canTap: () => ModalRoute.of(context)?.isCurrent != false,
+    onChange: () {
+      if (mounted) setState(() {});
+    },
+    onPaid: () => _paid(_gen),
+    onPending: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(context.tr('Pago enviado, esperando confirmación…')))),
+    onError: (message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message, softWrap: true),
+        backgroundColor: AppColors.error)),
+  );
 
   /// Bumped per invoice, so a late reply or a late paid signal from an
   /// abandoned invoice can't touch the current one.
@@ -71,6 +89,7 @@ class _ZapeScreenState extends State<ZapeScreen> {
   }
 
   void _stopWatching() {
+    _card.stop();
     _poll?.cancel();
     _poll = null;
     _zap?.dispose();
@@ -111,6 +130,7 @@ class _ZapeScreenState extends State<ZapeScreen> {
         _invoice = inv.pr;
         _verifyUrl = inv.verify;
       });
+      _card.arm(); // tap-to-pay, same as the charge screen
       final url = inv.verify;
       if (url != null) {
         _poll = Timer.periodic(const Duration(seconds: 2), (_) async {
@@ -189,7 +209,11 @@ class _ZapeScreenState extends State<ZapeScreen> {
             child: switch (_step) {
               _Step.pick => _pick(),
               _Step.custom => _custom(),
-              _Step.invoice => _error != null ? _failed() : _qr(),
+              _Step.invoice => _error != null
+                  ? _failed()
+                  : _card.collecting
+                      ? _collecting()
+                      : _qr(),
               _Step.printing => _printing(),
             },
           ),
@@ -289,12 +313,17 @@ class _ZapeScreenState extends State<ZapeScreen> {
         satsStr: _satsStr(_sats),
         arsStr: _arsStr(_sats),
         invoice: _invoice,
-        nfcAvailable: false,
+        nfcAvailable: _card.available,
         tabEnabled: false,
         onCancel: _reset,
         onCopy: () => Clipboard.setData(ClipboardData(text: _invoice ?? '')),
         onCheck: _check,
         onAddTab: () {},
+      );
+
+  /// Shown while a tapped card is being charged (LNURL-withdraw in progress).
+  Widget _collecting() => NfcChargingView(
+        amountLabel: '${_satsStr(_sats)} sats · ≈ ${_arsStr(_sats)} ARS',
       );
 
   Widget _failed() => Column(
