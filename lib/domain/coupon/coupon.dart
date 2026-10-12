@@ -507,6 +507,74 @@ CouponQuote quoteCoupon({
   );
 }
 
+/// Several coupons against one basket: a scanned one on top of the coupons the
+/// cart's own products carry.
+///
+/// Each [quotes] entry was priced on its own against the SAME gross lines;
+/// only the ones that [CouponQuote.applies] count. The sats add up and the sum
+/// is clamped to [goodsSats] — the same ceiling one coupon gets, so stacking
+/// can reach zero but never discounts the tip or goes negative. Entries are
+/// summed per currency, for the order's `discount` tags.
+///
+/// ponytail: two percentages on the same line ADD (5% + 10% = 15%) rather
+/// than compound (14.5%). Slightly generous to the customer and trivially
+/// explainable at the counter; quote the second against the first's net if a
+/// merchant ever needs compounding.
+CouponQuote stackQuotes(Iterable<CouponQuote> quotes, {required int goodsSats}) {
+  var sats = 0;
+  final byCurrency = <Currency, num>{};
+  final free = <FreeUnits>[];
+  for (final q in quotes.where((q) => q.applies)) {
+    sats += q.discountSats;
+    for (final e in q.entries) {
+      byCurrency.update(e.currency, (v) => _roundMoney(v + e.amount, e.currency),
+          ifAbsent: () => e.amount);
+    }
+    free.addAll(q.freeUnits);
+  }
+  final spendable = goodsSats - minChargeSats;
+  final capped = sats < spendable ? sats : spendable;
+  return CouponQuote(
+    discountSats: capped < 0 ? 0 : capped,
+    entries: [for (final e in byCurrency.entries) DiscountEntry(e.key, e.value)],
+    freeUnits: free,
+  );
+}
+
+/// A coupon a catalog product carries: ringing the product up applies it, with
+/// no nonce and no claim.
+///
+/// Published by the merchant panel as `["coupon", id, name, benefitJson]` on
+/// the kind-30402. "Vaso" at price 0 carrying "5% off two drinks" is the case
+/// it exists for.
+@immutable
+class ProductCoupon {
+  /// The coupon DEFINITION's id — what the order's `coupon` tag names, and
+  /// what dedupes two products carrying the same coupon.
+  final String id;
+  final String name;
+  final Benefit benefit;
+
+  /// The benefit as published, so the offline catalog cache can write it back
+  /// out. [Benefit] has no serialiser and this is the only thing that would
+  /// need one.
+  final Map<String, dynamic> raw;
+
+  const ProductCoupon(this.id, this.name, this.benefit, this.raw);
+
+  /// Null for anything unreadable — the product then sells as a plain product.
+  /// Fails closed on the DISCOUNT, never on the menu.
+  static ProductCoupon? tryParse(String id, String name, Object? raw) {
+    if (id.isEmpty || raw is! Map) return null;
+    final b = parseBenefit(raw);
+    return b.isOk
+        ? ProductCoupon(id, name, b.value!, raw.cast<String, dynamic>())
+        : null;
+  }
+
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'benefit': raw};
+}
+
 /// One line describing what the coupon does, for the sheet and the ticket.
 String describeBenefit(Benefit b, {String Function(String d)? titleOf}) {
   String name(String d) => titleOf?.call(d) ?? 'un producto';

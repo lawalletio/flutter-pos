@@ -1,4 +1,5 @@
 import '../config/currencies.dart';
+import '../coupon/coupon.dart';
 
 /// Product catalog model. Mirrors the webapp menu JSON schema
 /// (`src/constants/menus/*.json`), which is also the shape the nostr NIP-99
@@ -21,6 +22,14 @@ class Product {
   /// whenever the catalog does.
   final String d;
 
+  /// The coupon ringing this product up applies, from its `coupon` tag. Such a
+  /// product may be priced at 0 — it is sold for the discount it unlocks.
+  final ProductCoupon? coupon;
+
+  /// Most units of this product one order may hold, from `max_qty`. Null means
+  /// unlimited. The menu's + stops here.
+  final int? maxQty;
+
   const Product({
     required this.id,
     required this.categoryId,
@@ -30,6 +39,8 @@ class Product {
     required this.priceCurrency,
     this.imageUrls = const [],
     this.d = '',
+    this.coupon,
+    this.maxQty,
   });
 
   factory Product.fromJson(Map<String, dynamic> j) {
@@ -51,6 +62,12 @@ class Product {
         for (final u in (j['images'] as List?) ?? const []) u.toString(),
       ],
       d: (j['d'] as String?) ?? '',
+      coupon: switch (j['coupon']) {
+        final Map c => ProductCoupon.tryParse(
+            '${c['id'] ?? ''}', '${c['name'] ?? ''}', c['benefit']),
+        _ => null,
+      },
+      maxQty: (j['max_qty'] as num?)?.toInt(),
     );
   }
 
@@ -62,6 +79,8 @@ class Product {
         'price': {'value': priceValue, 'currency': priceCurrency.code},
         if (imageUrls.isNotEmpty) 'images': imageUrls,
         if (d.isNotEmpty) 'd': d,
+        if (coupon != null) 'coupon': coupon!.toJson(),
+        if (maxQty != null) 'max_qty': maxQty,
       };
 }
 

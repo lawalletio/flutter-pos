@@ -250,15 +250,7 @@ void main() {
 
     test('lleva bruto y descuento por separado', () async {
       final e = await buildCouponOrder(
-        coupon: CouponInfo(
-          status: 'minted',
-          couponId: 'c-1',
-          name: 'Bienvenida',
-          description: '',
-          npub: merchantNpub,
-          nonce: nonce,
-          benefit: parseBenefit({'type': 'percent', 'percent': 10}).value!,
-        ),
+        coupons: const [(id: 'c-1', type: 'percent', name: 'Bienvenida')],
         lines: const [
           OrderItem(name: 'Café', unitPrice: 250, qty: 2, d: cafeD, currency: Currency.ars),
         ],
@@ -283,15 +275,7 @@ void main() {
 
     test('una línea sin d (Caja registradora) no se inventa un producto', () async {
       final e = await buildCouponOrder(
-        coupon: CouponInfo(
-          status: 'minted',
-          couponId: 'c-1',
-          name: 'X',
-          description: '',
-          npub: merchantNpub,
-          nonce: nonce,
-          benefit: parseBenefit({'type': 'percent', 'percent': 10}).value!,
-        ),
+        coupons: const [(id: 'c-1', type: 'percent', name: 'X')],
         lines: const [OrderItem(name: 'Cobro', unitPrice: 5000, qty: 1, currency: Currency.sat)],
         discounts: const [DiscountEntry(Currency.sat, 500)],
         merchantPubkey: merchantHex,

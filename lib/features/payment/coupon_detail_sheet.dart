@@ -1,17 +1,25 @@
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
-import '../../data/coupon/coupon_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/coupon/coupon.dart';
 
-/// The applied coupon: what it is, what it took off, and the way out.
+/// A coupon as the sheet lists it.
+typedef CouponLine = ({String name, String description, Benefit benefit});
+
+/// The applied coupons: what each is, what they took off together, and the way
+/// out of the scanned one.
+///
+/// [coupons] holds the ones the cart's products carry and the scanned one, if
+/// any. [removable] offers "Quitar cupón", which drops the SCANNED coupon only —
+/// a product's coupon goes when the product leaves the cart.
 ///
 /// Returns true when the cashier chose to remove it.
 Future<bool?> showCouponDetailSheet(
   BuildContext context, {
-  required CouponInfo coupon,
+  required List<CouponLine> coupons,
+  required bool removable,
   required List<DiscountEntry> entries,
   required int discountSats,
   required int grossSats,
@@ -22,7 +30,8 @@ Future<bool?> showCouponDetailSheet(
       showDragHandle: true,
       isScrollControlled: true,
       builder: (ctx) => _CouponDetail(
-        coupon: coupon,
+        coupons: coupons,
+        removable: removable,
         entries: entries,
         discountSats: discountSats,
         grossSats: grossSats,
@@ -31,13 +40,15 @@ Future<bool?> showCouponDetailSheet(
 
 class _CouponDetail extends StatelessWidget {
   const _CouponDetail({
-    required this.coupon,
+    required this.coupons,
+    required this.removable,
     required this.entries,
     required this.discountSats,
     required this.grossSats,
   });
 
-  final CouponInfo coupon;
+  final List<CouponLine> coupons;
+  final bool removable;
   final List<DiscountEntry> entries;
   final int discountSats;
   final int grossSats;
@@ -80,23 +91,29 @@ class _CouponDetail extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.local_offer, color: AppColors.primary, size: 22),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(coupon.name,
-                    style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w700)),
-              ),
+          for (final coupon in coupons) ...[
+            Row(
+              children: [
+                const Icon(Icons.local_offer,
+                    color: AppColors.primary, size: 22),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(coupon.name,
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+            if (coupon.description.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(coupon.description,
+                  style: const TextStyle(color: AppColors.muted)),
             ],
-          ),
-          if (coupon.description.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(coupon.description,
-                style: const TextStyle(color: AppColors.muted)),
+            const SizedBox(height: 4),
+            Text(describeBenefit(coupon.benefit),
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
           ],
-          const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -105,9 +122,6 @@ class _CouponDetail extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(describeBenefit(coupon.benefit),
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 12),
                 // Per currency, because that is how the coupon was written: a
                 // basket in pesos and dollars gets a row for each.
                 for (final e in entries)
@@ -140,14 +154,16 @@ class _CouponDetail extends StatelessWidget {
                   child: Text(context.tr('Cerrar')),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextButton(
-                  onPressed: () => _confirmRemove(context),
-                  child: Text(context.tr('Quitar cupón'),
-                      style: const TextStyle(color: AppColors.error)),
+              if (removable) ...[
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => _confirmRemove(context),
+                    child: Text(context.tr('Quitar cupón'),
+                        style: const TextStyle(color: AppColors.error)),
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
         ],

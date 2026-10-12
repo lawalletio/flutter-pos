@@ -2,6 +2,9 @@ import '../config/currencies.dart';
 import '../coupon/coupon.dart';
 import 'current_order.dart';
 
+/// A coupon as an order records it: definition id, benefit type, name.
+typedef OrderCoupon = ({String id, String type, String name});
+
 /// What an order says about itself, as nostr tags.
 ///
 /// The vocabulary is the merchant panel's (`src/lib/domain/zap-order.ts`),
@@ -11,8 +14,8 @@ import 'current_order.dart';
 /// ["item", d, qty, unitAmount, currency]   one per line
 /// ["items_count", n]
 /// ["total", amount, currency]              GROSS, per currency
-/// ["discount", amount, currency]           what a coupon took off
-/// ["coupon", id, type, name]
+/// ["discount", amount, currency]           what the coupons took off, summed
+/// ["coupon", id, type, name]               one per coupon applied
 /// ```
 ///
 /// Gross and discount travel separately on purpose: gross − discount is what
@@ -20,12 +23,13 @@ import 'current_order.dart';
 ///
 /// Shared by the zap request sent to the LNURL callback and the order filed
 /// with a coupon redemption, so a sale reads the same either way.
+///
+/// [coupons] is every coupon applied — the ones the cart's products carry plus
+/// a scanned one — and [discounts] is what they took off together.
 List<List<String>> orderTags({
   required List<OrderItem> lines,
   List<DiscountEntry> discounts = const [],
-  String? couponId,
-  String? couponType,
-  String? couponName,
+  List<OrderCoupon> coupons = const [],
 }) {
   final gross = <Currency, num>{};
   for (final l in lines) {
@@ -34,8 +38,10 @@ List<List<String>> orderTags({
   }
 
   return [
-    if (couponId != null)
-      ['coupon', couponId, couponType ?? '', couponName ?? ''],
+    // `%` → full-width `％`: Primal's LNURL callback answers 500 to a zap
+    // request carrying a bare `%` ("5% al escabio"), so every invoice failed.
+    for (final c in coupons)
+      ['coupon', c.id, c.type, c.name.replaceAll('%', '％')],
     for (final e in gross.entries) ['total', '${e.value}', e.key.code],
     for (final d in discounts) ['discount', '${d.amount}', d.currency.code],
     if (lines.isNotEmpty)

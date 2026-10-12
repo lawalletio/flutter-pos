@@ -24,9 +24,14 @@ class OrderRecord {
   final String? zapOrderId; // `e` tag placed in the zap request
   final List<OrderItem> items; // ticket line items (snapshot at checkout)
 
-  /// The coupon applied, if any. [amountSats] is already NET of
+  /// The coupons applied, if any. [amountSats] is already NET of
   /// [discountSats] — the two together give the gross, which is what the
   /// reprinted ticket shows.
+  ///
+  /// [couponName] names EVERY coupon on the order, joined ("Vaso + Bienvenida"),
+  /// since it is only ever displayed; [discountSats] is their sum. [couponId]
+  /// and [couponNonce] are the SCANNED coupon's — the one with a redemption
+  /// behind it. Product coupons are on the order's own `coupon` tags.
   final String? couponId;
   final String? couponName;
   final String? couponNonce;
