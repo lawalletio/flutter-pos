@@ -38,6 +38,9 @@ import 'event.dart';
 /// know. That is what makes a replication pass possible: "relay X is missing
 /// event Y" is only a safe claim about a relay that finished answering.
 ///
+/// [connected] holds the relays whose websocket upgraded. A relay that never
+/// connected sent nothing at all — see [adoptableRead] for why that matters.
+///
 /// Never throws: a dead relay just contributes nothing.
 Future<
     ({
@@ -45,6 +48,7 @@ Future<
       bool unreachable,
       bool complete,
       Map<String, Set<String>> idsByRelay,
+      Set<String> connected,
     })> fetchEvents(
   List<Map<String, dynamic>> filters, {
   required List<String> relays,
@@ -56,6 +60,7 @@ Future<
       unreachable: true,
       complete: false,
       idsByRelay: <String, Set<String>>{},
+      connected: <String>{},
     );
   }
 
@@ -71,6 +76,7 @@ Future<
   final settled = <String>{}; // guarded: a relay must not settle twice
   final eosed = <String>{}; // reached a real end-of-stored-events
   final seen = <String, Set<String>>{}; // url -> event ids that relay served
+  final connected = <String>{};
   final done = Completer<void>();
   var opening = true;
   var answered = false;
@@ -125,6 +131,7 @@ Future<
       // out the full timeout and comes back a fragment. Observed against
       // relay.damus.io, which answers the handshake without upgrading.
       unawaited(ch.ready.then<void>((_) {
+        connected.add(url);
         if (!done.isCompleted) ch.sink.add(req);
       }).catchError((Object e) {
         debugPrint('fetchEvents: $url did not connect: $e');
@@ -143,6 +150,7 @@ Future<
       unreachable: true,
       complete: false,
       idsByRelay: <String, Set<String>>{},
+      connected: <String>{},
     );
   }
 
@@ -182,8 +190,42 @@ Future<
     // Only relays that finished answering. A relay that never EOSE'd has an
     // unknown inventory, and "missing" is meaningless against unknown.
     idsByRelay: {for (final u in eosed) u: seen[u] ?? <String>{}},
+    connected: connected,
   );
 }
+
+/// Whether a read that may not be [fetchEvents]' `complete` can still replace
+/// the catalog on screen.
+///
+/// `complete` alone is too strict: one relay that is simply dead —
+/// relay.damus.io failing every TLS handshake — made every read a "fragment",
+/// and the till sat on a menu hours old without the products published since.
+/// What a fragment actually risks is losing what ONE relay alone was holding,
+/// so only two kinds of relay must have finished answering ([eosed]):
+///
+///  - every relay that [connected]: it was talking, so stopping short (a
+///    dropped socket, the timeout) is a real gap in what it was sending;
+///  - every relay that served this catalog within [holderTtl] ([holders]),
+///    connected or not: the intermittent relay that alone held the categories
+///    and the kind-5 deletions, whose absence resurrects deleted products.
+///
+/// A relay that never connected and never held anything told us nothing we
+/// were missing.
+///
+/// ponytail: a holder that dies for good stops being required after
+/// [holderTtl], and whatever only it held is lost from then on. Tracking which
+/// KINDS each relay held would close that gap if it ever bites.
+bool adoptableRead({
+  required Set<String> connected,
+  required Set<String> eosed,
+  required Map<String, DateTime> holders,
+  required DateTime now,
+  Duration holderTtl = const Duration(days: 3),
+}) =>
+    connected.every(eosed.contains) &&
+    holders.entries
+        .where((h) => now.difference(h.value) < holderTtl)
+        .every((h) => eosed.contains(h.key));
 
 /// Republish [events] to a single [relay] over one connection.
 ///
