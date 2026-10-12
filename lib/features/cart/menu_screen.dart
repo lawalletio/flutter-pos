@@ -10,6 +10,7 @@ import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/config/session.dart';
+import '../../domain/coupon/coupon.dart';
 import '../../domain/order/current_order.dart';
 import '../../domain/order/order_reset.dart';
 import '../../domain/order/product.dart';
@@ -218,12 +219,20 @@ class _MenuScreenState extends State<MenuScreen> {
   /// be blocked, not guessed at.
   int? get _totalSats => cartTotalSats(_cart.values, pricing.fiatToSats);
 
-  void _add(Product p) => setState(() {
-        _cart.update(p.id, (l) {
-          l.qty++;
-          return l;
-        }, ifAbsent: () => CartLine(p));
-      });
+  /// The product's `max_qty` is reached — further taps are ignored.
+  bool _atMax(Product p) =>
+      p.maxQty != null && (_cart[p.id]?.qty ?? 0) >= p.maxQty!;
+
+  void _add(Product p) {
+    if (_atMax(p)) return;
+    setState(() {
+      _cart.update(p.id, (l) {
+        l.qty++;
+        return l;
+      }, ifAbsent: () => CartLine(p));
+    });
+  }
+
   void _remove(Product p) => setState(() {
         final l = _cart[p.id];
         if (l == null) return;
@@ -438,9 +447,7 @@ class _MenuScreenState extends State<MenuScreen> {
                           ],
                         ),
                       ),
-                      Text(
-                          '${l.product.priceCurrency.code} '
-                          '${formatToPreference(l.product.priceCurrency, l.subtotal)}',
+                      Text(_priceLabel(l.product, l.subtotal),
                           style: const TextStyle(fontWeight: FontWeight.w600)),
                     ],
                   ),
@@ -451,21 +458,14 @@ class _MenuScreenState extends State<MenuScreen> {
               return FilledButton(
                 // Null means a currency in this cart has no rate yet. The old
                 // `?? 0` rendered a "Cobrar 0 sats" button; refusing to arm the
-                // button is the honest version.
-                onPressed: total == null
+                // button is the honest version. Zero is a cart holding only
+                // price-0 coupon products: nothing to invoice, and no
+                // redemption either to record the sale.
+                onPressed: total == null || total <= 0
                     ? null
                     : () {
                         // Carry the cart lines to the ticket for printing.
-                        setOrderItems([
-                          for (final l in _cart.values)
-                            OrderItem(
-                              name: l.product.name,
-                              unitPrice: l.product.priceValue,
-                              qty: l.qty,
-                              d: l.product.d,
-                              currency: l.product.priceCurrency,
-                            ),
-                        ]);
+                        setOrderItems(_orderItems);
                         Navigator.of(ctx).pop();
                         goCheckout(context, sats: total, back: '/cart');
                       },
@@ -478,6 +478,41 @@ class _MenuScreenState extends State<MenuScreen> {
         ),
       ),
     );
+  }
+
+  /// The cart as the lines the payment screen and the coupons price.
+  List<OrderItem> get _orderItems => [
+        for (final l in _cart.values)
+          OrderItem(
+            name: l.product.name,
+            unitPrice: l.product.priceValue,
+            qty: l.qty,
+            d: l.product.d,
+            currency: l.product.priceCurrency,
+          ),
+      ];
+
+  /// What sits where a product's price goes.
+  ///
+  /// A coupon product has no price worth showing — a free Vaso reading
+  /// "ARS 0" says nothing. It shows what its coupon takes off this cart right
+  /// now ("−ARS 80"), or the coupon's name while it is not discounting
+  /// anything. Same rule as the merchant panel's storefront.
+  ///
+  /// Everything else: [amount] in the product's own currency, not a hardcoded
+  /// ARS — USD needs its two decimals, which ARS formatting was flooring away.
+  String _priceLabel(Product p, num amount) {
+    final coupon = p.coupon;
+    if (coupon == null) {
+      return '${p.priceCurrency.code} ${formatToPreference(p.priceCurrency, amount)}';
+    }
+    final off = _cart.values.any((l) => l.product.coupon?.id == coupon.id)
+        ? discountEntries(_orderItems, coupon.benefit)
+        : const <DiscountEntry>[];
+    if (off.isEmpty) return coupon.name;
+    return off
+        .map((e) => '−${e.currency.code} ${formatToPreference(e.currency, e.amount)}')
+        .join(' ');
   }
 
   Widget _productTile(Product p) {
@@ -525,14 +560,12 @@ class _MenuScreenState extends State<MenuScreen> {
                           style: const TextStyle(
                               fontSize: 18, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 2),
-                      Text(
-                          // The product's own currency, not a hardcoded ARS:
-                          // USD needs its two decimals, which ARS formatting
-                          // was flooring away.
-                          '${p.priceCurrency.code} '
-                          '${formatToPreference(p.priceCurrency, p.priceValue)}',
-                          style: const TextStyle(
-                              color: AppColors.muted, fontSize: 15)),
+                      Text(_priceLabel(p, p.priceValue),
+                          style: TextStyle(
+                              color: p.coupon != null
+                                  ? AppColors.primary
+                                  : AppColors.muted,
+                              fontSize: 15)),
                     ],
                   ),
                 ),
@@ -547,7 +580,8 @@ class _MenuScreenState extends State<MenuScreen> {
                             color: inCart ? AppColors.primary : null)),
                   ),
                 ],
-                _RoundBtn(icon: Icons.add, onTap: () => _add(p)),
+                _RoundBtn(
+                    icon: Icons.add, onTap: _atMax(p) ? null : () => _add(p)),
               ],
             ),
           ),
@@ -583,7 +617,9 @@ class _Notice extends StatelessWidget {
 
 class _RoundBtn extends StatelessWidget {
   final IconData icon;
-  final VoidCallback onTap;
+
+  /// Null disables the button (dimmed), e.g. a product at its `max_qty`.
+  final VoidCallback? onTap;
   const _RoundBtn({required this.icon, required this.onTap});
   @override
   Widget build(BuildContext context) {
@@ -595,7 +631,9 @@ class _RoundBtn extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 24, color: AppColors.primary),
+          child: Icon(icon,
+              size: 24,
+              color: onTap == null ? AppColors.muted : AppColors.primary),
         ),
       ),
     );

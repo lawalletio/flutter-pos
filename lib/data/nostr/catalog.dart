@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 import '../../domain/config/currencies.dart';
+import '../../domain/coupon/coupon.dart';
 import '../../domain/order/product.dart';
 import 'event.dart';
 
@@ -141,6 +144,12 @@ class NostrProduct {
   final List<String> imageUrls;
   final int updatedAt;
 
+  /// From `["coupon", id, name, benefitJson]`. Null when absent OR unreadable.
+  final ProductCoupon? coupon;
+
+  /// From `["max_qty", n]`. Null when absent or not a positive integer.
+  final int? maxQty;
+
   const NostrProduct({
     required this.d,
     required this.title,
@@ -151,6 +160,8 @@ class NostrProduct {
     required this.categorySlugs,
     required this.imageUrls,
     required this.updatedAt,
+    this.coupon,
+    this.maxQty,
   });
 }
 
@@ -219,7 +230,23 @@ NostrProduct? parseProductEvent(NostrEvent e) {
     categorySlugs: slugs,
     imageUrls: [for (final i in images) i.url],
     updatedAt: e.createdAt,
+    coupon: _parseCouponTag(_firstTagRow(e, 'coupon')),
+    maxQty: switch (int.tryParse(_tagValue(e, 'max_qty') ?? '')) {
+      final n? when n > 0 => n,
+      _ => null,
+    },
   );
+}
+
+/// `["coupon", definitionId, name, benefitJson]`, or null. A broken tag costs
+/// the discount, never the product: it then sells as a plain one.
+ProductCoupon? _parseCouponTag(List<String>? t) {
+  if (t == null || t.length < 4) return null;
+  try {
+    return ProductCoupon.tryParse(t[1], t[2], jsonDecode(t[3]));
+  } on FormatException {
+    return null;
+  }
 }
 
 List<String>? _firstTagRow(NostrEvent e, String name) {
@@ -447,7 +474,9 @@ bool _isSellable(NostrProduct p) {
   final price = p.price;
   if (price == null) return false; // NIP-99 says price is SHOULD, not MUST
   if (price.frequency != null) return false; // a subscription, not a sale
-  if (price.amount <= 0) return false;
+  // Zero only for a coupon product: it is sold for the discount it unlocks,
+  // and the menu refuses to check out a cart worth nothing.
+  if (price.amount < 0 || (price.amount == 0 && p.coupon == null)) return false;
   return CurrencyX.tryFromCode(price.currency) != null;
 }
 
@@ -519,6 +548,8 @@ CatalogProjection buildCatalog(
         priceCurrency: CurrencyX.tryFromCode(p.price!.currency)!,
         imageUrls: p.imageUrls,
         d: p.d,
+        coupon: p.coupon,
+        maxQty: p.maxQty,
       ));
     }
   }

@@ -135,9 +135,7 @@ class LnurlService {
       String? recipientPubkey,
       List<OrderItem> lines = const [],
       List<DiscountEntry> discounts = const [],
-      String? couponId,
-      String? couponType,
-      String? couponName}) async {
+      List<OrderCoupon> coupons = const []}) async {
     final params = await resolve(address);
     final msats = sats * 1000;
     if (msats < params.minSendable) {
@@ -167,9 +165,7 @@ class LnurlService {
         orderId: orderId,
         lines: lines,
         discounts: discounts,
-        couponId: couponId,
-        couponType: couponType,
-        couponName: couponName,
+        coupons: coupons,
       );
       query += '&nostr=${Uri.encodeComponent(jsonEncode(zapReq.toJson()))}';
       if (lnurl != null) query += '&lnurl=$lnurl';
@@ -220,9 +216,7 @@ class LnurlService {
     String? lnurl,
     List<OrderItem> lines = const [],
     List<DiscountEntry> discounts = const [],
-    String? couponId,
-    String? couponType,
-    String? couponName,
+    List<OrderCoupon> coupons = const [],
   }) async {
     final base = <List<String>>[
       ['relays', ...relays],
@@ -234,9 +228,7 @@ class LnurlService {
     var detail = orderTags(
       lines: lines,
       discounts: discounts,
-      couponId: couponId,
-      couponType: couponType,
-      couponName: couponName,
+      coupons: coupons,
     );
 
     // This event is URL-ENCODED into the callback's query string, so a long

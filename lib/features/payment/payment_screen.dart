@@ -24,6 +24,7 @@ import '../../domain/config/settings_state.dart';
 import '../../domain/coupon/coupon.dart';
 import '../../domain/order/current_order.dart';
 import '../../domain/order/invoice_debug_store.dart';
+import '../../domain/order/order_tags.dart';
 import '../../domain/order/order_reset.dart';
 import '../../domain/order/orders_store.dart';
 import '../../domain/order/receipt_printer.dart';
@@ -104,13 +105,54 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// dropped, so a slow response cannot replace the QR the customer is scanning.
   int _invoiceGen = 0;
 
-  // Coupons. `_service` non-null is the whole condition for the app-bar button:
+  // Coupons. `_service` non-null is the whole condition for the scan button:
   // it means this merchant authorised a claim endpoint on nostr.
   CouponDiscovery? _couponService;
-  CouponInfo? _coupon;
-  int _discountSats = 0;
-  List<DiscountEntry> _discountEntries = const [];
+  CouponInfo? _coupon; // the scanned one
+  CouponQuote? _scanQuote;
   bool _applyingCoupon = false;
+
+  /// The coupons the cart's own products carry, each with what it takes off.
+  /// Only the ones that apply: "Vaso" without a drink contributes nothing and
+  /// says nothing.
+  ///
+  /// Quoted ONCE, on first read (which is the first invoice request): the cart
+  /// cannot change under this screen, and re-quoting on a rate tick would move
+  /// the amount away from the bolt11 already on screen.
+  late final List<({ProductCoupon coupon, CouponQuote quote})> _productCoupons =
+      _quoteProductCoupons();
+
+  /// The product coupons stacked with [scan], clamped to the goods.
+  CouponQuote _stacked(CouponQuote? scan) => stackQuotes([
+        for (final p in _productCoupons) p.quote,
+        if (scan != null) scan,
+      ], goodsSats: _goodsSats);
+
+  int get _discountSats => _stacked(_scanQuote).discountSats;
+  List<DiscountEntry> get _discountEntries => _stacked(_scanQuote).entries;
+
+  /// Every coupon on this order, for its `coupon` tags.
+  List<OrderCoupon> _orderCoupons(CouponInfo? scanned) => [
+        for (final p in _productCoupons)
+          (
+            id: p.coupon.id,
+            type: p.coupon.benefit.type.name,
+            name: p.coupon.name
+          ),
+        if (scanned != null)
+          (
+            id: scanned.couponId,
+            type: scanned.benefit.type.name,
+            name: scanned.name
+          ),
+      ];
+
+  /// The applied coupons' names, for the ticket, the success screen and the
+  /// stored order. Null when there are none.
+  String? get _couponNames {
+    final names = _orderCoupons(_coupon).map((c) => c.name).join(' + ');
+    return names.isEmpty ? null : names;
+  }
 
   String _satsOf(int sats) => formatToPreference(Currency.sat, sats);
   String _arsOf(int sats) => formatToPreference(
@@ -191,7 +233,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           amountSats: _chargeSats,
           items: items,
           thankYouMessage: context.tr('Gracias por su pago'),
-          couponName: _coupon?.name ?? '',
+          couponName: _couponNames ?? '',
           discountSats: _discountSats,
         );
       },
@@ -254,6 +296,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
       _invoice = null;
       _verifyUrl = null;
     });
+    // Product coupons alone took the whole order off. With no invoice and no
+    // nonce to redeem, nothing would ever record this sale — refuse rather
+    // than hand it out unrecorded. A SCANNED coupon reaching zero settles
+    // through `_settleFree` instead: its redemption is the record.
+    if (_chargeSats <= 0) {
+      setState(() => _invoiceError =
+          'Los cupones de los productos dejan la orden en 0. No se puede cobrar.');
+      return;
+    }
     try {
       // Who the zap request names as recipient. Cached after the first lookup.
       final identity = await nostrProfile.resolveNip05(merchantAddress.value);
@@ -267,9 +318,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         recipientPubkey: identity?.pubkey,
         lines: currentOrderItems.value,
         discounts: _discountEntries,
-        couponId: _coupon?.couponId,
-        couponType: _coupon?.benefit.type.name,
-        couponName: _coupon?.name,
+        coupons: _orderCoupons(_coupon),
       );
       final stale = gen != _invoiceGen;
       if (!mounted || stale) {
@@ -358,7 +407,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       summary: _debugSummary(),
       items: currentOrderItems.value.toList(),
       couponId: _coupon?.couponId,
-      couponName: _coupon?.name,
+      couponName: _couponNames,
       discountSats: _discountSats,
       reason: reason,
       generation: gen,
@@ -400,13 +449,38 @@ class _PaymentScreenState extends State<PaymentScreen> {
       // before the receipt is printed and so the order can be re-printed later.
       items: currentOrderItems.value.toList(),
       couponId: _coupon?.couponId,
-      couponName: _coupon?.name,
+      couponName: _couponNames,
       couponNonce: _coupon?.nonce,
       discountSats: _discountSats,
     ));
   }
 
   // ──────────────────────────────────────────────────────────────── coupons
+
+  /// Look the cart's lines up in the catalog they were rung up from, by `d`,
+  /// and quote each product's coupon against the whole basket. Once per
+  /// coupon however many units or products carry it.
+  List<({ProductCoupon coupon, CouponQuote quote})> _quoteProductCoupons() {
+    final lines = currentOrderItems.value;
+    final byD = {
+      for (final p in catalog.result?.products ?? const [])
+        if (p.coupon != null && p.d.isNotEmpty) p.d: p.coupon!,
+    };
+    final seen = <String>{};
+    final out = <({ProductCoupon coupon, CouponQuote quote})>[];
+    for (final l in lines) {
+      final c = byD[l.d];
+      if (c == null || l.qty < 1 || !seen.add(c.id)) continue;
+      final quote = quoteCoupon(
+        benefit: c.benefit,
+        goodsSats: _goodsSats,
+        lines: lines,
+        toSats: pricing.fiatToSats,
+      );
+      if (quote.applies) out.add((coupon: c, quote: quote));
+    }
+    return out;
+  }
 
   /// The basket the coupon prices.
   ///
@@ -465,7 +539,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
       );
       if (quote.unmet != null) throw CouponException(quote.unmet!.message);
 
-      final net = widget.amountSats - quote.discountSats;
+      // Quoted on its own against the same gross lines, then stacked on top
+      // of whatever the cart's products already take off.
+      final total = _stacked(quote);
+      final net = widget.amountSats - total.discountSats;
       // BEFORE the POST: an amount the provider will not invoice would burn the
       // nonce and leave the customer holding a spent coupon and no way to pay.
       if (net > 0) {
@@ -484,9 +561,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
         merchantPubkey: merchant,
         amountMsat: net * 1000,
         order: await buildCouponOrder(
-          coupon: info,
+          coupons: _orderCoupons(info),
           lines: lines,
-          discounts: quote.entries,
+          discounts: total.entries,
           merchantPubkey: merchant,
           amountMsat: net * 1000,
         ),
@@ -494,8 +571,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (!mounted) return;
       setState(() {
         _coupon = redemption.info;
-        _discountSats = quote.discountSats;
-        _discountEntries = quote.entries;
+        _scanQuote = quote;
       });
 
       if (_chargeSats <= 0) {
@@ -522,8 +598,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (_collecting) return;
     setState(() {
       _coupon = null;
-      _discountSats = 0;
-      _discountEntries = const [];
+      _scanQuote = null;
     });
     await _fetchInvoice(reason: 'remove-coupon');
   }
@@ -540,10 +615,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _showCouponDetail() async {
     final coupon = _coupon;
-    if (coupon == null) return;
+    if (coupon == null && _productCoupons.isEmpty) return;
     final remove = await showCouponDetailSheet(
       context,
-      coupon: coupon,
+      coupons: [
+        for (final p in _productCoupons)
+          (name: p.coupon.name, description: '', benefit: p.coupon.benefit),
+        if (coupon != null)
+          (
+            name: coupon.name,
+            description: coupon.description,
+            benefit: coupon.benefit
+          ),
+      ],
+      removable: coupon != null,
       entries: _discountEntries,
       discountSats: _discountSats,
       grossSats: widget.amountSats,
@@ -617,7 +702,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           PaymentSuccessView(
             satsStr: _satsStr,
             arsStr: _arsStr,
-            couponName: _coupon?.name,
+            couponName: _couponNames,
             discountStr: _discountSats > 0 ? _satsOf(_discountSats) : null,
             onSpinWheel: offerSpin
                 ? () {
@@ -656,12 +741,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   /// The coupon button, top right.
   ///
-  /// Absent unless this merchant authorised a claim endpoint on nostr — a till
-  /// that offers to scan coupons nobody can issue is worse than no button.
+  /// The scan is absent unless this merchant authorised a claim endpoint on
+  /// nostr — a till that offers to scan coupons nobody can issue is worse than
+  /// no button. Product coupons need no endpoint: their tag shows beside the
+  /// scan, which stays available on top of them.
   List<Widget> _couponActions() {
-    if (_couponService == null || _view != _View.waiting || _collecting) {
-      return const [];
-    }
+    if (_view != _View.waiting || _collecting) return const [];
     if (_applyingCoupon) {
       return const [
         Padding(
@@ -677,17 +762,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
     final applied = _coupon != null;
     return [
-      IconButton(
-        tooltip: context
-            .tr(applied ? 'Cupón aplicado' : 'Escanear cupón')
-            .toUpperCase(),
-        icon: Icon(
-          applied ? Icons.local_offer : Icons.qr_code_scanner,
-          size: 26,
-          color: applied ? AppColors.primary : null,
+      if (!applied && _productCoupons.isNotEmpty)
+        IconButton(
+          tooltip: context.tr('Cupón aplicado').toUpperCase(),
+          icon:
+              const Icon(Icons.local_offer, size: 26, color: AppColors.primary),
+          onPressed: _showCouponDetail,
         ),
-        onPressed: applied ? _showCouponDetail : _scanCoupon,
-      ),
+      if (applied || _couponService != null)
+        IconButton(
+          tooltip: context
+              .tr(applied ? 'Cupón aplicado' : 'Escanear cupón')
+              .toUpperCase(),
+          icon: Icon(
+            applied ? Icons.local_offer : Icons.qr_code_scanner,
+            size: 26,
+            color: applied ? AppColors.primary : null,
+          ),
+          onPressed: applied ? _showCouponDetail : _scanCoupon,
+        ),
     ];
   }
 
@@ -748,7 +841,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
               style:
                   const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
-          Text(_invoiceError ?? '',
+          Text(context.tr(_invoiceError ?? ''),
               textAlign: TextAlign.center,
               style: const TextStyle(color: AppColors.muted)),
           const SizedBox(height: 28),

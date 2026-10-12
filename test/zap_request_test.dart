@@ -6,6 +6,7 @@ import 'package:lawallet_pos/data/nostr/signer.dart';
 import 'package:lawallet_pos/domain/config/currencies.dart';
 import 'package:lawallet_pos/domain/coupon/coupon.dart';
 import 'package:lawallet_pos/domain/order/current_order.dart';
+import 'package:lawallet_pos/domain/order/order_tags.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// The kind-9734 zap request. Its `p` is the merchant's own key, and getting
@@ -74,9 +75,10 @@ void main() {
         orderId: 'abc123',
         lines: lines,
         discounts: discounts,
-        couponId: couponId,
-        couponType: couponId == null ? null : 'percent',
-        couponName: couponName,
+        coupons: [
+          if (couponId != null)
+            (id: couponId, type: 'percent', name: couponName ?? ''),
+        ],
       );
       return e.tags;
     }
@@ -106,6 +108,15 @@ void main() {
       expect(tags.firstWhere((t) => t[0] == 'discount'), ['discount', '50', 'ARS']);
       expect(tags.firstWhere((t) => t[0] == 'coupon'),
           ['coupon', 'c-1', 'percent', 'Bienvenida']);
+    });
+
+    test('a coupon name with % stays invoiceable on Primal', () {
+      // Primal answers 500 to a zap request carrying a bare `%`.
+      final tags = orderTags(lines: const [], coupons: const [
+        (id: 'c-1', type: 'percent', name: '5% al escabio'),
+      ]);
+      expect(tags.firstWhere((t) => t[0] == 'coupon'),
+          ['coupon', 'c-1', 'percent', '5％ al escabio']);
     });
 
     test('a paydesk charge invents no product', () async {

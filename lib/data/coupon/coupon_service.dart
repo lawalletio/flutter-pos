@@ -225,11 +225,15 @@ const int maxOrderChars = 8000;
 /// a free order it is the ONLY record that will ever exist: no invoice, no zap
 /// receipt, and the coupon service keeps no order book of its own.
 ///
+/// [coupons] is every coupon on the order — the scanned one being redeemed
+/// and any the cart's products carry — and [discounts] what they took off
+/// together.
+///
 /// The `total` tags are GROSS and the `discount` tags are what came off, so
 /// gross − discount is what was charged. Carrying both beats carrying the net
 /// alone, which cannot be told apart from a cheaper basket.
 Future<NostrEvent> buildCouponOrder({
-  required CouponInfo coupon,
+  required List<OrderCoupon> coupons,
   required List<OrderItem> lines,
   required List<DiscountEntry> discounts,
   required String merchantPubkey,
@@ -241,9 +245,7 @@ Future<NostrEvent> buildCouponOrder({
     ...orderTags(
       lines: lines,
       discounts: discounts,
-      couponId: coupon.couponId,
-      couponType: coupon.benefit.type.name,
-      couponName: coupon.name,
+      coupons: coupons,
     ),
   ];
 

@@ -80,6 +80,10 @@ class _CachedCatalog {
   final List<({int id, String name})> categories;
   final int unsellable;
 
+  /// Relays that served this catalog, and when they last did. A read missing
+  /// any recent one is not adopted — see [adoptableRead].
+  final Map<String, DateTime> holders;
+
   const _CachedCatalog({
     required this.address,
     required this.pubkey,
@@ -87,6 +91,7 @@ class _CachedCatalog {
     required this.products,
     required this.categories,
     required this.unsellable,
+    this.holders = const {},
   });
 }
 
@@ -336,8 +341,20 @@ class CatalogService {
     // Deliberately not a "did the counts shrink?" test. A fragment missing only
     // the deletions has MORE products and the same categories, so a count check
     // waves it through and resurrects deleted items. If the read was not
-    // complete, the only safe move is to keep what we already have.
-    if (!fetched.complete) {
+    // adoptable, the only safe move is to keep what we already have.
+    //
+    // "Adoptable", not "complete": a relay that never even connected and never
+    // held this catalog cannot be hiding part of it, and requiring it froze
+    // the menu for good the day one default relay died.
+    final holders = cached?.pubkey == pubkey ? cached!.holders : const <String, DateTime>{};
+    final adoptable = fetched.complete ||
+        adoptableRead(
+          connected: fetched.connected,
+          eosed: fetched.idsByRelay.keys.toSet(),
+          holders: holders,
+          now: now,
+        );
+    if (!adoptable) {
       final previous = notifier.value;
       if (previous != null && previous.pubkey == pubkey && previous.hasProducts) {
         debugPrint('CatalogService: partial read '
@@ -399,9 +416,15 @@ class CatalogService {
       );
     }
 
-    if (fetched.complete) {
-      await _writeCache(address, pubkey, projection, now);
+    if (adoptable) {
+      await _writeCache(address, pubkey, projection, now, holders: {
+        ...holders,
+        for (final e in fetched.idsByRelay.entries)
+          if (e.value.isNotEmpty) e.key: now,
+      });
       _markLoaded(address);
+    }
+    if (fetched.complete) {
       // Replicate on a complete read only: "relay X is missing event Y" is only
       // a safe claim when we know what every relay holds.
       if (_syncedPubkey != pubkey) {
@@ -417,7 +440,7 @@ class CatalogService {
             )
             .ignore();
       }
-    } else {
+    } else if (!adoptable) {
       _loadedAddress = address;
       _loadedAt = null; // not authoritative; re-ask next time
     }
@@ -452,6 +475,15 @@ class CatalogService {
               at: DateTime.fromMillisecondsSinceEpoch(
                   (v['at'] as num).toInt() * 1000),
               unsellable: (v['unsellable'] as num?)?.toInt() ?? 0,
+              // Absent on a blob written before holders existed: no relay is
+              // required beyond the ones that connect, and the next adopted
+              // read fills it in.
+              holders: {
+                for (final h
+                    in ((v['holders'] as Map?) ?? const {}).entries)
+                  h.key as String: DateTime.fromMillisecondsSinceEpoch(
+                      (h.value as num).toInt() * 1000),
+              },
               products: [
                 for (final p in v['products'] as List)
                   Product.fromJson((p as Map).cast<String, dynamic>()),
@@ -488,7 +520,8 @@ class CatalogService {
   /// which would put hundreds of kilobytes of dead weight into the prefs file
   /// that Android loads at every startup.
   Future<void> _writeCache(
-      String address, String pubkey, CatalogProjection p, DateTime at) async {
+      String address, String pubkey, CatalogProjection p, DateTime at,
+      {Map<String, DateTime> holders = const {}}) async {
     try {
       final all = Map<String, _CachedCatalog>.from(await _allCached());
       all[address] = _CachedCatalog(
@@ -498,6 +531,7 @@ class CatalogService {
         unsellable: p.unsellable,
         products: p.products,
         categories: p.categories,
+        holders: holders,
       );
 
       // Evict the least recently fetched merchants.
@@ -520,6 +554,10 @@ class CatalogService {
                 'pubkey': e.value.pubkey,
                 'at': e.value.at.millisecondsSinceEpoch ~/ 1000,
                 'unsellable': e.value.unsellable,
+                'holders': {
+                  for (final h in e.value.holders.entries)
+                    h.key: h.value.millisecondsSinceEpoch ~/ 1000,
+                },
                 'categories': [
                   for (final c in e.value.categories)
                     {'id': c.id, 'name': c.name},

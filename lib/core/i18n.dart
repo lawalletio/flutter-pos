@@ -355,4 +355,6 @@ const Map<String, String> _en = {
   'Pegar': 'Paste',
   'Ese código no es un cupón': "That code isn't a coupon",
   'Aplicar': 'Apply',
+  'Los cupones de los productos dejan la orden en 0. No se puede cobrar.':
+      "The products' coupons bring the order to 0. It can't be charged.",
 };
