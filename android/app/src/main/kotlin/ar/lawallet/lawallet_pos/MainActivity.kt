@@ -15,6 +15,9 @@ import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.Ndef
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.text.Layout
 import android.util.Log
 import com.zcs.sdk.DriverManager
@@ -117,6 +120,7 @@ class MainActivity : FlutterActivity() {
                     // so leaving the payment screen never drops global tap capture.
                     "startSession" -> { enableReader(); result.success(nfcActive) }
                     "stopSession" -> result.success(null)
+                    "vibrate" -> { vibrate(); result.success(null) }
                     else -> result.notImplemented()
                 }
             }
@@ -383,9 +387,13 @@ class MainActivity : FlutterActivity() {
         try {
             val ndef = Ndef.get(tag)
             if (ndef != null) {
-                ndef.connect()
-                val msg = runCatching { ndef.ndefMessage }.getOrNull() ?: ndef.cachedNdefMessage
-                runCatching { ndef.close() }
+                // Android already read the message while discovering the tag,
+                // and a SUN card signed that read. Reading it again is another
+                // trip over the air, and fails once the card is moving away.
+                val msg = ndef.cachedNdefMessage ?: run {
+                    ndef.connect()
+                    try { ndef.ndefMessage } finally { runCatching { ndef.close() } }
+                }
                 url = extractUrl(msg)
             }
         } catch (e: Throwable) {
@@ -394,6 +402,19 @@ class MainActivity : FlutterActivity() {
         val u = url ?: return
         // Keep reader mode active for subsequent taps; just stream this one.
         runOnUiThread { nfcEvents?.success(u) }
+    }
+
+    /** One short buzz for a card the till took. A no-op without a motor. */
+    @Suppress("DEPRECATION")
+    private fun vibrate() {
+        val v = getSystemService(VIBRATOR_SERVICE) as? Vibrator ?: return
+        if (!v.hasVibrator()) return
+        val ms = 80L // long enough to feel through a hand holding the terminal
+        if (Build.VERSION.SDK_INT >= 26) {
+            v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            v.vibrate(ms)
+        }
     }
 
     private fun extractUrl(msg: NdefMessage?): String? {

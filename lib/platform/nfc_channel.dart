@@ -38,6 +38,13 @@ class NfcChannel {
     } catch (_) {}
   }
 
+  /// One short buzz, for a tap the till took. Silent without a motor.
+  static Future<void> vibrate() async {
+    try {
+      await _ch.invokeMethod('vibrate');
+    } catch (_) {}
+  }
+
   /// Stream of tag NDEF URLs (e.g. `lnurlw://…`).
   static Stream<String> tags() => _events
       .receiveBroadcastStream()
