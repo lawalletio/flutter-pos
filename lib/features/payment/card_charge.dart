@@ -57,8 +57,9 @@ class CardCharge {
     onChange();
     await NfcChannel.startSession();
     _sub = NfcChannel.tags().listen((cardUrl) {
-      if (!waiting() || collecting || !canTap()) return;
+      if (!waiting() || collecting || !canTap() || invoice() == null) return;
       AppSounds.play(AppSound.card);
+      NfcChannel.vibrate();
       _collect(cardUrl);
     });
   }
@@ -75,25 +76,46 @@ class CardCharge {
     onChange();
   }
 
+  static const _pollEvery = Duration(milliseconds: 500);
+
+  /// Polls once the card server has answered, ~24s, before calling it pending.
+  static const _settleTries = 48;
+
   /// A card was tapped. The charging screen runs its own timeline; this keeps
   /// pulling the payment and cuts that timeline the moment it settles.
+  ///
+  /// The verify URL is watched from the tap, not after the card server answers:
+  /// it pays the invoice before it replies, so the provider usually shows the
+  /// settlement first.
   Future<void> _collect(String cardUrl) async {
     final inv = invoice();
     if (inv == null) return;
     _setCollecting(true);
+    final url = verifyUrl();
+    Object? failure;
+    var answered = false;
+    final pay = _lnurl.payWithCard(cardUrl, inv).then<void>((_) {},
+        onError: (Object e) {
+      failure = e;
+    }).whenComplete(() => answered = true);
     try {
-      await _lnurl.payWithCard(cardUrl, inv);
-      final url = verifyUrl();
       var settled = false;
-      if (url != null) {
-        for (var i = 0; i < 30 && waiting() && invoice() == inv; i++) {
+      for (var left = _settleTries;
+          url != null &&
+              left > 0 &&
+              failure == null &&
+              waiting() &&
+              invoice() == inv;) {
+        try {
           if (await _lnurl.checkSettled(url)) {
             settled = true;
             break;
           }
-          await Future<void>.delayed(const Duration(milliseconds: 800));
-        }
+        } catch (_) {/* one failed poll is no answer — keep watching */}
+        if (answered) left--;
+        await Future<void>.delayed(_pollEvery);
       }
+      if (!settled) await pay;
       if (!waiting()) return;
       if (invoice() != inv) {
         _setCollecting(false);
@@ -102,10 +124,11 @@ class CardCharge {
       if (settled && verifyUrl() == url) {
         collecting = false;
         onPaid();
-      } else {
-        _setCollecting(false);
-        onPending();
+        return;
       }
+      if (failure != null) throw failure!;
+      _setCollecting(false);
+      onPending();
     } on LnurlException catch (e) {
       if (!waiting()) return;
       _setCollecting(false);

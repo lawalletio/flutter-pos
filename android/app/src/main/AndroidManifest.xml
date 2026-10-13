@@ -4,6 +4,8 @@
     <!-- NFC for Boltcard / LNURL-withdraw card payments. -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <!-- A buzz when a tapped card starts a charge. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <application
         android:label="LaWallet POS"
         android:name="${applicationName}"
