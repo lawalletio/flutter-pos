@@ -41,13 +41,59 @@ void main() {
     expect(sliceIndexAt(slices, 0.4), 0);
   });
 
-  test('the pointer fraction round-trips through the landing turns', () {
-    final slices = slicesOf([cafe, postre]);
-    final fraction = landingFraction(slices, 2, 0.5);
-    final turns = landingTurns(fraction, spins: 6);
-    final selected = (-turns) % 1;
-    expect(sliceIndexAt(slices, selected), 2);
-    expect(selected, closeTo(fraction, 0.0001));
+  test('every throw stops on its target, either way', () {
+    const turn = 2 * math.pi;
+    for (final velocity in [6.0, -6.0, 14.0, -22.0, 40.0]) {
+      for (final target in [0.0, 0.13, 0.5, 0.97]) {
+        for (final ms in [kWheelDurationMinMs, 6000, kWheelDurationMaxMs]) {
+          final plan = planWheelThrow(
+            angle: 1.7,
+            velocity: velocity,
+            target: target,
+            durationMs: ms,
+          );
+          final end = wheelFractionAt(plan.angleAt(plan.seconds));
+          final off = (end - target).abs();
+          expect(math.min(off, 1 - off), lessThan(1e-9));
+          expect(plan.speedAt(0), velocity.abs());
+          expect(plan.speedAt(plan.seconds), 0);
+          expect(plan.distance, greaterThan(turn / 2));
+          var last = plan.angleAt(0);
+          for (var i = 1; i <= 50; i++) {
+            final at = plan.angleAt(plan.seconds * i / 50);
+            expect((at - last) * velocity.sign, greaterThanOrEqualTo(0));
+            last = at;
+          }
+        }
+      }
+    }
+  });
+
+  test('a harder throw spins further and a slow one does not count', () {
+    const turn = 2 * math.pi;
+    expect(wheelFlingCounts(kWheelMinFlingTurns * turn * 0.9), isFalse);
+    expect(wheelFlingCounts(-kWheelMinFlingTurns * turn), isTrue);
+    WheelThrow plan(double velocity) => planWheelThrow(
+          angle: 0,
+          velocity: velocity,
+          target: 0.4,
+          durationMs: kWheelDurationDefaultMs,
+        );
+    final soft = plan(kWheelMinFlingTurns * turn);
+    final hard = plan(kWheelMaxFlingTurns * turn);
+    expect(hard.distance, greaterThan(soft.distance + 2 * turn));
+    expect(hard.seconds, greaterThan(soft.seconds));
+  });
+
+  test('the duration setting stretches the spin', () {
+    double seconds(int ms) => planWheelThrow(
+          angle: 0,
+          velocity: 15,
+          target: 0.25,
+          durationMs: ms,
+        ).seconds;
+    expect(seconds(kWheelDurationMaxMs), greaterThan(seconds(6000) * 1.8));
+    expect(seconds(kWheelDurationMinMs), lessThan(seconds(6000) * 0.6));
   });
 
   test('pick follows the weights', () {
@@ -136,54 +182,6 @@ void main() {
       ),
       isFalse,
     );
-  });
-
-  test('speed scales the laps and the default acceleration is unchanged', () {
-    expect(
-      wheelExtraSpins(kWheelDurationDefaultMs, speed: 2),
-      closeTo(wheelExtraSpins(kWheelDurationDefaultMs) * 2, 0.001),
-    );
-    expect(
-      wheelSpinProgress(0.28, acceleration: 1),
-      closeTo(wheelSpinProgress(0.28), 0.0001),
-    );
-    expect(
-      wheelSpinProgress(0.2, acceleration: 2),
-      greaterThan(wheelSpinProgress(0.2)),
-    );
-  });
-
-  test('the slow part of the spin lasts long enough to read', () {
-    expect(wheelSpinProgress(0), 0);
-    expect(wheelSpinProgress(1), closeTo(1, 1e-9));
-    final opening = wheelSpinProgress(0.28);
-    expect(opening, greaterThan(0.55));
-    expect(opening, lessThan(0.70));
-    // The second half still sweeps a readable arc instead of creeping.
-    final tail = 1 - wheelSpinProgress(0.5);
-    expect(tail, greaterThan(0.18));
-    expect(tail, lessThan(0.30));
-    expect(wheelSpinProgress(0.86), greaterThan(0.95));
-    var previous = 0.0;
-    for (var i = 1; i <= 20; i++) {
-      final progress = wheelSpinProgress(i / 20);
-      expect(progress, greaterThan(previous));
-      previous = progress;
-    }
-    final burst = wheelSpinProgress(0.1);
-    final coast = wheelSpinProgress(0.6) - wheelSpinProgress(0.5);
-    expect(coast, lessThan(burst / 2));
-  });
-
-  test('a long wheel duration slows the spin instead of adding laps', () {
-    final normal = wheelExtraSpins(kWheelDurationDefaultMs) /
-        (kWheelDurationDefaultMs / 1000);
-    final atCap = wheelExtraSpins(kWheelSlowAfterMs) / (kWheelSlowAfterMs / 1000);
-    expect(atCap, closeTo(normal, 0.001));
-    expect(wheelExtraSpins(kWheelDurationMaxMs), wheelExtraSpins(kWheelSlowAfterMs));
-    final slow = wheelExtraSpins(kWheelDurationMaxMs) /
-        (kWheelDurationMaxMs / 1000);
-    expect(slow, lessThan(normal));
   });
 
   test('a single full-circle prize is still cut into pieces', () {

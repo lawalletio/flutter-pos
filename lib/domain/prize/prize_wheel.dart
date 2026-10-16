@@ -176,9 +176,6 @@ double landingFraction(List<WheelSlice> slices, int index, double along) {
   return value >= 1 ? 0.999999 : value;
 }
 
-/// Past this length the wheel stops adding laps. Extra time only slows it down.
-const kWheelSlowAfterMs = 10000;
-
 /// The success screen offers one spin when prizes are on and the merchant's
 /// [offer] matches this payment. [tipSats] is what the customer added.
 bool offerWheelSpin({
@@ -192,56 +189,120 @@ bool offerWheelSpin({
   return tipSats > 0;
 }
 
-/// The whole spin is 60% slower than the first tuning. Fewer laps in the same
-/// time, so speed and acceleration drop together. The sliders still scale this.
-const kWheelGlobalPace = 0.4;
+/// Slowest release, in turns per second, that counts as a spin. A gentler
+/// throw coasts to a stop and asks for a harder one.
+const kWheelMinFlingTurns = 0.9;
 
-/// Extra revolutions for a spin of [durationMs]. The count stays low so the
-/// coast at the end is slow enough to read. Up to [kWheelSlowAfterMs] laps
-/// grow with the time; past that the lap count stays put and the extra time
-/// only slows the wheel further.
-double wheelExtraSpins(int durationMs, {double speed = 1}) {
-  final ms = clampWheelDurationMs(durationMs);
-  final paced = ms < kWheelSlowAfterMs ? ms : kWheelSlowAfterMs;
-  final pace = speed.isNaN ? 1.0 : speed.clamp(0.5, 2.0);
-  return 3.5 * paced / kWheelDurationDefaultMs * pace * kWheelGlobalPace;
-}
+/// Faster releases launch as if they were this fast.
+const kWheelMaxFlingTurns = 4.0;
 
-/// How far around the wheel a spin has traveled at normalized time [t] (0..1).
+/// Seconds the wheel takes to go from the finger's speed to the launch speed.
+const kWheelLaunchSeconds = 0.16;
+
+bool wheelFlingCounts(double radiansPerSecond) =>
+    radiansPerSecond.abs() >= kWheelMinFlingTurns * 2 * math.pi;
+
+/// Fraction of the wheel under the top pointer once it has turned [angle]
+/// radians clockwise.
+double wheelFractionAt(double angle) => (-angle / (2 * math.pi)) % 1;
+
+/// One throw, from the release to the stop. The result is drawn before the
+/// wheel moves; the motion only has to look like the finger caused it.
 ///
-/// The opening dumps speed gradually, like a heavy wheel. Most of the
-/// remaining time is a long coast that still sweeps about a turn, so each
-/// prize stays readable, and the last moment eases to a stop.
-double wheelSpinProgress(double t, {double acceleration = 1}) {
-  final clamped = t.clamp(0.0, 1.0);
-  final accel = acceleration.isNaN ? 1.0 : acceleration.clamp(0.5, 2.0);
-  final t1 = (0.28 / accel).clamp(0.12, 0.5);
-  const t2 = 0.86;
-  final v0 = 5.0 * accel * kWheelGlobalPace;
-  const v1 = 1.35 * kWheelGlobalPace;
-  const v2 = 0.50 * kWheelGlobalPace;
-  final area1 = (v0 + v1) / 2 * t1;
-  final area2 = (v1 + v2) / 2 * (t2 - t1);
-  final area3 = v2 / 2 * (1 - t2);
-  final total = area1 + area2 + area3;
-  final area = clamped <= t1
-      ? _spinArea(0, clamped, v0, v1, t1)
-      : clamped <= t2
-          ? area1 + _spinArea(t1, clamped, v1, v2, t2)
-          : area1 + area2 + _spinArea(t2, clamped, v2, 0, 1);
-  return area / total;
+/// Speed starts at the finger's, eases for [ramp] seconds to [launch], then
+/// decays as `(1 - t)^power`, which stops dead at [seconds] on the target.
+class WheelThrow {
+  const WheelThrow({
+    required this.from,
+    required this.direction,
+    required this.fling,
+    required this.launch,
+    required this.ramp,
+    required this.seconds,
+    required this.power,
+    required this.distance,
+  });
+
+  final double from;
+  final double direction;
+  final double fling;
+  final double launch;
+  final double ramp;
+  final double seconds;
+  final double power;
+  final double distance;
+
+  double get _rampDistance => (fling + launch) / 2 * ramp;
+
+  /// Radians covered after [t] seconds, always positive.
+  double travelled(double t) {
+    if (t <= 0) return 0;
+    if (t >= seconds) return distance;
+    if (t <= ramp) return fling * t + (launch - fling) * t * t / (2 * ramp);
+    final span = seconds - ramp;
+    final left = 1 - (t - ramp) / span;
+    return _rampDistance +
+        launch * span / (power + 1) * (1 - math.pow(left, power + 1));
+  }
+
+  double angleAt(double t) => from + direction * travelled(t);
+
+  /// Radians per second at [t], always positive.
+  double speedAt(double t) {
+    if (t <= 0) return fling;
+    if (t >= seconds) return 0;
+    if (t <= ramp) return fling + (launch - fling) * t / ramp;
+    final left = 1 - (t - ramp) / (seconds - ramp);
+    return launch * math.pow(left, power).toDouble();
+  }
 }
 
-double _spinArea(double t0, double t, double vStart, double vEnd, double t1) {
-  final u = (t - t0) / (t1 - t0);
-  final v = vStart + (vEnd - vStart) * u;
-  return (vStart + v) / 2 * (t - t0);
-}
-
-/// Clockwise turns that leave [fraction] under a pointer fixed at the top.
-double landingTurns(double fraction, {double spins = 6}) {
-  final frac = (1 - (fraction % 1)) % 1;
-  return spins + frac;
+/// Plans a throw released at [velocity] (radians per second, clockwise
+/// positive) that stops with [target] under the pointer.
+///
+/// [durationMs] is the spin length the merchant picked; a harder throw runs a
+/// bit longer. [speed] scales the launch, [acceleration] how early it brakes.
+WheelThrow planWheelThrow({
+  required double angle,
+  required double velocity,
+  required double target,
+  required int durationMs,
+  double speed = 1,
+  double acceleration = 1,
+}) {
+  const turn = 2 * math.pi;
+  final direction = velocity < 0 ? -1.0 : 1.0;
+  final fling = velocity.abs();
+  const slowest = kWheelMinFlingTurns * turn;
+  const fastest = kWheelMaxFlingTurns * turn;
+  final clamped = fling.clamp(slowest, fastest);
+  final strength = (clamped - slowest) / (fastest - slowest);
+  final launch = clamped * clampWheelPace(speed);
+  const ramp = kWheelLaunchSeconds;
+  final rampDistance = (fling + launch) / 2 * ramp;
+  final ideal = clampWheelDurationMs(durationMs) / 1000 * (0.85 + 0.3 * strength);
+  final idealPower = 1 + 1.4 * clampWheelPace(acceleration);
+  // Turning clockwise, the fraction under the pointer goes down.
+  final now = wheelFractionAt(angle);
+  final gap = (direction > 0 ? now - target : target - now) % 1 * turn;
+  final wanted = rampDistance + launch * (ideal - ramp) / (idealPower + 1);
+  final laps = math.max(0, ((wanted - gap) / turn).round());
+  var distance = gap + laps * turn;
+  while (distance - rampDistance < math.pi) {
+    distance += turn;
+  }
+  final coast = distance - rampDistance;
+  final power = (launch * (ideal - ramp) / coast - 1).clamp(1.2, 5.0);
+  return WheelThrow(
+    from: angle,
+    direction: direction,
+    fling: fling,
+    launch: launch,
+    ramp: ramp,
+    seconds: ramp + coast * (power + 1) / launch,
+    power: power,
+    distance: distance,
+  );
 }
 
 /// Index chosen with probability proportional to [WheelSlice.weight].

@@ -48,6 +48,13 @@ const miniapps = [
       MiniappRequirement.printer,
     },
   ),
+  // Prints only when its own setting says so; print errors already ask.
+  MiniappManifest(
+    name: 'Rueda de la fortuna',
+    sublabel: 'Juego de premios',
+    route: '/rueda',
+    icon: Icons.casino_outlined,
+  ),
 ];
 
 /// The requirements of [app] this device and account don't meet.
@@ -115,7 +122,7 @@ class _MiniappTileState extends State<MiniappTile> {
               child: PosCard(
                 key: Key('miniapp-${widget.app.route}'),
                 icon: widget.app.icon,
-                label: widget.app.name,
+                label: context.tr(widget.app.name),
                 sublabel: context.tr(widget.app.sublabel),
                 onTap: ready ? () => context.go(widget.app.route) : null,
               ),
