@@ -6,9 +6,10 @@ import 'package:lawallet_pos/features/miniapps/miniapps.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  final zape = miniapps.firstWhere((app) => app.route == '/zape');
 
   test('ZAPE asks for lud16, lud21 and a printer', () {
-    expect(miniapps.single.requires, MiniappRequirement.values.toSet());
+    expect(zape.requires, MiniappRequirement.values.toSet());
   });
 
   testWidgets('without an address ZAPE is disabled and says why',
@@ -17,7 +18,7 @@ void main() {
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         const MethodChannel('pos/printer'), (_) async => false);
     await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: MiniappTile(app: miniapps.single))));
+        MaterialApp(home: Scaffold(body: MiniappTile(app: zape))));
     await tester.pumpAndSettle();
     expect(find.text(MiniappRequirement.lud16.message), findsOneWidget);
     expect(find.text(MiniappRequirement.printer.message), findsOneWidget);

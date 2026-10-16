@@ -12,9 +12,9 @@ import '../../domain/config/session.dart';
 import '../../domain/config/settings_persistence.dart';
 import '../../domain/config/settings_state.dart';
 import '../../domain/order/order_reset.dart';
-import '../../domain/prize/prize_wheel.dart';
 import '../../platform/printer_channel.dart';
 import '../miniapps/miniapps.dart';
+import '../miniapps/rueda_screen.dart';
 
 /// Loaded once and reused across rebuilds.
 final Future<PackageInfo> _packageInfo = PackageInfo.fromPlatform();
@@ -387,7 +387,13 @@ class SettingsSectionScreen extends StatelessWidget {
           )),
         ];
       case SettingsSection.miniapps:
-        return [for (final app in miniapps) MiniappTile(app: app)];
+        return [
+          for (final app in miniapps)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: MiniappTile(app: app),
+            ),
+        ];
       case SettingsSection.coupons:
         return [
           _countLine(context, s.prizeCoupons.length,
@@ -399,21 +405,14 @@ class SettingsSectionScreen extends StatelessWidget {
           if (s.prizePrintEnabled) ...[
             const SizedBox(height: 16),
             _WheelOfferCard(offer: s.wheelOffer),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () => context.push('/settings/cupones/ruleta'),
-                icon: const Icon(Icons.casino_outlined),
-                label: Text(context.tr('Configurar Ruleta')),
-              ),
-            ),
           ],
         ];
     }
   }
 }
 
-/// Wheel timing and the try button. When the wheel appears is set in Cupones.
+/// Settings of the Rueda de la fortuna miniapp: which prizes it plays and how
+/// the wheel spins. Coupons and when the wheel follows a payment stay in Cupones.
 class WheelSettingsScreen extends StatelessWidget {
   const WheelSettingsScreen({super.key});
 
@@ -421,17 +420,21 @@ class WheelSettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: PosAppBar(
-        title: context.tr('Configurar Ruleta'),
+        title: context.tr('Configurar rueda'),
         showSettings: false,
+        showSync: false,
+        showInvoiceDebug: false,
       ),
-      body: ValueListenableBuilder<SettingsState>(
-        valueListenable: appSettings,
-        builder: (context, s, _) {
-          final canSpin = wheelHasPrizes(s.prizeCoupons);
+      body: ListenableBuilder(
+        listenable:
+            Listenable.merge([appSettings, ruedaUseCustom, ruedaCustomPrizes]),
+        builder: (context, _) {
+          final s = appSettings.value;
           return PosBody(
             child: ListView(
               padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
+                _RuedaPrizesCard(globalCount: s.prizeCoupons.length),
                 _WheelDurationSlider(milliseconds: s.wheelDurationMs),
                 _WheelPaceSlider(
                   label: context.tr('Aceleración'),
@@ -446,42 +449,75 @@ class WheelSettingsScreen extends StatelessWidget {
                   onChanged: (value) => setWheelSpeed(value, persist: false),
                   onChangeEnd: setWheelSpeed,
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: _card(
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      activeTrackColor: AppColors.primary,
-                      title: Text(context.tr('Imprimir ticket en modo prueba')),
-                      value: s.wheelPracticePrint,
-                      onChanged: setWheelPracticePrint,
-                    ),
+                _card(
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    activeTrackColor: AppColors.primary,
+                    title: Text(context.tr('Imprimir ticket al ganar')),
+                    value: s.wheelPracticePrint,
+                    onChanged: setWheelPracticePrint,
                   ),
                 ),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: canSpin
-                        ? () => context.push('/settings/cupones/ruleta/probar')
-                        : null,
-                    icon: const Icon(Icons.casino_outlined),
-                    label: Text(context.tr('Probar')),
-                  ),
-                ),
-                if (!canSpin)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Text(
-                      context.tr('No hay premios'),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: AppColors.muted, fontSize: 15),
-                    ),
-                  ),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Plays the coupons from Cupones, or prizes typed here for the moment.
+class _RuedaPrizesCard extends StatelessWidget {
+  const _RuedaPrizesCard({required this.globalCount});
+
+  final int globalCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final custom = ruedaUseCustom.value;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: _card(
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(context.tr('Premios'), style: const TextStyle(fontSize: 15)),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _chip(context, 'Cupones',
+                        selected: !custom,
+                        onTap: () => ruedaUseCustom.value = false),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _chip(context, 'Personalizados',
+                        selected: custom,
+                        onTap: () => ruedaUseCustom.value = true),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (custom)
+                _PrizeList(
+                  coupons: ruedaCustomPrizes.value,
+                  onAdd: addRuedaPrize,
+                  onEdit: updateRuedaPrize,
+                  onRemove: removeRuedaPrize,
+                )
+              else
+                Text(
+                  '$globalCount ${context.tr(globalCount == 1 ? 'premio' : 'premios')} · ${context.tr('Se editan en Configuración › Cupones')}',
+                  softWrap: true,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 13),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -507,10 +543,18 @@ class _WheelOfferCard extends StatelessWidget {
               const SizedBox(height: 10),
               Row(
                 children: [
-                  Expanded(child: _chip(context, 'Siempre', WheelOffer.always)),
+                  Expanded(
+                    child: _chip(context, 'Siempre',
+                        selected: offer == WheelOffer.always,
+                        onTap: () =>
+                            _selectWheelOffer(context, WheelOffer.always)),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: _chip(context, 'Solo con propina', WheelOffer.tipOnly),
+                    child: _chip(context, 'Solo con propina',
+                        selected: offer == WheelOffer.tipOnly,
+                        onTap: () =>
+                            _selectWheelOffer(context, WheelOffer.tipOnly)),
                   ),
                 ],
               ),
@@ -520,15 +564,17 @@ class _WheelOfferCard extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _chip(BuildContext context, String label, WheelOffer value) {
-    final selected = offer == value;
-    return Material(
+/// One option of a two-way picker.
+Widget _chip(BuildContext context, String label,
+        {required bool selected, required VoidCallback onTap}) =>
+    Material(
       color: selected ? AppColors.primary : AppColors.background,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
-        onTap: () => _selectWheelOffer(context, value),
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           child: Text(context.tr(label),
@@ -540,8 +586,6 @@ class _WheelOfferCard extends StatelessWidget {
         ),
       ),
     );
-  }
-}
 
 Future<void> _selectWheelOffer(BuildContext context, WheelOffer value) async {
   if (value == WheelOffer.always || appSettings.value.tipEnabled) {
@@ -1362,18 +1406,62 @@ class _EditPrizeDialogState extends State<_EditPrizeDialog> {
 }
 
 /// Prize coupons: enable toggle and the editable text + chance list.
-class _PrizeCouponsCard extends StatefulWidget {
+class _PrizeCouponsCard extends StatelessWidget {
   final bool enabled;
   final List<PrizeCoupon> coupons;
   const _PrizeCouponsCard({
     required this.enabled,
     required this.coupons,
   });
+
   @override
-  State<_PrizeCouponsCard> createState() => _PrizeCouponsCardState();
+  Widget build(BuildContext context) {
+    return _card(Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          activeTrackColor: AppColors.primary,
+          title: Text(context.tr('Cupones de premio')),
+          subtitle: Text(
+              context.tr('Imprimir cupones de premio después del cobro'),
+              style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          value: enabled,
+          onChanged: setPrizePrintEnabled,
+        ),
+        if (enabled) ...[
+          const Divider(height: 1),
+          _PrizeList(
+            coupons: coupons,
+            onAdd: addPrizeCoupon,
+            onEdit: updatePrizeCoupon,
+            onRemove: removePrizeCoupon,
+          ),
+        ],
+      ],
+    ));
+  }
 }
 
-class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
+/// Editable text + chance list. The callbacks return false on a blank text.
+class _PrizeList extends StatefulWidget {
+  const _PrizeList({
+    required this.coupons,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onRemove,
+  });
+
+  final List<PrizeCoupon> coupons;
+  final bool Function(String text, int chancePercent) onAdd;
+  final bool Function(String id, String text, int chancePercent) onEdit;
+  final void Function(String id) onRemove;
+
+  @override
+  State<_PrizeList> createState() => _PrizeListState();
+}
+
+class _PrizeListState extends State<_PrizeList> {
   final _textCtrl = TextEditingController();
   final _chanceCtrl = TextEditingController(text: '10');
 
@@ -1399,7 +1487,7 @@ class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
       _snack('Texto inválido');
       return;
     }
-    if (addPrizeCoupon(text, _parseChance(_chanceCtrl.text))) {
+    if (widget.onAdd(text, _parseChance(_chanceCtrl.text))) {
       _textCtrl.clear();
       _chanceCtrl.text = '10';
       FocusScope.of(context).unfocus();
@@ -1414,7 +1502,7 @@ class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
       builder: (ctx) => _EditPrizeDialog(coupon: coupon),
     );
     if (result == null) return;
-    if (!updatePrizeCoupon(coupon.id, result.text, result.chance)) {
+    if (!widget.onEdit(coupon.id, result.text, result.chance)) {
       _snack('Texto inválido');
     }
   }
@@ -1422,21 +1510,9 @@ class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
   @override
   Widget build(BuildContext context) {
     final coupons = widget.coupons;
-    return _card(Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          activeTrackColor: AppColors.primary,
-          title: Text(context.tr('Cupones de premio')),
-          subtitle: Text(
-              context.tr('Imprimir cupones de premio después del cobro'),
-              style: const TextStyle(color: AppColors.muted, fontSize: 12)),
-          value: widget.enabled,
-          onChanged: setPrizePrintEnabled,
-        ),
-        if (widget.enabled) ...[
-          const Divider(height: 1),
           for (var i = 0; i < coupons.length; i++) ...[
             if (i > 0) const Divider(height: 1),
             InkWell(
@@ -1469,7 +1545,7 @@ class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
                       visualDensity: VisualDensity.compact,
                       icon: const Icon(Icons.close_rounded,
                           size: 18, color: AppColors.error),
-                      onPressed: () => removePrizeCoupon(coupons[i].id),
+                      onPressed: () => widget.onRemove(coupons[i].id),
                     ),
                   ],
                 ),
@@ -1534,8 +1610,7 @@ class _PrizeCouponsCardState extends State<_PrizeCouponsCard> {
             ],
           ),
           const SizedBox(height: 8),
-        ],
       ],
-    ));
+    );
   }
 }

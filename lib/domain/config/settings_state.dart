@@ -74,6 +74,34 @@ class PrizeCoupon {
       );
 }
 
+/// [prizes] plus a new one. Null when [text] is blank.
+List<PrizeCoupon>? withPrizeAdded(
+    List<PrizeCoupon> prizes, String text, int chancePercent) {
+  final t = text.trim();
+  if (t.isEmpty) return null;
+  return [
+    ...prizes,
+    PrizeCoupon(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      text: t,
+      chancePercent: chancePercent.clamp(0, 100),
+    ),
+  ];
+}
+
+/// [prizes] with [id] edited. Null when [text] is blank or [id] is gone.
+List<PrizeCoupon>? withPrizeUpdated(
+    List<PrizeCoupon> prizes, String id, String text, int chancePercent) {
+  final t = text.trim();
+  if (t.isEmpty || !prizes.any((c) => c.id == id)) return null;
+  return [
+    for (final c in prizes)
+      c.id == id
+          ? c.copyWith(text: t, chancePercent: chancePercent.clamp(0, 100))
+          : c,
+  ];
+}
+
 @immutable
 class SettingsState {
   final bool tipEnabled;
@@ -100,7 +128,7 @@ class SettingsState {
   /// How hard the wheel launches and then settles. 1 is the default curve.
   final double wheelAcceleration;
 
-  /// When trying the wheel from settings, print the winning ticket.
+  /// Print the winning ticket in the Rueda de la fortuna miniapp.
   final bool wheelPracticePrint;
 
   /// [WheelOffer.tipOnly] shows the spin button only after a tip.

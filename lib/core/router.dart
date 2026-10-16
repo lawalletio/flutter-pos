@@ -15,6 +15,7 @@ import '../features/relays/relay_sync_screen.dart';
 import '../features/prize/prize_wheel_screen.dart';
 import '../features/settings/pin_settings_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/miniapps/rueda_screen.dart';
 import '../features/miniapps/zape_screen.dart';
 
 /// A fast, smooth transition applied to every route change: the incoming page
@@ -113,37 +114,28 @@ final appRouter = GoRouter(
       pageBuilder: (c, s) => _page(const SettingsScreen()),
       routes: [
         for (final section in SettingsSection.values)
-          if (section != SettingsSection.coupons)
-            GoRoute(
-              path: section.path,
-              pageBuilder: (c, s) =>
-                  _page(SettingsSectionScreen(section: section)),
-            ),
+          GoRoute(
+            path: section.path,
+            pageBuilder: (c, s) =>
+                _page(SettingsSectionScreen(section: section)),
+          ),
         GoRoute(
           path: 'pin',
           pageBuilder: (c, s) => _page(const PinSettingsScreen()),
         ),
-        GoRoute(
-          path: SettingsSection.coupons.path,
-          pageBuilder: (c, s) => _page(
-              const SettingsSectionScreen(section: SettingsSection.coupons)),
-          routes: [
-            GoRoute(
-              path: 'ruleta',
-              pageBuilder: (c, s) => _page(const WheelSettingsScreen()),
-              routes: [
-                GoRoute(
-                  path: 'probar',
-                  pageBuilder: (c, s) =>
-                      _page(const PrizeWheelScreen(practice: true)),
-                ),
-              ],
-            ),
-          ],
-        ),
       ],
     ),
     GoRoute(path: '/zape', pageBuilder: (c, s) => _page(const ZapeScreen())),
+    GoRoute(
+      path: '/rueda',
+      pageBuilder: (c, s) => _page(const RuedaScreen()),
+      routes: [
+        GoRoute(
+          path: 'config',
+          pageBuilder: (c, s) => _page(const WheelSettingsScreen()),
+        ),
+      ],
+    ),
     GoRoute(
         path: '/relays', pageBuilder: (c, s) => _page(const RelaySyncScreen())),
   ],

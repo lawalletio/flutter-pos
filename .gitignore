@@ -24,3 +24,6 @@ android/app/google-services.json
 
 # OS
 .DS_Store
+
+# Test coverage
+/coverage/

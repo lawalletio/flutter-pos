@@ -219,39 +219,21 @@ void setPrizePrintMode(PrizePrintMode mode) {
   _persistPrizeSlice();
 }
 
-bool addPrizeCoupon(String text, int chancePercent) {
-  final t = text.trim();
-  if (t.isEmpty) return false;
-  final chance = chancePercent.clamp(0, 100);
-  final current = List<PrizeCoupon>.from(appSettings.value.prizeCoupons);
-  current.add(PrizeCoupon(
-    id: DateTime.now().microsecondsSinceEpoch.toString(),
-    text: t,
-    chancePercent: chance,
-  ));
-  appSettings.value = appSettings.value.copyWith(prizeCoupons: current);
+bool addPrizeCoupon(String text, int chancePercent) => _setPrizeCoupons(
+    withPrizeAdded(appSettings.value.prizeCoupons, text, chancePercent));
+
+bool updatePrizeCoupon(String id, String text, int chancePercent) =>
+    _setPrizeCoupons(withPrizeUpdated(
+        appSettings.value.prizeCoupons, id, text, chancePercent));
+
+void removePrizeCoupon(String id) => _setPrizeCoupons(
+    appSettings.value.prizeCoupons.where((c) => c.id != id).toList());
+
+bool _setPrizeCoupons(List<PrizeCoupon>? next) {
+  if (next == null) return false;
+  appSettings.value = appSettings.value.copyWith(prizeCoupons: next);
   _persistPrizeSlice();
   return true;
-}
-
-bool updatePrizeCoupon(String id, String text, int chancePercent) {
-  final t = text.trim();
-  if (t.isEmpty) return false;
-  final chance = chancePercent.clamp(0, 100);
-  final current = List<PrizeCoupon>.from(appSettings.value.prizeCoupons);
-  final i = current.indexWhere((c) => c.id == id);
-  if (i < 0) return false;
-  current[i] = current[i].copyWith(text: t, chancePercent: chance);
-  appSettings.value = appSettings.value.copyWith(prizeCoupons: current);
-  _persistPrizeSlice();
-  return true;
-}
-
-void removePrizeCoupon(String id) {
-  final current = List<PrizeCoupon>.from(appSettings.value.prizeCoupons)
-    ..removeWhere((c) => c.id == id);
-  appSettings.value = appSettings.value.copyWith(prizeCoupons: current);
-  _persistPrizeSlice();
 }
 
 final bool _tillPersistenceHooked = () {

@@ -38,6 +38,23 @@ void main() {
     expect(s.prizeCoupons.first.chancePercent, 25);
   });
 
+  test('prize edits trim, clamp and reject blanks or missing ids', () {
+    expect(addPrizeCoupon('  ', 10), isFalse);
+    expect(addPrizeCoupon(' Café ', 140), isTrue);
+    final cafe = appSettings.value.prizeCoupons.single;
+    expect(cafe.text, 'Café');
+    expect(cafe.chancePercent, 100);
+
+    expect(updatePrizeCoupon(cafe.id, ' ', 5), isFalse);
+    expect(updatePrizeCoupon('gone', 'Té', 5), isFalse);
+    expect(updatePrizeCoupon(cafe.id, 'Té', -3), isTrue);
+    expect(appSettings.value.prizeCoupons.single.text, 'Té');
+    expect(appSettings.value.prizeCoupons.single.chancePercent, 0);
+
+    removePrizeCoupon(cafe.id);
+    expect(appSettings.value.prizeCoupons, isEmpty);
+  });
+
   test('switching address loads that address or defaults', () async {
     await settingsPersistence.load();
 
