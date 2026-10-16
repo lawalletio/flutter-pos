@@ -14,6 +14,17 @@ void main() {
     ruedaCustomPrizes.value = const [];
   });
 
+  test('custom prizes stay in memory and edit like the settings ones', () {
+    expect(addRuedaPrize('Birra', 30), isTrue);
+    final birra = ruedaCustomPrizes.value.single;
+    expect(updateRuedaPrize(birra.id, '', 10), isFalse);
+    expect(updateRuedaPrize(birra.id, 'Birra 2x1', 40), isTrue);
+    expect(ruedaCustomPrizes.value.single.text, 'Birra 2x1');
+    expect(appSettings.value.prizeCoupons, isEmpty);
+    removeRuedaPrize(birra.id);
+    expect(ruedaCustomPrizes.value, isEmpty);
+  });
+
   testWidgets('plays settings coupons or custom ones, config behind the gear',
       (tester) async {
     tester.view.physicalSize = const Size(800, 1400);
