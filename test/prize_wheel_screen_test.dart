@@ -8,10 +8,12 @@ void main() {
   // Every throw wins, so the end of a spin is the prize card.
   const sure = [PrizeCoupon(id: 'cafe', text: 'Café', chancePercent: 100)];
 
-  Future<Offset> open(WidgetTester tester) async {
+  Future<Offset> open(WidgetTester tester, {double textScale = 1}) async {
     tester.view.physicalSize = const Size(800, 1600);
     tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = textScale;
     addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     appSettings.value = const SettingsState(wheelDurationMs: 2000);
     addTearDown(() => appSettings.value = const SettingsState());
     await tester.pumpWidget(MaterialApp(
@@ -51,6 +53,17 @@ void main() {
     expect(spinning(tester), isFalse);
     await tester.pump(const Duration(seconds: 3));
     expect(find.text('¡Ganaste un premio!'), findsNothing);
+  });
+
+  // The display font and a big system text size are taller than the test
+  // font; the message band must shrink them instead of overflowing.
+  testWidgets('the harder hint fits the band with large text', (tester) async {
+    final at = await open(tester, textScale: 1.8);
+    await tester.timedDragFrom(
+        at, const Offset(0, 260), const Duration(milliseconds: 1500));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Girá más rápido para que cuente'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a fast fling spins and lands on the prize', (tester) async {
