@@ -809,18 +809,27 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
           SizedBox(
             height: 84,
             child: RepaintBoundary(
-              child: Center(
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 260),
-                  switchInCurve: Curves.easeOutBack,
-                  transitionBuilder: (child, animation) => FadeTransition(
-                    opacity: animation,
-                    child: ScaleTransition(
-                      scale: Tween(begin: 0.9, end: 1.0).animate(animation),
-                      child: child,
+              // The display font, or a big system text size, can be taller
+              // than the band: the message shrinks to fit instead.
+              child: LayoutBuilder(
+                builder: (context, box) => FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: SizedBox(
+                    width: box.maxWidth,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 260),
+                      switchInCurve: Curves.easeOutBack,
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: ScaleTransition(
+                          scale:
+                              Tween(begin: 0.9, end: 1.0).animate(animation),
+                          child: child,
+                        ),
+                      ),
+                      child: _status(context),
                     ),
                   ),
-                  child: _status(context),
                 ),
               ),
             ),
