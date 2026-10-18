@@ -266,7 +266,9 @@ void main() {
 
     test('una firma rota se rechaza', () {
       final e = signed();
-      e['sig'] = '0${(e['sig'] as String).substring(1)}';
+      final sig = e['sig'] as String;
+      // The signature is random; flip its first digit to one it isn't.
+      e['sig'] = '${sig[0] == '0' ? '1' : '0'}${sig.substring(1)}';
       expect(
         verifyVoucher(e, managerPubkey: managerPubkey, nonce: nonce),
         isNull,
