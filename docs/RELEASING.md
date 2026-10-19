@@ -1,7 +1,7 @@
 # Releasing
 
-One version ships to three channels: GitHub Releases and Zapstore (Android APKs),
-and the Apple App Store (iOS).
+One version ships to four channels: GitHub Releases and Zapstore (Android APKs),
+Google Play (Android AAB), and the Apple App Store (iOS).
 
 ## 1. Bump the version
 
@@ -60,6 +60,72 @@ SIGN_WITH=<nsec | bunker:// | browser> zsp publish zapstore.yaml
 ```
 
 Sign with the key behind the `pubkey` in `zapstore.yaml`.
+
+### Google Play
+
+| | |
+|---|---|
+| Play Console account | La Crypta (personal), id `6540284059719666276` |
+| App | LaWallet POS, `ar.lawallet.lawallet_pos`, app id `4974804433299749591` |
+| Signing | Play App Signing. We sign uploads with the same upload key as the APKs |
+
+`.github/workflows/android-release.yml` runs when a GitHub release is
+published, next to the iOS workflow. It:
+
+1. checks that the release tag matches `pubspec.yaml`;
+2. builds the AAB signed with the upload key, and fails if it came out
+   debug-signed;
+3. turns the release body into a plain-text changelog (500 characters max,
+   the APK table dropped). It goes in under en-US, the listing's default
+   language, but stays in Spanish;
+4. runs `fastlane supply` to put the AAB on the **alpha** track (Closed testing
+   - Alpha) as a completed rollout. With managed publishing off, Play sends it
+   for review on its own.
+
+The listing, screenshots and declarations aren't touched. Change them in the
+Play Console.
+
+To re-run it, use **Actions › Android release › Run workflow**. It has three
+inputs:
+- `track`: `alpha`, `internal` or `production`;
+- `release_notes`: optional changelog text;
+- `dry_run`: builds the AAB and validates the upload with Play without
+  committing it. That proves the service account works and the version code is
+  free.
+
+The release goes to `alpha`, not production. The account is personal, so Play
+only grants production access after a closed test with **12+ testers opted in
+for 14 days**. Once it's granted, change the default `TRACK` in the workflow
+to `production`.
+
+Repository secrets:
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | `base64 -i lawallet-pos-upload.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | `storePassword` from `key.properties` |
+| `ANDROID_KEY_PASSWORD` | `keyPassword` from `key.properties` |
+| `PLAY_SERVICE_ACCOUNT_JSON` | the service account's JSON key, as is |
+
+Maintainers keep a backup of the keystore and `key.properties` outside the repo
+(alias `upload`, SHA-256 `9B:D5:EB:E8:…:AD:81:13`).
+
+The service account, set up once:
+1. In Google Cloud Console, pick or create a project and enable the **Google
+   Play Android Developer API**.
+2. Under IAM › Service accounts, create an account (e.g.
+   `play-publisher`), then Keys › Add key › JSON. You can only download it once.
+3. In Play Console › Users and permissions, invite the service account's email.
+   Give it access to LaWallet POS with **Release to production, exclude devices,
+   and use Play App Signing** and **Release apps to testing tracks**.
+
+Play refuses an upload when:
+- the version code was already used (bump the `+N` in `pubspec.yaml`);
+- the release's track isn't set up yet (countries, testers);
+- the app is still a draft. Before Google approves the first release, the API
+  only accepts `--release_status draft`.
+
+The job fails with Google's message in each case.
 
 ## 3. iOS (App Store)
 
