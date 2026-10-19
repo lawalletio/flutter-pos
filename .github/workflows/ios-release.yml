@@ -16,6 +16,10 @@ on:
         description: Submit for App Review after uploading
         type: boolean
         default: true
+      dry_run:
+        description: Only build the IPA and check the API key; upload nothing
+        type: boolean
+        default: false
 
 concurrency:
   group: ios-release
@@ -28,6 +32,9 @@ jobs:
   app-store:
     runs-on: macos-26
     timeout-minutes: 90
+    env:
+      FASTLANE_DISABLE_COLORS: 1
+      FASTLANE_SKIP_UPDATE_CHECK: 1
     steps:
       - uses: actions/checkout@v4
 
@@ -94,6 +101,23 @@ jobs:
             key: Base64.decode64(ENV["ASC_KEY_P8_BASE64"]), in_house: false))' \
             "$RUNNER_TEMP/asc_api_key.json"
 
+      - name: Check build number against App Store Connect
+        env:
+          BUILD: ${{ steps.version.outputs.build }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          command -v fastlane >/dev/null || brew install fastlane
+          # Read-only call, so it also proves the API key works.
+          latest=$(fastlane run latest_testflight_build_number \
+            api_key_path:"$RUNNER_TEMP/asc_api_key.json" app_identifier:ar.lawallet.pos \
+            initial_build_number:0 | sed -n 's/.*Result: \([0-9][0-9]*\).*/\1/p' | tail -1)
+          [[ -n "$latest" ]] || { echo "::error::Could not read builds from App Store Connect"; exit 1; }
+          echo "Latest uploaded build: $latest, this build: $BUILD"
+          if (( BUILD <= latest )) && [[ "$DRY_RUN" != true ]]; then
+            echo "::error::Build number $BUILD is already used. Bump the +N in pubspec.yaml above $latest."
+            exit 1
+          fi
+
       - name: Write release notes
         env:
           RELEASE_BODY: ${{ github.event.release.body }}
@@ -109,10 +133,10 @@ jobs:
           cat "$RUNNER_TEMP/metadata/es-MX/release_notes.txt"
 
       - name: Upload and submit for review
+        if: ${{ !inputs.dry_run }}
         env:
           SUBMIT: ${{ github.event_name == 'release' || inputs.submit }}
         run: |
-          command -v fastlane >/dev/null || brew install fastlane
           # Uploads the IPA, creates the App Store version if needed, sets
           # What's New, waits for processing, attaches the build and submits.
           # Only release_notes.txt is in metadata_path, so the rest of the

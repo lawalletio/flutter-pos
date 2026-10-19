@@ -129,8 +129,14 @@ things:
 The listing (description, screenshots, URLs, privacy answers) isn't touched.
 Change it in the website.
 
-To re-run it, or to upload without submitting, use **Actions › iOS release ›
-Run workflow**. It has a `submit` checkbox and an optional `release_notes` field.
+To re-run it, use **Actions › iOS release › Run workflow**. It has three inputs:
+- `submit`: untick it to upload without submitting for review;
+- `release_notes`: optional What's New text;
+- `dry_run`: only builds the signed IPA and checks the API key. Nothing is
+  uploaded. Use it after changing secrets or renewing the certificate.
+
+Before uploading, the workflow compares the build number with the latest one
+App Store Connect has, and fails early if it isn't higher.
 
 Repository secrets (Settings › Secrets and variables › Actions):
 
