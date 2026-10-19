@@ -112,7 +112,54 @@ The certificate and profile both expire on **2027-10-18**. To renew:
 
 Keep all of these files out of the repo.
 
-### Build and upload
+### Automated: GitHub Actions
+
+`.github/workflows/ios-release.yml` runs when a GitHub release is published, so
+the `gh release create` from the Android step also ships iOS. It does five
+things:
+
+1. Checks that the release tag matches `pubspec.yaml` (`v0.2.7` ↔ `0.2.7+14`).
+2. Imports the signing certificate and profile into a throwaway keychain.
+3. Runs `flutter build ipa` on `macos-26`.
+4. Turns the release body into plain-text **What's New** (es-MX, 4000 characters max).
+5. Runs `fastlane deliver`. That uploads the IPA, creates the App Store version
+   if it doesn't exist, waits for processing, attaches the build and submits it
+   for review with automatic release on approval.
+
+The listing (description, screenshots, URLs, privacy answers) isn't touched.
+Change it in the website.
+
+To re-run it, or to upload without submitting, use **Actions › iOS release ›
+Run workflow**. It has a `submit` checkbox and an optional `release_notes` field.
+
+Repository secrets (Settings › Secrets and variables › Actions):
+
+| Secret | Value |
+|---|---|
+| `IOS_DIST_P12_BASE64` | `base64 -i ios_distribution.p12` |
+| `IOS_DIST_P12_PASSWORD` | contents of `ios_distribution.p12.password` |
+| `IOS_PROFILE_BASE64` | `base64 -i LaWallet_POS_App_Store.mobileprovision` |
+| `ASC_KEY_ID` | the API key's ID |
+| `ASC_ISSUER_ID` | the team's issuer ID |
+| `ASC_KEY_P8_BASE64` | `base64 -i AuthKey_<KEY_ID>.p8` |
+
+The API key needs the **App Manager** (or Admin) role. A Developer key can
+upload, but the submit step fails with `FORBIDDEN_ERROR`. Create the key at App
+Store Connect › Users and Access › Integrations › App Store Connect API. You can
+only download it once.
+
+When the certificate or profile is renewed (next: 2027-10-18), update the three
+`IOS_*` secrets too.
+
+The workflow can't submit if one of these is true:
+- a license agreement is waiting to be accepted;
+- a previous version is still in review. Remove it from review, or wait for it
+  to finish;
+- the build number was already uploaded.
+
+The job fails with Apple's message in each case.
+
+### Build and upload by hand
 
 ```bash
 flutter build ipa --release --export-options-plist=ios/ExportOptions.plist
