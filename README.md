@@ -17,6 +17,7 @@ via platform channels.
 - [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — Lightning/Nostr payment protocol to reimplement
 - [`docs/NATIVE-CONTRACT.md`](docs/NATIVE-CONTRACT.md) — printer (ZCS SmartPos) + NFC contract
 - [`docs/PARITY-CHECKLIST.md`](docs/PARITY-CHECKLIST.md) — release gate vs. the webapp
+- [`docs/RELEASING.md`](docs/RELEASING.md) — Android (GitHub + Zapstore) and iOS (App Store) releases
 
 ## Getting started (once Flutter is installed)
 
@@ -34,26 +35,9 @@ flutter run
 
 ## Releasing
 
-```bash
-tool/build_release.sh
-```
-
-Bump `version:` in `pubspec.yaml` first, then run the script. It produces three
-signed APKs in `build/app/outputs/flutter-apk/`:
-
-| Artifact | ABIs | Use |
-|---|---|---|
-| `lawallet-pos-v<v>.apk` | all | Zapstore + general distribution |
-| `lawallet-pos-v<v>-armeabi-v7a.apk` | 32-bit | ZCS/Ciontek terminals — ~⅓ the size |
-| `lawallet-pos-v<v>-arm64-v8a.apk` | 64-bit | modern phones |
-
-Signing requires `android/key.properties` + `android/app/upload-keystore.jks`
-(both gitignored); the script fails rather than silently debug-signing.
-
-Note that `--split-per-abi` offsets `versionCode` per ABI (armeabi-v7a +1000,
-arm64-v8a +2000), so a split APK outranks the universal one. Moving a device
-from a split build back to universal is a downgrade and Android will refuse it
-— pick one channel per device and stay on it.
+Android APKs ship to GitHub Releases and Zapstore, and iOS ships to the App Store.
+[`docs/RELEASING.md`](docs/RELEASING.md) has the full flow: version bump, signing,
+`tool/build_release.sh`, `zsp publish`, `flutter build ipa`, upload and App Review.
 
 ## Architecture
 Riverpod replaces the 6 React contexts. See the plan and `docs/`. Layered `lib/`:
