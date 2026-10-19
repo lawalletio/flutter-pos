@@ -37,7 +37,8 @@ flutter run
 
 Android APKs ship to GitHub Releases and Zapstore, and iOS ships to the App Store.
 [`docs/RELEASING.md`](docs/RELEASING.md) has the full flow: version bump, signing,
-`tool/build_release.sh`, `zsp publish`, `flutter build ipa`, upload and App Review.
+`tool/build_release.sh`, `zsp publish`, and the iOS workflow that builds, uploads and
+submits to App Review when a GitHub release is published.
 
 ## Architecture
 Riverpod replaces the 6 React contexts. See the plan and `docs/`. Layered `lib/`:
