@@ -221,6 +221,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     return TextField(
                       controller: controller,
                       focusNode: focusNode,
+                      // An address, not prose: iOS would "correct" barra → barbra.
+                      keyboardType: TextInputType.emailAddress,
+                      autocorrect: false,
+                      enableSuggestions: false,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                           fontSize: 20, fontWeight: FontWeight.w600),
