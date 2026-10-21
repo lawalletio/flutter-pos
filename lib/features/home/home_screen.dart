@@ -225,7 +225,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       keyboardType: TextInputType.emailAddress,
                       autocorrect: false,
                       enableSuggestions: false,
-                      textAlign: TextAlign.center,
                       style: const TextStyle(
                           fontSize: 20, fontWeight: FontWeight.w600),
                       onSubmitted: (_) => onFieldSubmitted(),
