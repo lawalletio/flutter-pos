@@ -260,6 +260,7 @@ class _MenuScreenState extends State<MenuScreen> {
     return Scaffold(
       appBar: PosAppBar(
         title: context.tr('Menú'),
+        lockFlow: '/cart',
         actions: [
           IconButton(
             tooltip: context.tr('Actualizar menú').toUpperCase(),

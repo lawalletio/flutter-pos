@@ -30,11 +30,9 @@ void main() {
     return Offset(box.right - outer * 0.6, box.top + band + outer);
   }
 
+  // The gear hides while the wheel is busy.
   bool spinning(WidgetTester tester) =>
-      tester
-          .widget<IconButton>(find.byKey(const Key('rueda-config')))
-          .onPressed ==
-      null;
+      find.byIcon(Icons.settings_outlined).evaluate().isEmpty;
 
   Future<void> settle(WidgetTester tester) async {
     for (var i = 0; i < 400 && spinning(tester); i++) {

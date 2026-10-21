@@ -8,6 +8,7 @@ import 'package:lottie/lottie.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../core/theme.dart' show withButtonSound;
 import '../../core/widgets.dart' show recordImage;
 import 'cards_api.dart';
 
@@ -76,7 +77,7 @@ ThemeData buildCardsTheme() {
     labelMedium: _inter(b.labelMedium),
     labelSmall: _inter(b.labelSmall),
   );
-  return ThemeData(
+  return withButtonSound(ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: nearBlack,
@@ -86,7 +87,7 @@ ThemeData buildCardsTheme() {
       border: OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(4))),
     ),
-  );
+  ));
 }
 
 /// Near-black canvas with a soft teal glow at the top — the lawallet.io feel.
@@ -530,6 +531,69 @@ class PrintTicket extends StatelessWidget {
                     fontFamily: 'monospace',
                     fontFamilyFallback: ['Courier'])),
             const SizedBox(height: 8), // small free margin
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// On-screen twin of the printed top-up slip: what was loaded and the balance
+/// after it, on the same torn paper as [PrintTicket].
+class TopUpTicket extends StatelessWidget {
+  const TopUpTicket(
+      {super.key, required this.amount, this.balance, required this.address});
+
+  final String amount;
+  final String? balance;
+  final String address;
+
+  @override
+  Widget build(BuildContext context) {
+    const ink = Color(0xFF0A0A0A);
+    const faint = Color(0xFF6B6B6B);
+    return ClipPath(
+      clipper: _TornPaperClipper(),
+      child: Container(
+        color: const Color(0xFFFBFBF8),
+        padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('LaWallet',
+                style: _inter(const TextStyle(color: ink, fontSize: 20),
+                    FontWeight.w700)),
+            const SizedBox(height: 10),
+            const _DashedDivider(),
+            const SizedBox(height: 14),
+            Text('+$amount',
+                style: _inter(const TextStyle(color: ink, fontSize: 30),
+                    FontWeight.w800)),
+            if (balance != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.account_balance_wallet_outlined,
+                      size: 16, color: faint),
+                  const SizedBox(width: 6),
+                  Text(balance!,
+                      style: _inter(const TextStyle(color: ink, fontSize: 16),
+                          FontWeight.w600)),
+                ],
+              ),
+            ],
+            const SizedBox(height: 14),
+            const _DashedDivider(),
+            const SizedBox(height: 10),
+            Text(address,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: faint,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    fontFamilyFallback: ['Courier'])),
           ],
         ),
       ),

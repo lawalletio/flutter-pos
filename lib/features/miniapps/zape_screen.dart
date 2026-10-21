@@ -1,15 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/i18n.dart';
 import '../../core/numpad.dart';
-import '../../core/pin_dialog.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../core/widgets.dart';
 import '../../data/lnurl/lnurl_service.dart';
 import '../../data/nostr/profile_service.dart';
 import '../../data/nostr/relay_pool.dart';
@@ -36,8 +35,8 @@ int zapePoints(int sats) => (sats * 40 / 21000).round().clamp(1, 40);
 /// [CardCharge] as the charge screen) to the logged Lightning Address, and a
 /// ZAPE strip prints with a sound as long as the tip is big.
 ///
-/// No back, settings, relay or debug buttons. The only way out is the X,
-/// which asks for the miniapp PIN.
+/// The navbar's lock turns it into a kiosk: nothing but the unlock, which
+/// asks for the PIN.
 class ZapeScreen extends StatefulWidget {
   const ZapeScreen({super.key});
 
@@ -185,38 +184,25 @@ class _ZapeScreenState extends State<ZapeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      child: Scaffold(
-        appBar: AppBar(
-          backgroundColor: AppColors.background,
-          automaticallyImplyLeading: false,
-          toolbarHeight: 72,
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: IconButton(
-                key: const Key('miniapp-close'),
-                icon: const Icon(Icons.close, size: 30),
-                onPressed: () => _close(context),
-              ),
-            ),
-          ],
-        ),
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: switch (_step) {
-              _Step.pick => _pick(),
-              _Step.custom => _custom(),
-              _Step.invoice => _error != null
-                  ? _failed()
-                  : _card.collecting
-                      ? _collecting()
-                      : _qr(),
-              _Step.printing => _printing(),
-            },
-          ),
+    return Scaffold(
+      appBar: PosAppBar(
+        lockFlow: '/zape',
+        // Leaving mid-print would cut the strip and its sound.
+        showBack: _step != _Step.printing,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: switch (_step) {
+            _Step.pick => _pick(),
+            _Step.custom => _custom(),
+            _Step.invoice => _error != null
+                ? _failed()
+                : _card.collecting
+                    ? _collecting()
+                    : _qr(),
+            _Step.printing => _printing(),
+          },
         ),
       ),
     );
@@ -341,10 +327,4 @@ class _ZapeScreenState extends State<ZapeScreen> {
         child: Text('ZAPEEE',
             style: TextStyle(fontFamily: 'ClimateCrisis', fontSize: 56)),
       );
-
-  Future<void> _close(BuildContext context) async {
-    if (await confirmMiniappPin(context, action: 'Salir') && context.mounted) {
-      context.go('/');
-    }
-  }
 }

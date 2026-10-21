@@ -93,7 +93,7 @@ class _PaydeskScreenState extends State<PaydeskScreen> {
     final display = formatToPreference(_currency, _enteredAmount);
     final satsStr = formatToPreference(Currency.sat, _sats);
     return Scaffold(
-      appBar: PosAppBar(title: context.tr('Modo caja')),
+      appBar: PosAppBar(title: context.tr('Modo caja'), lockFlow: '/paydesk'),
       body: PosBody(
         child: Column(
           children: [

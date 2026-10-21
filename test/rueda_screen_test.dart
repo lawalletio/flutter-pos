@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lawallet_pos/core/flow_lock.dart';
 import 'package:lawallet_pos/core/theme.dart';
 import 'package:lawallet_pos/domain/config/miniapp_pin.dart';
 import 'package:lawallet_pos/domain/config/settings_state.dart';
@@ -57,7 +58,7 @@ void main() {
     expect(find.byKey(const Key('wheel-input')), findsOneWidget,
         reason: 'custom prize spins');
 
-    await tester.tap(find.byKey(const Key('rueda-config')));
+    await tester.tap(find.byIcon(Icons.settings_outlined));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('Configurar rueda'), findsOneWidget);
@@ -67,9 +68,14 @@ void main() {
     router.pop();
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
-    await tester.tap(find.byKey(const Key('miniapp-close')));
+    await tester.tap(find.byKey(const Key('flow-lock')));
+    await tester.pump();
+    expect(find.byIcon(Icons.settings_outlined), findsNothing,
+        reason: 'config is out of reach while locked');
+    await tester.tap(find.byKey(const Key('flow-unlock')));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('home'), findsOneWidget);
+    expect(lockedFlow.value, isNull);
   });
 }

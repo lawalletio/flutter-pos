@@ -240,7 +240,7 @@ class SettingsSectionScreen extends StatelessWidget {
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.lock_outline, color: AppColors.primary),
                 title: Text(context.tr('Configuración de PIN')),
-                subtitle: Text(context.tr('Bloqueo de las miniapps'),
+                subtitle: Text(context.tr('Para desbloquear la pantalla'),
                     style: const TextStyle(color: AppColors.muted, fontSize: 12)),
                 trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
                 onTap: () => _openPinSettings(context),

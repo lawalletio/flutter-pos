@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lawallet_pos/core/flow_lock.dart';
 import 'package:lawallet_pos/data/pricing/pricing_service.dart';
 import 'package:lawallet_pos/domain/config/miniapp_pin.dart';
 import 'package:lawallet_pos/features/miniapps/zape_screen.dart';
@@ -17,15 +18,30 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     miniappPin.value = null;
+    lockedFlow.value = null;
   });
 
-  Future<void> openZape(WidgetTester tester) async {
-    final router = GoRouter(initialLocation: '/zape', routes: [
-      GoRoute(path: '/', builder: (c, s) => const Text('home')),
-      GoRoute(path: '/zape', builder: (c, s) => const ZapeScreen()),
-    ]);
+  /// Opens ZAPE, locks it, checks nothing else leads out, then unlocks.
+  Future<void> lockAndUnlockZape(WidgetTester tester) async {
+    final router = GoRouter(
+      initialLocation: '/zape',
+      redirect: (c, s) => lockRedirect(s.uri.path),
+      routes: [
+        GoRoute(path: '/', builder: (c, s) => const Text('home')),
+        GoRoute(path: '/zape', builder: (c, s) => const ZapeScreen()),
+      ],
+    );
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-    await tester.tap(find.byKey(const Key('miniapp-close')));
+    expect(find.byIcon(Icons.arrow_back), findsOneWidget, reason: 'unlocked');
+    await tester.tap(find.byKey(const Key('flow-lock')));
+    await tester.pump();
+    expect(lockedFlow.value, '/zape');
+    expect(find.byIcon(Icons.arrow_back), findsNothing);
+    expect(find.byIcon(Icons.settings_outlined), findsNothing);
+    router.go('/');
+    await tester.pumpAndSettle();
+    expect(find.text('home'), findsNothing, reason: 'the router holds it');
+    await tester.tap(find.byKey(const Key('flow-unlock')));
     await tester.pumpAndSettle();
   }
 
@@ -49,13 +65,15 @@ void main() {
     expect(find.text('1'), findsOneWidget, reason: 'numpad is up');
   });
 
-  testWidgets('without a PIN, ZAPE closes straight to Home', (tester) async {
-    await openZape(tester);
+  testWidgets('without a PIN, unlocking goes straight to Home', (tester) async {
+    await lockAndUnlockZape(tester);
     expect(find.byKey(const Key('miniapp-pin')), findsNothing);
     expect(find.text('home'), findsOneWidget);
+    expect(lockedFlow.value, isNull);
   });
 
-  testWidgets('a PIN set in settings locks ZAPE and persists', (tester) async {
+  testWidgets('a PIN set in settings guards the unlock and persists',
+      (tester) async {
     await tester.pumpWidget(const MaterialApp(home: PinSettingsScreen()));
     expect(find.text('SETEAR PIN'), findsOneWidget);
 
@@ -69,10 +87,10 @@ void main() {
     expect((await SharedPreferences.getInstance()).getString('miniappPin'),
         '9876');
 
-    await openZape(tester);
+    await lockAndUnlockZape(tester);
     expect(
         tester.getTopLeft(find.byKey(const Key('pin-cancel'))).dy,
-        greaterThan(tester.getTopLeft(find.text('Salir')).dy),
+        greaterThan(tester.getTopLeft(find.text('Desbloquear')).dy),
         reason: 'Cancelar sits below the action');
     await enterPin(tester, '0000');
     expect(find.text('home'), findsNothing);

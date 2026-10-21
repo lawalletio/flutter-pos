@@ -6,10 +6,13 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../../core/pin_dialog.dart';
+import '../../core/flow_lock.dart';
+import '../../core/sounds.dart';
+import '../../core/widgets.dart';
 import '../../platform/nfc_channel.dart';
 import '../../platform/printer_channel.dart';
 import 'cards_api.dart';
+import 'cards_topup.dart';
 import 'cards_widgets.dart';
 
 /// Cards miniapp: the whole LaWallet Card Manager. Sign in with a device-token
@@ -17,7 +20,7 @@ import 'cards_widgets.dart';
 /// their key, a recovery QR) that prints on the thermal printer.
 ///
 /// Uses plain Material [Text], not the POS uppercase one, to keep
-/// card-manager's look. The X asks for the miniapp PIN.
+/// card-manager's look. The X leaves; the lock beside it keeps players in.
 class CardsScreen extends StatefulWidget {
   const CardsScreen({super.key, this.api});
 
@@ -32,10 +35,10 @@ class _CardsScreenState extends State<CardsScreen> {
   late final _loading = _auth.load();
   late final _api = widget.api ?? CardsApi();
 
-  Future<void> _close() async {
-    if (await confirmMiniappPin(context, action: 'Salir') && mounted) {
-      context.go('/');
-    }
+  /// The X, shown only while unlocked; locked, the lock is the way out.
+  void _close() {
+    if (lockedFlow.value != null) return;
+    context.canPop() ? context.pop() : context.go('/hub');
   }
 
   @override
@@ -90,15 +93,27 @@ class _AppVersion extends StatelessWidget {
       );
 }
 
+/// The X and the till's lock. Locked, only the lock shows.
 class _CloseButton extends StatelessWidget {
   const _CloseButton(this.onClose);
   final VoidCallback onClose;
 
   @override
-  Widget build(BuildContext context) => IconButton(
-        key: const Key('miniapp-close'),
-        icon: const Icon(Icons.close, color: textSecondary),
-        onPressed: onClose,
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ValueListenableBuilder<String?>(
+            valueListenable: lockedFlow,
+            builder: (context, locked, _) => locked != null
+                ? const SizedBox.shrink()
+                : IconButton(
+                    key: const Key('miniapp-close'),
+                    icon: const Icon(Icons.close, color: textSecondary),
+                    onPressed: onClose,
+                  ),
+          ),
+          const FlowLockButton(flow: '/cards', color: textSecondary),
+        ],
       );
 }
 
@@ -278,6 +293,14 @@ class _Qr extends _Flow {
   final bool autoStart;
 }
 
+/// Loading sats into an owned card's wallet, at its owner's [address].
+class _TopUp extends _Flow {
+  const _TopUp(this.card, this.owner, this.address);
+  final CardDetail card;
+  final OwnerSummary owner;
+  final String address;
+}
+
 class _Failed extends _Flow {
   const _Failed(this.message);
   final String message;
@@ -305,6 +328,9 @@ class _CardsHomeState extends State<_CardsHome> {
   bool _nfcAvailable = false;
   StreamSubscription<String>? _taps;
 
+  /// Taps go here during a top-up: one listener holds the native tag stream.
+  final _topUpTaps = StreamController<String>.broadcast();
+
   CardsApi get _api => widget.api;
 
   void _set(_Flow flow) {
@@ -321,9 +347,14 @@ class _CardsHomeState extends State<_CardsHome> {
     // A LaWallet card's lnurl points at /api/cards/<id>/scan. Anything else
     // (no NDEF, or a non-LaWallet tag) is a blank card.
     _taps = NfcChannel.taps().listen((url) {
+      if (_flow is _TopUp) return _topUpTaps.add(url);
+      if (_flow is! _Scanning) return;
+      // Same cue as a card paying on the charge screen.
+      AppSounds.play(AppSound.card);
+      NfcChannel.vibrate();
       if (url.contains('/api/cards/')) {
         _handleCard(url);
-      } else if (_flow is _Scanning) {
+      } else {
         _set(const _BlankCard());
       }
     });
@@ -332,6 +363,7 @@ class _CardsHomeState extends State<_CardsHome> {
   @override
   void dispose() {
     _taps?.cancel();
+    _topUpTaps.close();
     NfcChannel.stopSession();
     super.dispose();
   }
@@ -415,7 +447,18 @@ class _CardsHomeState extends State<_CardsHome> {
           owner: owner,
           onActivate: () => _activate(card),
           onRecover: () => _recover(card),
+          onTopUp: (owner, address) => _set(_TopUp(card, owner, address)),
           onCancel: _toScanning,
+        ),
+      _TopUp(:final card, :final owner, :final address) => TopUpView(
+          card: card,
+          owner: owner,
+          address: address,
+          imageUrl: card.imageUrl ?? _fallbackImage,
+          api: _api,
+          taps: _topUpTaps.stream,
+          nfcAvailable: _nfcAvailable,
+          onDone: _toScanning,
         ),
       _Activating() => const _Loading('Generating activation QR…'),
       _Recovering() => const _Loading('Generating recovery QR…'),
@@ -572,6 +615,7 @@ class _CardDetailView extends StatelessWidget {
     required this.owner,
     required this.onActivate,
     required this.onRecover,
+    required this.onTopUp,
     required this.onCancel,
   });
 
@@ -579,6 +623,7 @@ class _CardDetailView extends StatelessWidget {
   final _Owner? owner;
   final VoidCallback onActivate;
   final VoidCallback onRecover;
+  final void Function(OwnerSummary owner, String address) onTopUp;
   final VoidCallback onCancel;
 
   @override
@@ -601,6 +646,11 @@ class _CardDetailView extends StatelessWidget {
     } else {
       recoverBlocked = null;
     }
+    // Top-up needs somewhere to send the sats: the owner's address.
+    final topUpTo = known?.primaryAddress ??
+        (known == null || known.lightningAddresses.isEmpty
+            ? null
+            : known.lightningAddresses.first);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 28),
@@ -652,7 +702,7 @@ class _CardDetailView extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: canOfferRecover
+              children: known != null && topUpTo != null
                   ? [
                       if (recoverBlocked != null) ...[
                         Padding(
@@ -664,22 +714,50 @@ class _CardDetailView extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                       ],
-                      BrandButton('RECOVER', onRecover,
-                          key: const Key('cards-recover'),
-                          enabled: recoverBlocked == null),
+                      BrandButton('Top-up', () => onTopUp(known, topUpTo),
+                          key: const Key('cards-topup'), icon: Icons.bolt),
                       const SizedBox(height: 12),
                       Row(children: [
+                        Expanded(
+                            child: GhostButton('RECOVER', onRecover,
+                                key: const Key('cards-recover'),
+                                enabled: recoverBlocked == null)),
+                        const SizedBox(width: 8),
                         Expanded(child: GhostButton('ACTIVATE', onActivate)),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
                         Expanded(child: GhostButton('Cancel', onCancel)),
                       ]),
                     ]
-                  : [
-                      BrandButton('ACTIVATE', onActivate,
-                          key: const Key('cards-activate')),
-                      const SizedBox(height: 12),
-                      GhostButton('Cancel', onCancel),
-                    ],
+                  : canOfferRecover
+                      ? [
+                          if (recoverBlocked != null) ...[
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
+                              child: Text(recoverBlocked,
+                                  textAlign: TextAlign.center,
+                                  style: t.bodySmall
+                                      ?.copyWith(color: textSecondary)),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                          BrandButton('RECOVER', onRecover,
+                              key: const Key('cards-recover'),
+                              enabled: recoverBlocked == null),
+                          const SizedBox(height: 12),
+                          Row(children: [
+                            Expanded(
+                                child: GhostButton('ACTIVATE', onActivate)),
+                            const SizedBox(width: 12),
+                            Expanded(child: GhostButton('Cancel', onCancel)),
+                          ]),
+                        ]
+                      : [
+                          BrandButton('ACTIVATE', onActivate,
+                              key: const Key('cards-activate')),
+                          const SizedBox(height: 12),
+                          GhostButton('Cancel', onCancel),
+                        ],
             ),
           ),
         ],

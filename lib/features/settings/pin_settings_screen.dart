@@ -5,7 +5,7 @@ import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/miniapp_pin.dart';
 
-/// Sets or changes the PIN that locks the miniapps. Opening it already asked
+/// Sets or changes the PIN that unlocks the till. Opening it already asked
 /// for the current PIN (when there is one), so changing only asks for the new.
 class PinSettingsScreen extends StatelessWidget {
   const PinSettingsScreen({super.key});
@@ -47,8 +47,8 @@ class PinSettingsScreen extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(4, 8, 4, 20),
                 child: Text(
                   context.tr(pin == null
-                      ? 'Sin PIN: las miniapps se cierran sin pedirlo.'
-                      : 'Las miniapps se desbloquean con tu PIN.'),
+                      ? 'Sin PIN: se desbloquea sin pedirlo.'
+                      : 'Se desbloquea con tu PIN.'),
                   style: const TextStyle(color: AppColors.muted, fontSize: 15),
                 ),
               ),
