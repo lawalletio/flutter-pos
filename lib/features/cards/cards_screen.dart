@@ -6,7 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
-import '../../core/pin_dialog.dart';
+import '../../core/flow_lock.dart';
+import '../../core/sounds.dart';
+import '../../core/widgets.dart';
 import '../../platform/nfc_channel.dart';
 import '../../platform/printer_channel.dart';
 import 'cards_api.dart';
@@ -17,7 +19,7 @@ import 'cards_widgets.dart';
 /// their key, a recovery QR) that prints on the thermal printer.
 ///
 /// Uses plain Material [Text], not the POS uppercase one, to keep
-/// card-manager's look. The X asks for the miniapp PIN.
+/// card-manager's look. The X leaves; the lock beside it keeps players in.
 class CardsScreen extends StatefulWidget {
   const CardsScreen({super.key, this.api});
 
@@ -32,10 +34,10 @@ class _CardsScreenState extends State<CardsScreen> {
   late final _loading = _auth.load();
   late final _api = widget.api ?? CardsApi();
 
-  Future<void> _close() async {
-    if (await confirmMiniappPin(context, action: 'Salir') && mounted) {
-      context.go('/');
-    }
+  /// The X, shown only while unlocked; locked, the lock is the way out.
+  void _close() {
+    if (lockedFlow.value != null) return;
+    context.canPop() ? context.pop() : context.go('/hub');
   }
 
   @override
@@ -90,15 +92,27 @@ class _AppVersion extends StatelessWidget {
       );
 }
 
+/// The X and the till's lock. Locked, only the lock shows.
 class _CloseButton extends StatelessWidget {
   const _CloseButton(this.onClose);
   final VoidCallback onClose;
 
   @override
-  Widget build(BuildContext context) => IconButton(
-        key: const Key('miniapp-close'),
-        icon: const Icon(Icons.close, color: textSecondary),
-        onPressed: onClose,
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ValueListenableBuilder<String?>(
+            valueListenable: lockedFlow,
+            builder: (context, locked, _) => locked != null
+                ? const SizedBox.shrink()
+                : IconButton(
+                    key: const Key('miniapp-close'),
+                    icon: const Icon(Icons.close, color: textSecondary),
+                    onPressed: onClose,
+                  ),
+          ),
+          const FlowLockButton(flow: '/cards', color: textSecondary),
+        ],
       );
 }
 
@@ -321,9 +335,13 @@ class _CardsHomeState extends State<_CardsHome> {
     // A LaWallet card's lnurl points at /api/cards/<id>/scan. Anything else
     // (no NDEF, or a non-LaWallet tag) is a blank card.
     _taps = NfcChannel.taps().listen((url) {
+      if (_flow is! _Scanning) return;
+      // Same cue as a card paying on the charge screen.
+      AppSounds.play(AppSound.card);
+      NfcChannel.vibrate();
       if (url.contains('/api/cards/')) {
         _handleCard(url);
-      } else if (_flow is _Scanning) {
+      } else {
         _set(const _BlankCard());
       }
     });

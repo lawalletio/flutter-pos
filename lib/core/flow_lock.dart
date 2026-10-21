@@ -8,6 +8,7 @@ const lockableFlows = {
   '/paydesk': {'/paydesk', '/tip', '/payment', '/ruleta'},
   '/zape': {'/zape'},
   '/rueda': {'/rueda'},
+  '/cards': {'/cards'},
 };
 
 /// The flow the till is locked to, by its starting route, or null when

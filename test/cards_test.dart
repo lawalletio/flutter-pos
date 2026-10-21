@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lawallet_pos/core/flow_lock.dart';
 import 'package:lawallet_pos/features/cards/cards_api.dart';
 import 'package:lawallet_pos/features/cards/cards_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -45,6 +46,9 @@ CardsApi apiWith(FakeNet net) => CardsApi(
 
 const cardUrl = 'lnurlw://beta.lawallet.io/api/cards/abc-1/scan?p=A1B2&c=C3D4';
 
+/// Methods the screen called on the NFC channel.
+final nfcCalls = <String>[];
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final messenger =
@@ -67,8 +71,12 @@ void main() {
         Future<void> Function() settle,
       })> pumpCards(WidgetTester tester, FakeNet net) async {
     final printed = <Map>[];
+    nfcCalls.clear();
     messenger.setMockMethodCallHandler(const MethodChannel('pos/nfc'),
-        (call) async => call.method == 'stopSession' ? null : true);
+        (call) async {
+      nfcCalls.add(call.method);
+      return call.method == 'stopSession' ? null : true;
+    });
     messenger.setMockMethodCallHandler(const MethodChannel('pos/printer'),
         (call) async {
       if (call.method == 'printCardQr') printed.add(call.arguments as Map);
@@ -85,6 +93,7 @@ void main() {
     addTearDown(tester.view.reset);
     final router = GoRouter(initialLocation: '/cards', routes: [
       GoRoute(path: '/', builder: (_, __) => const Text('home')),
+      GoRoute(path: '/hub', builder: (_, __) => const Text('hub')),
       GoRoute(
           path: '/cards', builder: (_, __) => CardsScreen(api: apiWith(net))),
     ]);
@@ -189,6 +198,7 @@ void main() {
     app.tap(''); // a tag without a LaWallet lnurl
     await tester.pump();
     expect(find.text('Blank card'), findsOneWidget);
+    expect(nfcCalls, contains('vibrate'), reason: 'a taken tap buzzes');
     await tester.tap(find.text('Back'));
     await tester.pump();
 
@@ -369,6 +379,18 @@ void main() {
     final app = await pumpCards(tester, FakeNet({}));
     await tester.tap(find.byKey(const Key('miniapp-close')));
     await app.settle();
-    expect(find.text('home'), findsOneWidget);
+    expect(find.text('hub'), findsOneWidget);
+  });
+
+  testWidgets('locked, only the unlock leads out', (tester) async {
+    addTearDown(() => lockedFlow.value = null);
+    final app = await pumpCards(tester, FakeNet({}));
+    await tester.tap(find.byKey(const Key('flow-lock')));
+    await tester.pump();
+    expect(find.byKey(const Key('miniapp-close')), findsNothing);
+    await tester.tap(find.byKey(const Key('flow-unlock')));
+    await app.settle();
+    expect(find.text('home'), findsOneWidget, reason: 'no PIN, no address');
+    expect(lockedFlow.value, isNull);
   });
 }

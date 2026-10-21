@@ -56,14 +56,6 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Size get preferredSize => const Size.fromHeight(72);
 
-  Future<void> _unlock(BuildContext context) async {
-    if (!await confirmMiniappPin(context, action: 'Desbloquear')) return;
-    lockedFlow.value = null;
-    if (context.mounted) {
-      context.go(merchantAddress.value.isEmpty ? '/' : '/hub');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<String?>(
@@ -123,21 +115,8 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
             onPressed: () => context.push('/invoice-debug'),
           ),
         if (showSync && !isLocked) const _SyncAction(),
-        if (isLocked)
-          IconButton(
-            key: const Key('flow-unlock'),
-            tooltip: context.tr('Desbloquear').toUpperCase(),
-            icon: const Icon(Icons.lock, size: 26, color: AppColors.primary),
-            // Not mid-charge or mid-print: those screens hide back too.
-            onPressed: showBack ? () => _unlock(context) : null,
-          )
-        else if (lockFlow != null)
-          IconButton(
-            key: const Key('flow-lock'),
-            tooltip: context.tr('Bloquear').toUpperCase(),
-            icon: const Icon(Icons.lock_open_outlined, size: 26),
-            onPressed: () => lockedFlow.value = lockFlow,
-          ),
+        // Not mid-charge or mid-print: those screens hide back too.
+        FlowLockButton(flow: lockFlow, enabled: showBack),
         if (showSettings && !isLocked)
           Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -147,6 +126,51 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// The till's lock (see [lockableFlows]). Unlocked, on a [flow] screen, it
+/// locks to that flow; locked, on any screen, it asks for the PIN, unlocks and
+/// goes back to the hub. Nothing otherwise.
+class FlowLockButton extends StatelessWidget {
+  const FlowLockButton({super.key, this.flow, this.enabled = true, this.color});
+
+  final String? flow;
+  final bool enabled;
+
+  /// Of the open lock; the closed one is always the primary color.
+  final Color? color;
+
+  Future<void> _unlock(BuildContext context) async {
+    if (!await confirmMiniappPin(context, action: 'Desbloquear')) return;
+    lockedFlow.value = null;
+    if (context.mounted) {
+      context.go(merchantAddress.value.isEmpty ? '/' : '/hub');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: lockedFlow,
+      builder: (context, locked, _) {
+        if (locked != null) {
+          return IconButton(
+            key: const Key('flow-unlock'),
+            tooltip: context.tr('Desbloquear').toUpperCase(),
+            icon: const Icon(Icons.lock, size: 26, color: AppColors.primary),
+            onPressed: enabled ? () => _unlock(context) : null,
+          );
+        }
+        if (flow == null) return const SizedBox.shrink();
+        return IconButton(
+          key: const Key('flow-lock'),
+          tooltip: context.tr('Bloquear').toUpperCase(),
+          icon: Icon(Icons.lock_open_outlined, size: 26, color: color),
+          onPressed: () => lockedFlow.value = flow,
+        );
+      },
     );
   }
 }
