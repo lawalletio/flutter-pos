@@ -46,7 +46,10 @@ class NfcChannel {
   }
 
   /// Stream of tag NDEF URLs (e.g. `lnurlw://…`).
-  static Stream<String> tags() => _events
+  static Stream<String> tags() => taps().where((url) => url.isNotEmpty);
+
+  /// Every tap: the tag's URL, or '' for a tag without one (a blank card).
+  static Stream<String> taps() => _events
       .receiveBroadcastStream()
       .where((e) => e != null)
       .map((e) => e.toString());

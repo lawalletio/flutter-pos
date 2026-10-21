@@ -55,6 +55,13 @@ const miniapps = [
     route: '/rueda',
     icon: Icons.casino_outlined,
   ),
+  // LaWallet Card Manager: activate and recover NFC cards. Its own login.
+  MiniappManifest(
+    name: 'Cards',
+    sublabel: 'Activar y recuperar tarjetas',
+    route: '/cards',
+    icon: Icons.credit_card,
+  ),
 ];
 
 /// The requirements of [app] this device and account don't meet.

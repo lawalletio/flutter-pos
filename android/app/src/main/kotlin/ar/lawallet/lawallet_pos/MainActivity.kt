@@ -107,6 +107,21 @@ class MainActivity : FlutterActivity() {
                         val points = ((call.arguments as? Map<*, *>)?.get("points") as? Number)?.toInt() ?: 10
                         runAsync(result) { printZape(points) }
                     }
+                    "printCardQr" -> {
+                        val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                        val png = args["qr"] as? ByteArray
+                        if (png == null) {
+                            result.error("PRINT_ERROR", "missing qr", null)
+                        } else {
+                            runAsync(result) {
+                                printCardQr(
+                                    png,
+                                    args["subtitle"]?.toString().orEmpty(),
+                                    args["caption"]?.toString(),
+                                )
+                            }
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -399,8 +414,9 @@ class MainActivity : FlutterActivity() {
         } catch (e: Throwable) {
             url = null
         }
-        val u = url ?: return
         // Keep reader mode active for subsequent taps; just stream this one.
+        // A tag with no URL streams as "" so the Cards miniapp can call it blank.
+        val u = url.orEmpty()
         runOnUiThread { nfcEvents?.success(u) }
     }
 
@@ -417,39 +433,34 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /** The LaWallet lnurl record wherever it sits in the message, else the first
+     *  URI or Text record (from card-manager's CardNfc). */
     private fun extractUrl(msg: NdefMessage?): String? {
         if (msg == null) return null
+        var fallback: String? = null
         for (rec in msg.records) {
-            val payload = rec.payload
-            when {
-                rec.tnf == NdefRecord.TNF_ABSOLUTE_URI ->
-                    return String(rec.type, Charsets.UTF_8)
-                rec.tnf == NdefRecord.TNF_WELL_KNOWN &&
-                    rec.type.contentEquals(NdefRecord.RTD_URI) -> {
-                    if (payload.isEmpty()) continue
-                    val prefix = uriPrefix(payload[0].toInt() and 0xFF)
-                    return prefix + String(payload, 1, payload.size - 1, Charsets.UTF_8)
-                }
-                rec.tnf == NdefRecord.TNF_WELL_KNOWN &&
-                    rec.type.contentEquals(NdefRecord.RTD_TEXT) -> {
-                    if (payload.isEmpty()) continue
-                    val status = payload[0].toInt()
-                    val langLen = status and 0x3F
-                    val enc = if (status and 0x80 == 0) Charsets.UTF_8 else Charsets.UTF_16
-                    return String(payload, 1 + langLen, payload.size - 1 - langLen, enc)
-                }
+            val decoded = decodeRecord(rec)?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+            if (decoded.contains("/api/cards/") || decoded.startsWith("lnurlw://", ignoreCase = true)) {
+                return decoded
             }
+            if (fallback == null) fallback = decoded
         }
-        for (rec in msg.records) rec.toUri()?.let { return it.toString() }
-        return null
+        return fallback
     }
 
-    private fun uriPrefix(code: Int): String = when (code) {
-        0x01 -> "http://www."
-        0x02 -> "https://www."
-        0x03 -> "http://"
-        0x04 -> "https://"
-        else -> ""
+    private fun decodeRecord(rec: NdefRecord): String? {
+        // URI records (boltcards): Android assembles prefix + body.
+        rec.toUri()?.let { return it.toString() }
+        val payload = rec.payload
+        if (rec.tnf == NdefRecord.TNF_WELL_KNOWN &&
+            rec.type.contentEquals(NdefRecord.RTD_TEXT) && payload.isNotEmpty()
+        ) {
+            val status = payload[0].toInt()
+            val langLen = status and 0x3F
+            val enc = if (status and 0x80 == 0) Charsets.UTF_8 else Charsets.UTF_16
+            return String(payload, 1 + langLen, payload.size - 1 - langLen, enc)
+        }
+        return null
     }
 
     /** Run [block] on the background print thread; deliver its result (or error)
@@ -711,6 +722,38 @@ class MainActivity : FlutterActivity() {
             p.setPrintAppendBitmap(Bitmap.createBitmap(strip, 0, y, ZAPE_DOTS, h), Layout.Alignment.ALIGN_CENTER)
             y += h
         }
+        return p.setPrintStart()
+    }
+
+    /**
+     * The Cards miniapp slip, ported from card-manager's ZcsPrinter: "LaWallet",
+     * [subtitle], the QR [png] (the very bitmap shown on screen, so both match),
+     * and the [caption] domain.
+     */
+    private fun printCardQr(png: ByteArray, subtitle: String, caption: String?): Int {
+        if (!ensureInit()) throw RuntimeException("Impresora no disponible")
+        val p = printer!!
+        val status = p.getPrinterStatus()
+        if (status == SdkResult.SDK_PRN_STATUS_PAPEROUT) return status
+        val qr = BitmapFactory.decodeByteArray(png, 0, png.size)
+            ?: throw RuntimeException("Bad QR image")
+
+        p.setPrintLine(2) // top free margin
+        p.setPrintAppendString("LaWallet", fmt(34, Layout.Alignment.ALIGN_CENTER))
+        p.setPrintLine(1)
+        p.setPrintAppendString(subtitle, fmt(24, Layout.Alignment.ALIGN_CENTER))
+        p.setPrintLine(2)
+        p.setPrintAppendBitmap(qr, Layout.Alignment.ALIGN_CENTER)
+        if (caption != null) {
+            p.setPrintLine(1)
+            p.setPrintAppendString(caption, fmt(18, Layout.Alignment.ALIGN_CENTER))
+        }
+        // Two trailing blank lines (as printed content) so the paper actually
+        // feeds out; a trailing line feed with nothing after it can be dropped.
+        val blank = fmt(18, Layout.Alignment.ALIGN_CENTER)
+        p.setPrintAppendString("\n", blank)
+        p.setPrintAppendString("\n", blank)
+        p.setPrintLine(6) // tear-off margin
         return p.setPrintStart()
     }
 
