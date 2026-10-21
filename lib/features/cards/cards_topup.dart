@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../core/amount_pad.dart';
 import '../../core/i18n.dart';
-import '../../core/numpad.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
@@ -96,7 +96,6 @@ class _TopUpViewState extends State<TopUpView>
   LnurlService get _lnurl => widget.service ?? lnurl;
 
   var _stage = _Stage.amount;
-  var _raw = '0';
   var _sats = 0;
   String? _invoice;
   String? _verifyUrl;
@@ -223,19 +222,7 @@ class _TopUpViewState extends State<TopUpView>
 
   // ── amount → invoice ──────────────────────────────────────────────────────
 
-  void _digit(String d) => setState(() {
-        if (_raw == '0') {
-          _raw = d == '00' ? '0' : d;
-        } else if (_raw.length + d.length <= 9) {
-          _raw += d;
-        }
-      });
-
-  void _backspace() => setState(
-      () => _raw = _raw.length <= 1 ? '0' : _raw.substring(0, _raw.length - 1));
-
-  Future<void> _requestInvoice() async {
-    final sats = int.tryParse(_raw) ?? 0;
+  Future<void> _requestInvoice(int sats) async {
     if (sats <= 0) return;
     final gen = ++_gen;
     setState(() {
@@ -380,69 +367,26 @@ class _TopUpViewState extends State<TopUpView>
               ),
       );
 
-  Widget _numpad() {
-    final sats = int.tryParse(_raw) ?? 0;
-    final ars = pricing.satsToFiat(sats, Currency.ars);
-    final t = Theme.of(context).textTheme;
-    return Padding(
-      key: const ValueKey('numpad'),
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Column(
-        children: [
-          Expanded(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // A small bump per key, so each press shows.
-                  TweenAnimationBuilder<double>(
-                    key: ValueKey(_raw),
-                    tween: Tween(begin: 1.06, end: 1),
-                    duration: const Duration(milliseconds: 160),
-                    builder: (context, s, child) =>
-                        Transform.scale(scale: s, child: child),
-                    child: Text.rich(
-                      TextSpan(children: [
-                        TextSpan(
-                            text: _satsStr(sats),
-                            style: t.displayMedium?.copyWith(
-                                color: sats > 0 ? textPrimary : textSecondary,
-                                fontWeight: FontWeight.w800,
-                                fontFeatures: const [
-                                  FontFeature.tabularFigures()
-                                ])),
-                        TextSpan(
-                            text: ' sats',
-                            style:
-                                t.titleLarge?.copyWith(color: textSecondary)),
-                      ]),
-                    ),
-                  ),
-                  if (ars != null && sats > 0)
-                    Text('≈ ARS ${_arsStr(sats)}',
-                        style: t.titleSmall?.copyWith(color: textSecondary)),
-                ],
+  /// The cash register's amount entry, with its currency switcher.
+  Widget _numpad() => Padding(
+        key: const ValueKey('numpad'),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Theme(
+          data: _posTheme,
+          child: AmountPad(
+            action: (context, sats) => Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: BrandButton(
+                '${_satsStr(sats)} sats',
+                () => _requestInvoice(sats),
+                key: const Key('topup-charge'),
+                icon: Icons.bolt,
+                enabled: sats > 0,
               ),
             ),
           ),
-          Theme(
-            data: _posTheme,
-            child: Numpad(onDigit: _digit, onBackspace: _backspace),
-          ),
-          const SizedBox(height: 14),
-          BrandButton(
-            '${_satsStr(sats)} sats',
-            _requestInvoice,
-            key: const Key('topup-charge'),
-            icon: Icons.bolt,
-            enabled: sats > 0,
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
-    );
-  }
+        ),
+      );
 
   Widget _invoiceStep() {
     final error = _error;
