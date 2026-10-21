@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:go_router/go_router.dart';
 
 import '../data/nostr/relay_sync_service.dart';
@@ -6,6 +9,19 @@ import 'theme.dart';
 import 'ui.dart';
 
 /// Shared UI building blocks for the POS screens.
+
+/// [draw] rasterized once into a [width]×[height] px bitmap. Impeller has no
+/// raster cache, so a static layer is re-shaded every frame anything on screen
+/// animates; radial, sweep and diagonal gradients are slow on the Z92's GPU,
+/// a bitmap of them is ~free.
+ui.Image recordImage(int width, int height, void Function(Canvas canvas) draw) {
+  final recorder = ui.PictureRecorder();
+  draw(Canvas(recorder));
+  final picture = recorder.endRecording();
+  final image = picture.toImageSync(math.max(1, width), math.max(1, height));
+  picture.dispose();
+  return image;
+}
 
 /// Top app bar with an optional back button and a settings gear (mirrors the
 /// webapp's `layout/top.tsx` + `Navbar`).
