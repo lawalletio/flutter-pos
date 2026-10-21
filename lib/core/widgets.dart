@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../data/nostr/relay_sync_service.dart';
 import '../domain/config/session.dart';
@@ -24,6 +25,50 @@ ui.Image recordImage(int width, int height, void Function(Canvas canvas) draw) {
   final image = picture.toImageSync(math.max(1, width), math.max(1, height));
   picture.dispose();
   return image;
+}
+
+/// [painter]'s QR drawn once into a bitmap, [size] wide or as wide as it can
+/// be, like a `QrImageView` with no padding. A live `QrImageView` re-draws
+/// every module each frame anything on screen animates (a spinner, a
+/// breathing dot): ~28 ms a frame on the Z92.
+class BakedQr extends StatefulWidget {
+  const BakedQr({super.key, required this.painter, this.size});
+  final QrPainter painter;
+  final double? size;
+
+  @override
+  State<BakedQr> createState() => _BakedQrState();
+}
+
+class _BakedQrState extends State<BakedQr> {
+  ui.Image? _image;
+  QrPainter? _painter;
+
+  @override
+  void dispose() {
+    _image?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
+        final side = widget.size ?? box.biggest.shortestSide;
+        final px = (side * MediaQuery.devicePixelRatioOf(context)).ceil();
+        final painter = _painter;
+        if (_image?.width != px ||
+            painter == null ||
+            widget.painter.shouldRepaint(painter)) {
+          _image?.dispose();
+          _image = recordImage(px, px,
+              (c) => widget.painter.paint(c, Size.square(px.toDouble())));
+          _painter = widget.painter;
+        }
+        return Semantics(
+          label: 'qr code',
+          child: RawImage(
+              image: _image, width: side, height: side, fit: BoxFit.fill),
+        );
+      });
 }
 
 /// Top app bar with an optional back button and a settings gear (mirrors the

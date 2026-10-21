@@ -7,6 +7,7 @@ import '../../core/i18n.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../core/widgets.dart' show BakedQr;
 
 /// The invoice / QR screen shown while charging.
 ///
@@ -245,11 +246,13 @@ class _InvoiceViewState extends State<InvoiceView>
                 ),
               ),
               child: ready
-                  ? QrImageView(
+                  ? BakedQr(
                       key: const ValueKey('qr'),
-                      data: (widget.invoice ?? '').toUpperCase(),
-                      version: QrVersions.auto,
-                      padding: EdgeInsets.zero,
+                      painter: QrPainter(
+                        data: (widget.invoice ?? '').toUpperCase(),
+                        version: QrVersions.auto,
+                        gapless: true,
+                      ),
                     )
                   : const _QrScramble(key: ValueKey('scramble')),
             ),

@@ -10,6 +10,7 @@ import '../../core/numpad.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart' show BakedQr;
 import '../../data/lnurl/bech32_lnurl.dart';
 import '../../data/lnurl/lnurl_service.dart';
 import '../../data/nostr/profile_service.dart';
@@ -660,12 +661,13 @@ class _LnurlQr extends StatelessWidget {
           ],
         ),
         child: Stack(alignment: Alignment.center, children: [
-          RepaintBoundary(
-            child: QrImageView(
-              key: const Key('topup-lnurl'),
+          BakedQr(
+            key: const Key('topup-lnurl'),
+            size: inner,
+            painter: QrPainter(
               data: data,
-              size: inner,
-              padding: EdgeInsets.zero,
+              version: QrVersions.auto,
+              gapless: true,
               errorCorrectionLevel: QrErrorCorrectLevel.H,
               eyeStyle: const QrEyeStyle(
                   eyeShape: QrEyeShape.square, color: nearBlack),
