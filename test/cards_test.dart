@@ -182,4 +182,45 @@ void main() {
     expect(printed.single['caption'], 'beta.lawallet.io');
     expect(net.calls, contains('POST /api/cards/abc-1/activation-tokens'));
   });
+
+  testWidgets('an owner shows at most 3 lightning addresses', (tester) async {
+    messenger.setMockMethodCallHandler(const MethodChannel('pos/nfc'),
+        (call) async => call.method == 'stopSession' ? null : true);
+    MockStreamHandlerEventSink? sink;
+    messenger.setMockStreamHandler(const EventChannel('pos/nfc/tags'),
+        MockStreamHandler.inline(onListen: (_, s) {
+      sink = s;
+    }));
+    final net = FakeNet({
+      'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+      'GET /api/cards/abc-1/owner': (
+        200,
+        {
+          'owned': true,
+          'primaryAddress': 'a@x.io',
+          'lightningAddresses': [for (final n in 'abcde'.split('')) '$n@x.io'],
+          'cardRecoveryEnabled': true,
+          'balanceSats': 1,
+        }
+      ),
+    });
+    tester.view
+      ..physicalSize = const Size(720, 1440)
+      ..devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: CardsScreen(api: apiWith(net))));
+    await tester.pump();
+    await tester.pump();
+    sink!.success(cardUrl);
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    expect(find.text('⚡ a@x.io'), findsOneWidget);
+    expect(find.text('b@x.io'), findsOneWidget);
+    expect(find.text('c@x.io'), findsOneWidget);
+    expect(find.text('d@x.io'), findsNothing);
+    expect(find.text('e@x.io'), findsNothing);
+  });
 }

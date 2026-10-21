@@ -701,7 +701,8 @@ class _OwnerBlock extends StatelessWidget {
         (owner.lightningAddresses.isEmpty
             ? null
             : owner.lightningAddresses.first);
-    final others = owner.lightningAddresses.where((a) => a != primary);
+    // At most 3 addresses on screen: the primary plus 2 others.
+    final others = owner.lightningAddresses.where((a) => a != primary).take(2);
     final balance = owner.balanceSats;
     return Column(children: [
       const SizedBox(height: 18),
