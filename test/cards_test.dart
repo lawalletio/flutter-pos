@@ -8,6 +8,9 @@ import 'package:go_router/go_router.dart';
 import 'package:lawallet_pos/core/flow_lock.dart';
 import 'package:lawallet_pos/features/cards/cards_api.dart';
 import 'package:lawallet_pos/features/cards/cards_screen.dart';
+import 'package:lawallet_pos/features/cards/cards_topup.dart';
+import 'package:lawallet_pos/data/lnurl/bech32_lnurl.dart';
+import 'package:lawallet_pos/data/pricing/pricing_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 String jwt(Map<String, Object?> claims) {
@@ -79,7 +82,9 @@ void main() {
     });
     messenger.setMockMethodCallHandler(const MethodChannel('pos/printer'),
         (call) async {
-      if (call.method == 'printCardQr') printed.add(call.arguments as Map);
+      if (call.method.startsWith('printCard')) {
+        printed.add(call.arguments as Map);
+      }
       return call.method == 'isAvailable' ? true : 0;
     });
     MockStreamHandlerEventSink? sink;
@@ -274,6 +279,62 @@ void main() {
     expect(net.calls, contains('POST /api/cards/abc-1/recovery-tokens'));
     await tester.tap(find.text('Cancel'));
     await tester.pump();
+    expect(find.text('Tap your card'), findsOneWidget);
+  });
+
+  test('the top-up QR is the owner\'s LNURL-pay', () {
+    expect(lnurlpUri('a@x.io'),
+        'lightning:${encodeLnurl('https://x.io/.well-known/lnurlp/a')}');
+    expect(lnurlpUri('nope'), isNull);
+  });
+
+  testWidgets('top-up: LNURL and numpad tabs, paid when the balance rises',
+      (tester) async {
+    final net = FakeNet({
+      'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+      'GET /api/cards/abc-1/owner': (200, owner),
+    });
+    pricing.seedRates(const Rates(0.05, 0.0001));
+    final app = await pumpCards(tester, net);
+    app.tap(cardUrl);
+    await app.settle();
+    // One frame starts an animation, the next runs it.
+    Future<void> run() async {
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 2));
+    }
+
+    await tester.tap(find.byKey(const Key('cards-topup')));
+    await run();
+    expect(find.byKey(const Key('topup-lnurl')), findsOneWidget);
+    expect(find.text('a@x.io'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('topup-set-amount')));
+    await run();
+    for (final d in ['1', '00']) {
+      await tester.tap(find.text(d));
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('topup-charge')),
+            matching: find.text('100 sats')),
+        findsOneWidget);
+
+    // Paid from any wallet: the owner's balance goes 21 → 121.
+    net.routes['GET /api/cards/abc-1/owner'] =
+        (200, {...owner, 'balanceSats': 121});
+    await tester.pump(const Duration(seconds: 3));
+    await app.settle();
+    await run();
+    expect(find.byKey(const Key('topup-done')), findsOneWidget);
+    expect(find.text('+100 sats'), findsWidgets);
+    expect(find.text('121 sats'), findsWidgets);
+    expect(app.printed.single,
+        {'amount': '100 sats', 'balance': '121 sats', 'address': 'a@x.io'});
+
+    await tester.tap(find.byKey(const Key('topup-done')));
+    await run();
     expect(find.text('Tap your card'), findsOneWidget);
   });
 

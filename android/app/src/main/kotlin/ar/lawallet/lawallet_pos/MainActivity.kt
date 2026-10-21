@@ -122,6 +122,16 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
+                    "printCardTopUp" -> {
+                        val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                        runAsync(result) {
+                            printCardTopUp(
+                                args["amount"]?.toString().orEmpty(),
+                                args["balance"]?.toString(),
+                                args["address"]?.toString(),
+                            )
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -754,6 +764,36 @@ class MainActivity : FlutterActivity() {
         p.setPrintAppendString("\n", blank)
         p.setPrintAppendString("\n", blank)
         p.setPrintLine(6) // tear-off margin
+        return p.setPrintStart()
+    }
+
+    /** The Cards top-up slip: "LaWallet", the [amount] loaded, the [balance] after it. */
+    private fun printCardTopUp(amount: String, balance: String?, address: String?): Int {
+        if (!ensureInit()) throw RuntimeException("Impresora no disponible")
+        val p = printer!!
+        val status = p.getPrinterStatus()
+        if (status == SdkResult.SDK_PRN_STATUS_PAPEROUT) return status
+
+        p.setPrintLine(2)
+        p.setPrintAppendString("LaWallet", fmt(34, Layout.Alignment.ALIGN_CENTER))
+        p.setPrintAppendString("--------------------------------", fmt(22, Layout.Alignment.ALIGN_NORMAL))
+        p.setPrintAppendString("Top-up", fmt(22, Layout.Alignment.ALIGN_CENTER))
+        p.setPrintAppendString("+$amount", fmt(40, Layout.Alignment.ALIGN_CENTER))
+        if (balance != null) {
+            p.setPrintLine(6)
+            p.setPrintAppendString("Balance", fmt(22, Layout.Alignment.ALIGN_CENTER))
+            p.setPrintAppendString(balance, fmt(32, Layout.Alignment.ALIGN_CENTER))
+        }
+        p.setPrintAppendString("--------------------------------", fmt(22, Layout.Alignment.ALIGN_NORMAL))
+        if (!address.isNullOrEmpty()) {
+            p.setPrintAppendString(address, fmt(18, Layout.Alignment.ALIGN_CENTER))
+        }
+        p.setPrintAppendString(currentDate(), fmt(18, Layout.Alignment.ALIGN_CENTER))
+        // Same trailing feed as the Cards QR slip, so it clears the tear bar.
+        val blank = fmt(18, Layout.Alignment.ALIGN_CENTER)
+        p.setPrintAppendString("\n", blank)
+        p.setPrintAppendString("\n", blank)
+        p.setPrintLine(6)
         return p.setPrintStart()
     }
 
