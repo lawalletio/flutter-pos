@@ -294,6 +294,7 @@ const Map<String, String> _en = {
   'Configurar rueda': 'Set up the wheel',
   'Rueda de la fortuna': 'Wheel of fortune',
   'Juego de premios': 'Prize game',
+  'Activar y recuperar tarjetas': 'Activate and recover cards',
   'Premios': 'Prizes',
   'Personalizados': 'Custom',
   'Se editan en Configuración › Cupones': 'Edited in Settings › Coupons',

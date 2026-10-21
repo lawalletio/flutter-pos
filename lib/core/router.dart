@@ -15,6 +15,7 @@ import '../features/relays/relay_sync_screen.dart';
 import '../features/prize/prize_wheel_screen.dart';
 import '../features/settings/pin_settings_screen.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/cards/cards_screen.dart';
 import '../features/miniapps/rueda_screen.dart';
 import '../features/miniapps/zape_screen.dart';
 
@@ -126,6 +127,7 @@ final appRouter = GoRouter(
       ],
     ),
     GoRoute(path: '/zape', pageBuilder: (c, s) => _page(const ZapeScreen())),
+    GoRoute(path: '/cards', pageBuilder: (c, s) => _page(const CardsScreen())),
     GoRoute(
       path: '/rueda',
       pageBuilder: (c, s) => _page(const RuedaScreen()),

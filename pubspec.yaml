@@ -72,3 +72,7 @@ flutter:
     - family: ClimateCrisis
       fonts:
         - asset: assets/fonts/ClimateCrisis.ttf
+    # OFL variable font, card-manager's typeface for the Cards miniapp.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf

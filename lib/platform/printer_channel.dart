@@ -51,6 +51,12 @@ class PrinterChannel {
   static Future<PrintResult> printZape(int points) =>
       _invoke('printZape', {'points': points});
 
+  /// Cards miniapp slip: "LaWallet", [subtitle], the [qr] PNG and [caption].
+  static Future<PrintResult> printCardQr(
+          {required Uint8List qr, required String subtitle, String? caption}) =>
+      _invoke('printCardQr',
+          {'qr': qr, 'subtitle': subtitle, 'caption': caption});
+
   static Future<PrintResult> _invoke(String method, [dynamic args]) async {
     try {
       final code = await _ch.invokeMethod<int>(method, args) ?? -1;
