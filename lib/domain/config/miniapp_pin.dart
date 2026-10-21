@@ -3,7 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const _key = 'miniappPin';
 
-/// The PIN that closes a miniapp (kiosk mode) and opens the PIN settings.
+/// The PIN that unlocks a locked flow (see `lockedFlow`) and opens the PIN
+/// settings.
 /// Device-wide, not per merchant. Null until someone sets one, and while it
 /// is null nothing asks for it.
 // ponytail: stored in plain prefs; it guards a kiosk screen, not money.

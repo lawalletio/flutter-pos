@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/i18n.dart';
-import '../../core/pin_dialog.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
@@ -98,8 +97,9 @@ class PrizeWheelScreen extends StatefulWidget {
   /// When set, back leaves the payment flow for this route instead of success.
   final String? returnTo;
 
-  /// Rueda de la fortuna miniapp: no back, gear and X behind the PIN, prints
-  /// only when the miniapp says so, and a prize resets for the next player.
+  /// Rueda de la fortuna miniapp: lockable from the navbar, gear opens its
+  /// config, prints only when the miniapp says so, and a prize resets for the
+  /// next player.
   final bool miniapp;
 
   @override
@@ -616,45 +616,20 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
     final busy = _phase == _Phase.spinning || _printGate;
     return PosAppBar(
       title: context.tr('Rueda de la fortuna'),
-      showBack: false,
-      showSettings: false,
+      lockFlow: '/rueda',
+      showBack: !busy,
+      showSettings: !busy,
+      settingsRoute: '/rueda/config',
       showSync: false,
       showInvoiceDebug: false,
-      actions: [
-        IconButton(
-          key: const Key('rueda-config'),
-          icon: const Icon(Icons.settings_outlined, size: 28),
-          onPressed: busy ? null : _openConfig,
-        ),
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: IconButton(
-            key: const Key('miniapp-close'),
-            icon: const Icon(Icons.close, size: 30),
-            onPressed: busy ? null : _close,
-          ),
-        ),
-      ],
     );
-  }
-
-  Future<void> _openConfig() async {
-    if (await confirmMiniappPin(context, action: 'Entrar') && mounted) {
-      context.push('/rueda/config');
-    }
-  }
-
-  Future<void> _close() async {
-    if (await confirmMiniappPin(context, action: 'Salir') && mounted) {
-      context.go('/');
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     final leavePayment = widget.returnTo != null && widget.returnTo!.isNotEmpty;
     return PopScope(
-      canPop: !widget.miniapp && !leavePayment && !_printGate,
+      canPop: !leavePayment && !_printGate,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _leave();
       },

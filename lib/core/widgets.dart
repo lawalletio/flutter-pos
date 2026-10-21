@@ -1,7 +1,10 @@
 import 'package:go_router/go_router.dart';
 
 import '../data/nostr/relay_sync_service.dart';
+import '../domain/config/session.dart';
+import 'flow_lock.dart';
 import 'i18n.dart';
+import 'pin_dialog.dart';
 import 'theme.dart';
 import 'ui.dart';
 
@@ -9,10 +12,17 @@ import 'ui.dart';
 
 /// Top app bar with an optional back button and a settings gear (mirrors the
 /// webapp's `layout/top.tsx` + `Navbar`).
+///
+/// Also the till's lock: [lockFlow] screens show a lock that keeps the till in
+/// that flow (see [lockableFlows]). While locked every screen of the flow
+/// shows only the unlock, which asks for the PIN and goes back to the hub.
 class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String? title;
   final bool showBack;
   final bool showSettings;
+
+  /// Where the gear goes. The rueda points it at its own config.
+  final String settingsRoute;
 
   /// Relay replication indicator, left of the settings gear. Spins while a
   /// sync is running; tapping it opens the progress and the log.
@@ -27,28 +37,59 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// Replaces the default pop. The payment wheel uses this to skip success.
   final VoidCallback? onBack;
 
+  /// The flow this screen starts, a key of [lockableFlows]. Shows the lock.
+  final String? lockFlow;
+
   const PosAppBar({
     super.key,
     this.title,
     this.showBack = true,
     this.showSettings = true,
+    this.settingsRoute = '/settings',
     this.showSync = true,
     this.actions = const [],
     this.showInvoiceDebug = true,
     this.onBack,
+    this.lockFlow,
   });
 
   @override
   Size get preferredSize => const Size.fromHeight(72);
 
+  Future<void> _unlock(BuildContext context) async {
+    if (!await confirmMiniappPin(context, action: 'Desbloquear')) return;
+    lockedFlow.value = null;
+    if (context.mounted) {
+      context.go(merchantAddress.value.isEmpty ? '/' : '/hub');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: lockedFlow,
+      builder: (context, locked, _) {
+        final isLocked = locked != null;
+        // The flow's first screen has nothing of the flow behind it.
+        final atStart = isLocked && locked == lockFlow;
+        return PopScope(
+          canPop: !atStart,
+          child: _bar(context, isLocked: isLocked, atStart: atStart),
+        );
+      },
+    );
+  }
+
+  Widget _bar(BuildContext context,
+      {required bool isLocked, required bool atStart}) {
+    final back = showBack && !atStart;
     return AppBar(
       backgroundColor: AppColors.background,
       elevation: 0,
       toolbarHeight: 72,
       leadingWidth: 68,
-      leading: showBack
+      automaticallyImplyLeading: false,
+      leading: back
           ? Padding(
               padding: const EdgeInsets.only(left: 12),
               child: Material(
@@ -75,19 +116,34 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
                   const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
       actions: [
         ...actions,
-        if (showInvoiceDebug)
+        if (showInvoiceDebug && !isLocked)
           IconButton(
             tooltip: context.tr('Invoices generadas').toUpperCase(),
             icon: const Icon(Icons.bug_report_outlined, size: 26),
             onPressed: () => context.push('/invoice-debug'),
           ),
-        if (showSync) const _SyncAction(),
-        if (showSettings)
+        if (showSync && !isLocked) const _SyncAction(),
+        if (isLocked)
+          IconButton(
+            key: const Key('flow-unlock'),
+            tooltip: context.tr('Desbloquear').toUpperCase(),
+            icon: const Icon(Icons.lock, size: 26, color: AppColors.primary),
+            // Not mid-charge or mid-print: those screens hide back too.
+            onPressed: showBack ? () => _unlock(context) : null,
+          )
+        else if (lockFlow != null)
+          IconButton(
+            key: const Key('flow-lock'),
+            tooltip: context.tr('Bloquear').toUpperCase(),
+            icon: const Icon(Icons.lock_open_outlined, size: 26),
+            onPressed: () => lockedFlow.value = lockFlow,
+          ),
+        if (showSettings && !isLocked)
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: IconButton(
               icon: const Icon(Icons.settings_outlined, size: 26),
-              onPressed: () => context.push('/settings'),
+              onPressed: () => context.push(settingsRoute),
             ),
           ),
       ],

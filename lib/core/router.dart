@@ -17,6 +17,7 @@ import '../features/settings/pin_settings_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/miniapps/rueda_screen.dart';
 import '../features/miniapps/zape_screen.dart';
+import 'flow_lock.dart';
 
 /// A fast, smooth transition applied to every route change: the incoming page
 /// fades in while easing up from a slight scale/offset — snappy enough for a POS
@@ -49,6 +50,7 @@ Page<void> _page(Widget child) => CustomTransitionPage<void>(
 
 final appRouter = GoRouter(
   initialLocation: '/',
+  redirect: (c, s) => lockRedirect(s.uri.path),
   routes: [
     GoRoute(path: '/', pageBuilder: (c, s) => _page(const HomeScreen())),
     GoRoute(
