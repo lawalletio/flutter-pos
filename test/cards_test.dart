@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:lawallet_pos/features/cards/cards_api.dart';
 import 'package:lawallet_pos/features/cards/cards_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -53,7 +54,72 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await CardsAuth.instance
         .login(jwt({'apiUrl': 'beta.lawallet.io/', 'exp': _future}));
+    CardsAuth.instance.setAutoPrint(false);
   });
+
+  /// Pumps the miniapp at /cards (behind a '/' home) on a Z92-sized screen.
+  /// Returns the printed slips, a card tap, and a settle that lets Dio and
+  /// the QR PNG run on real async while the animations stay on fake time.
+  Future<
+      ({
+        List<Map> printed,
+        void Function(String url) tap,
+        Future<void> Function() settle,
+      })> pumpCards(WidgetTester tester, FakeNet net) async {
+    final printed = <Map>[];
+    messenger.setMockMethodCallHandler(const MethodChannel('pos/nfc'),
+        (call) async => call.method == 'stopSession' ? null : true);
+    messenger.setMockMethodCallHandler(const MethodChannel('pos/printer'),
+        (call) async {
+      if (call.method == 'printCardQr') printed.add(call.arguments as Map);
+      return call.method == 'isAvailable' ? true : 0;
+    });
+    MockStreamHandlerEventSink? sink;
+    messenger.setMockStreamHandler(const EventChannel('pos/nfc/tags'),
+        MockStreamHandler.inline(onListen: (_, s) {
+      sink = s;
+    }));
+    tester.view
+      ..physicalSize = const Size(720, 1440) // the Z92's portrait screen
+      ..devicePixelRatio = 2;
+    addTearDown(tester.view.reset);
+    final router = GoRouter(initialLocation: '/cards', routes: [
+      GoRoute(path: '/', builder: (_, __) => const Text('home')),
+      GoRoute(
+          path: '/cards', builder: (_, __) => CardsScreen(api: apiWith(net))),
+    ]);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    Future<void> settle() async {
+      for (var i = 0; i < 10; i++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump(const Duration(milliseconds: 1));
+      }
+    }
+
+    await settle();
+    return (
+      printed: printed,
+      tap: (String url) => sink!.success(url),
+      settle: settle
+    );
+  }
+
+  const unowned = {
+    'id': 'abc-1',
+    'design': {'imageUrl': ''}
+  };
+  const owner = {
+    'owned': true,
+    'primaryAddress': 'a@x.io',
+    'lightningAddresses': ['a@x.io'],
+    'cardRecoveryEnabled': true,
+    'balanceSats': 21,
+  };
+  const activation = (
+    200,
+    {'qrPayload': 'https://beta.lawallet.io/wallet/activate/abc-1?t=1'}
+  );
 
   test('parses tokens, card urls and domains like card-manager', () {
     final c = decodeJwt(jwt({
@@ -113,114 +179,196 @@ void main() {
 
   testWidgets('tap → detail → activate → print → back to scanning',
       (tester) async {
-    final printed = <Map>[];
-    messenger.setMockMethodCallHandler(const MethodChannel('pos/nfc'),
-        (call) async => call.method == 'stopSession' ? null : true);
-    messenger.setMockMethodCallHandler(const MethodChannel('pos/printer'),
-        (call) async {
-      if (call.method == 'printCardQr') printed.add(call.arguments as Map);
-      return call.method == 'isAvailable' ? true : 0;
-    });
     final net = FakeNet({
-      'GET /api/cards/abc-1': (
-        200,
-        {
-          'id': 'abc-1',
-          'design': {'imageUrl': ''}
-        }
-      ),
-      'POST /api/cards/abc-1/activation-tokens': (
-        200,
-        {'qrPayload': 'https://beta.lawallet.io/wallet/activate/abc-1?t=1'}
-      ),
+      'GET /api/cards/abc-1': (200, unowned),
+      'POST /api/cards/abc-1/activation-tokens': activation,
     });
-    MockStreamHandlerEventSink? sink;
-    messenger.setMockStreamHandler(const EventChannel('pos/nfc/tags'),
-        MockStreamHandler.inline(onListen: (_, s) {
-      sink = s;
-    }));
-
-    // Dio and the QR PNG need real async; the animations run on fake time.
-    Future<void> settle() async {
-      for (var i = 0; i < 10; i++) {
-        await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 20)));
-        await tester.pump(const Duration(milliseconds: 1));
-      }
-    }
-
-    tester.view
-      ..physicalSize = const Size(720, 1440) // the Z92's portrait screen
-      ..devicePixelRatio = 2;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(home: CardsScreen(api: apiWith(net))));
-    await tester.pump();
-    await tester.pump();
+    final app = await pumpCards(tester, net);
     expect(find.text('Tap your card'), findsOneWidget);
 
-    sink!.success(''); // a tag without a LaWallet lnurl
+    app.tap(''); // a tag without a LaWallet lnurl
     await tester.pump();
     expect(find.text('Blank card'), findsOneWidget);
     await tester.tap(find.text('Back'));
     await tester.pump();
 
-    sink!.success(cardUrl);
-    await settle();
+    app.tap(cardUrl);
+    await app.settle();
     expect(find.text('Not activated'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('cards-activate')));
-    await settle();
+    await app.settle();
     expect(find.text('Print to activate your card'), findsOneWidget);
-    await settle();
+    await app.settle();
     await tester.tap(find.byKey(const Key('cards-print')));
     await tester.pump();
     expect(find.text('Printing…'), findsOneWidget);
-    await settle();
+    await app.settle();
     await tester.pump(const Duration(milliseconds: 2100));
     expect(find.text('Tap your card'), findsOneWidget);
-    expect(printed.single['subtitle'], 'Activate your card');
-    expect(printed.single['caption'], 'beta.lawallet.io');
-    expect(net.calls, contains('POST /api/cards/abc-1/activation-tokens'));
+    expect(app.printed.single['subtitle'], 'Activate your card');
+    expect(app.printed.single['caption'], 'beta.lawallet.io');
   });
 
-  testWidgets('an owner shows at most 3 lightning addresses', (tester) async {
-    messenger.setMockMethodCallHandler(const MethodChannel('pos/nfc'),
-        (call) async => call.method == 'stopSession' ? null : true);
-    MockStreamHandlerEventSink? sink;
-    messenger.setMockStreamHandler(const EventChannel('pos/nfc/tags'),
-        MockStreamHandler.inline(onListen: (_, s) {
-      sink = s;
-    }));
+  testWidgets('auto-print mints and prints an unowned card on tap',
+      (tester) async {
+    CardsAuth.instance.setAutoPrint(true);
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (200, unowned),
+          'POST /api/cards/abc-1/activation-tokens': activation,
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    await app.settle();
+    expect(find.text('Printing…'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 2100));
+    expect(app.printed, hasLength(1));
+    expect(find.text('Tap your card'), findsOneWidget);
+  });
+
+  testWidgets('an owned card shows its owner and recovers with the tap',
+      (tester) async {
     final net = FakeNet({
       'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
       'GET /api/cards/abc-1/owner': (
         200,
         {
-          'owned': true,
-          'primaryAddress': 'a@x.io',
+          ...owner,
           'lightningAddresses': [for (final n in 'abcde'.split('')) '$n@x.io'],
-          'cardRecoveryEnabled': true,
-          'balanceSats': 1,
+        }
+      ),
+      'POST /api/cards/abc-1/recovery-tokens': (
+        200,
+        {
+          'qrPayload':
+              'https://beta.lawallet.io/wallet/activate/abc-1?tag=recover'
         }
       ),
     });
-    tester.view
-      ..physicalSize = const Size(720, 1440)
-      ..devicePixelRatio = 2;
-    addTearDown(tester.view.reset);
-    await tester.pumpWidget(MaterialApp(home: CardsScreen(api: apiWith(net))));
-    await tester.pump();
-    await tester.pump();
-    sink!.success(cardUrl);
-    for (var i = 0; i < 10; i++) {
-      await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(milliseconds: 1));
-    }
+    final app = await pumpCards(tester, net);
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.text('Activated'), findsOneWidget);
+    expect(find.text('21 sats'), findsOneWidget);
+    // At most 3 addresses: the primary plus 2 others.
     expect(find.text('⚡ a@x.io'), findsOneWidget);
     expect(find.text('b@x.io'), findsOneWidget);
     expect(find.text('c@x.io'), findsOneWidget);
     expect(find.text('d@x.io'), findsNothing);
-    expect(find.text('e@x.io'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('cards-recover')));
+    await app.settle();
+    expect(find.text('Print to recover your account'), findsOneWidget);
+    expect(net.calls, contains('POST /api/cards/abc-1/recovery-tokens'));
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    expect(find.text('Tap your card'), findsOneWidget);
+  });
+
+  testWidgets('RECOVER says why it is off', (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+          'GET /api/cards/abc-1/owner': (500, {'message': 'down'}),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.text('Balance unavailable'), findsOneWidget);
+    expect(find.text('Owner info unavailable'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+
+    // Typed by hand: no SUN proof, so recovery needs a real tap.
+    final net = FakeNet({
+      'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+      'GET /api/cards/abc-1/owner': (200, owner),
+    });
+    await tester.pumpWidget(const SizedBox());
+    final manual = await pumpCards(tester, net);
+    await tester.tap(find.text('Enter manually'));
+    await tester.pump();
+    await tester.enterText(
+        find.byKey(const Key('cards-manual-field')), 'abc-1');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('cards-find')));
+    await manual.settle();
+    expect(find.text('Tap the card to recover'), findsOneWidget);
+  });
+
+  testWidgets('an unknown card fails and goes back', (tester) async {
+    final app = await pumpCards(tester, FakeNet({}));
+    await tester.tap(find.text('Enter manually'));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('cards-manual-field')), 'zzz');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('cards-find')));
+    await app.settle();
+    expect(find.text('Card not registered.'), findsOneWidget);
+    await tester.tap(find.text('Back'));
+    await tester.pump();
+    expect(find.text('Tap your card'), findsOneWidget);
+  });
+
+  testWidgets('settings: session, auto-print and log out', (tester) async {
+    final app = await pumpCards(tester, FakeNet({}));
+    await tester.tap(find.byKey(const Key('cards-settings')));
+    await tester.pump();
+    expect(find.text('Settings'), findsOneWidget);
+    expect(find.text('beta.lawallet.io'), findsOneWidget);
+    expect(find.text('Token expires'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('cards-autoprint')));
+    await tester.pump();
+    expect(CardsAuth.instance.autoPrint.value, isTrue);
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pump();
+    expect(find.text('Tap your card'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('cards-settings')));
+    await tester.pump();
+    await tester.tap(find.text('Log out'));
+    await app.settle();
+    expect(find.text('Card activation'), findsOneWidget);
+  });
+
+  testWidgets('login: rejects bad tokens, accepts a good one', (tester) async {
+    CardsAuth.instance.logout();
+    final app = await pumpCards(tester, FakeNet({}));
+    expect(find.text('Card activation'), findsOneWidget);
+
+    await tester.tap(find.text('Paste token manually'));
+    await tester.pump();
+    final field = find.byKey(const Key('cards-token-field'));
+    final use = find.byKey(const Key('cards-use-token'));
+
+    await tester.enterText(field, 'not-a-token');
+    await tester.pump();
+    await tester.tap(use);
+    await app.settle();
+    expect(find.text("That QR isn't a valid device token."), findsOneWidget);
+
+    await tester.enterText(field, jwt({'exp': 10}));
+    await tester.pump();
+    await tester.tap(use);
+    await app.settle();
+    expect(
+        find.text('That token expired — ask for a new one.'), findsOneWidget);
+
+    await tester.enterText(field, jwt({'exp': _future}));
+    await tester.pump();
+    await tester.tap(use);
+    await app.settle();
+    expect(find.text('Tap your card'), findsOneWidget);
+  });
+
+  testWidgets('the X leaves the miniapp', (tester) async {
+    final app = await pumpCards(tester, FakeNet({}));
+    await tester.tap(find.byKey(const Key('miniapp-close')));
+    await app.settle();
+    expect(find.text('home'), findsOneWidget);
   });
 }
