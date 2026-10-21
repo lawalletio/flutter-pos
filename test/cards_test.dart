@@ -311,6 +311,9 @@ void main() {
 
     await tester.tap(find.byKey(const Key('topup-set-amount')));
     await run();
+    // The cash register's currency switcher; type the amount in sats.
+    await tester.tap(find.text('SAT'));
+    await tester.pump();
     for (final d in ['1', '00']) {
       await tester.tap(find.text(d));
       await tester.pump(const Duration(milliseconds: 200));
