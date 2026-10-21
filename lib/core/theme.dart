@@ -29,7 +29,8 @@ ThemeData buildAppTheme() {
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         enableFeedback: false,
-        minimumSize: const Size.fromHeight(74), // large POS touch targets (+15%)
+        minimumSize:
+            const Size.fromHeight(74), // large POS touch targets (+15%)
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
       ),
@@ -56,8 +57,13 @@ ThemeData buildAppTheme() {
   );
   // Every InkWell and Material button splashes on press, including the numpad
   // and the hub cards. One factory covers them without wiring each onTap.
-  return theme.copyWith(splashFactory: _ButtonSoundSplash(theme.splashFactory));
+  return withButtonSound(theme);
 }
+
+/// [theme] with the tap click on every InkWell. The Cards miniapp keeps its
+/// own theme and uses this to sound like the rest of the till.
+ThemeData withButtonSound(ThemeData theme) =>
+    theme.copyWith(splashFactory: _ButtonSoundSplash(theme.splashFactory));
 
 class _ButtonSoundSplash extends InteractiveInkFeatureFactory {
   const _ButtonSoundSplash(this._delegate);

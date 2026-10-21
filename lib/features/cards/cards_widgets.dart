@@ -8,6 +8,8 @@ import 'package:lottie/lottie.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../core/theme.dart' show withButtonSound;
+import '../../core/widgets.dart' show recordImage;
 import 'cards_api.dart';
 
 // Ported from card-manager's ui/theme and ui/components. The Cards miniapp
@@ -75,7 +77,7 @@ ThemeData buildCardsTheme() {
     labelMedium: _inter(b.labelMedium),
     labelSmall: _inter(b.labelSmall),
   );
-  return ThemeData(
+  return withButtonSound(ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: nearBlack,
@@ -85,7 +87,7 @@ ThemeData buildCardsTheme() {
       border: OutlineInputBorder(
           borderRadius: BorderRadius.all(Radius.circular(4))),
     ),
-  );
+  ));
 }
 
 /// Near-black canvas with a soft teal glow at the top — the lawallet.io feel.
@@ -101,17 +103,43 @@ class GradientBackground extends StatelessWidget {
 }
 
 class _GlowPainter extends CustomPainter {
+  // Impeller on GLES (the Z92's PowerVR GE8300) shades a radial gradient at
+  // ~75 ms per full-screen frame, and Impeller redraws it under every
+  // animation. A quarter-res bitmap of the same glow, scaled up, costs ~0.
+  static const _scale = 4;
+  static ui.Image? _glow;
+  static Size? _glowSize;
+
+  static ui.Image _render(Size size) {
+    final w = (size.width / _scale).ceil(), h = (size.height / _scale).ceil();
+    return recordImage(
+      w,
+      h,
+      (canvas) => canvas.drawRect(
+        Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+        Paint()
+          ..shader = ui.Gradient.radial(Offset(w / 2, h * 0.16), w * 0.95,
+              [teal.withValues(alpha: 0.22), Colors.transparent]),
+      ),
+    );
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
     canvas.drawRect(rect, Paint()..color = nearBlack);
-    final center = Offset(size.width / 2, size.height * 0.16);
-    canvas.drawRect(
-      rect,
-      Paint()
-        ..shader = ui.Gradient.radial(center, size.width * 0.95,
-            [teal.withValues(alpha: 0.22), Colors.transparent]),
-    );
+    if (size.isEmpty) return;
+    if (_glowSize != size) {
+      _glow?.dispose();
+      _glow = _render(size);
+      _glowSize = size;
+    }
+    final glow = _glow!;
+    canvas.drawImageRect(
+        glow,
+        Rect.fromLTWH(0, 0, glow.width.toDouble(), glow.height.toDouble()),
+        rect,
+        Paint()..filterQuality = FilterQuality.low);
   }
 
   @override
@@ -287,27 +315,54 @@ class _FloatingCardState extends _TickingState<FloatingCard> {
                   fit: BoxFit.cover,
                   semanticLabel: 'Card',
                   errorBuilder: (_, __, ___) => const SizedBox.shrink()),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment(-1.6 + sx, -1.6 + sy),
-                    end: Alignment(1.6 + sx, 1.6 + sy),
-                    colors: [
-                      Colors.transparent,
-                      Colors.white.withValues(alpha: 0.16),
-                      Colors.white.withValues(alpha: 0.30),
-                      Colors.white.withValues(alpha: 0.16),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-              ),
+              CustomPaint(painter: SheenPainter(sx, sy)),
             ]),
           ),
         ),
       ),
     );
   }
+}
+
+/// The card's diagonal sheen: a LinearGradient from Alignment(-1.6+sx,
+/// -1.6+sy) to (1.6+sx, 1.6+sy), drawn along x in a canvas rotated onto that
+/// axis. Impeller on GLES has a fast path for that (~3 ms a frame on the Z92)
+/// but not for the diagonal gradient (~30 ms). Keep the band reaching past
+/// the card: a tighter rect measured slow again.
+class SheenPainter extends CustomPainter {
+  SheenPainter(this.sx, this.sy);
+  final double sx;
+  final double sy;
+
+  static final _colors = [
+    Colors.transparent,
+    Colors.white.withValues(alpha: 0.16),
+    Colors.white.withValues(alpha: 0.30),
+    Colors.white.withValues(alpha: 0.16),
+    Colors.transparent,
+  ];
+  static const _stops = [0.0, 0.25, 0.5, 0.75, 1.0];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final begin = Alignment(-1.6 + sx, -1.6 + sy).alongSize(size);
+    final axis = Alignment(1.6 + sx, 1.6 + sy).alongSize(size) - begin;
+    // Past either end the gradient is transparent, so the band alone covers
+    // it; the card's clip trims the rest.
+    final reach = size.longestSide * 4;
+    canvas
+      ..translate(begin.dx, begin.dy)
+      ..rotate(axis.direction)
+      ..drawRect(
+        Rect.fromLTRB(0, -reach, axis.distance, reach),
+        Paint()
+          ..shader = ui.Gradient.linear(
+              Offset.zero, Offset(axis.distance, 0), _colors, _stops),
+      );
+  }
+
+  @override
+  bool shouldRepaint(SheenPainter old) => old.sx != sx || old.sy != sy;
 }
 
 /// Centered NFC glyph with 3 concentric "radar" rings that expand outward and
@@ -476,6 +531,69 @@ class PrintTicket extends StatelessWidget {
                     fontFamily: 'monospace',
                     fontFamilyFallback: ['Courier'])),
             const SizedBox(height: 8), // small free margin
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// On-screen twin of the printed top-up slip: what was loaded and the balance
+/// after it, on the same torn paper as [PrintTicket].
+class TopUpTicket extends StatelessWidget {
+  const TopUpTicket(
+      {super.key, required this.amount, this.balance, required this.address});
+
+  final String amount;
+  final String? balance;
+  final String address;
+
+  @override
+  Widget build(BuildContext context) {
+    const ink = Color(0xFF0A0A0A);
+    const faint = Color(0xFF6B6B6B);
+    return ClipPath(
+      clipper: _TornPaperClipper(),
+      child: Container(
+        color: const Color(0xFFFBFBF8),
+        padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('LaWallet',
+                style: _inter(const TextStyle(color: ink, fontSize: 20),
+                    FontWeight.w700)),
+            const SizedBox(height: 10),
+            const _DashedDivider(),
+            const SizedBox(height: 14),
+            Text('+$amount',
+                style: _inter(const TextStyle(color: ink, fontSize: 30),
+                    FontWeight.w800)),
+            if (balance != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.account_balance_wallet_outlined,
+                      size: 16, color: faint),
+                  const SizedBox(width: 6),
+                  Text(balance!,
+                      style: _inter(const TextStyle(color: ink, fontSize: 16),
+                          FontWeight.w600)),
+                ],
+              ),
+            ],
+            const SizedBox(height: 14),
+            const _DashedDivider(),
+            const SizedBox(height: 10),
+            Text(address,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: faint,
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    fontFamilyFallback: ['Courier'])),
           ],
         ),
       ),

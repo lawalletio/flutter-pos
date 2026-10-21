@@ -1,18 +1,89 @@
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:go_router/go_router.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../data/nostr/relay_sync_service.dart';
+import '../domain/config/session.dart';
+import 'flow_lock.dart';
 import 'i18n.dart';
+import 'pin_dialog.dart';
 import 'theme.dart';
 import 'ui.dart';
 
 /// Shared UI building blocks for the POS screens.
 
+/// [draw] rasterized once into a [width]×[height] px bitmap. Impeller has no
+/// raster cache, so a static layer is re-shaded every frame anything on screen
+/// animates; radial, sweep and diagonal gradients are slow on the Z92's GPU,
+/// a bitmap of them is ~free.
+ui.Image recordImage(int width, int height, void Function(Canvas canvas) draw) {
+  final recorder = ui.PictureRecorder();
+  draw(Canvas(recorder));
+  final picture = recorder.endRecording();
+  final image = picture.toImageSync(math.max(1, width), math.max(1, height));
+  picture.dispose();
+  return image;
+}
+
+/// [painter]'s QR drawn once into a bitmap, [size] wide or as wide as it can
+/// be, like a `QrImageView` with no padding. A live `QrImageView` re-draws
+/// every module each frame anything on screen animates (a spinner, a
+/// breathing dot): ~28 ms a frame on the Z92.
+class BakedQr extends StatefulWidget {
+  const BakedQr({super.key, required this.painter, this.size});
+  final QrPainter painter;
+  final double? size;
+
+  @override
+  State<BakedQr> createState() => _BakedQrState();
+}
+
+class _BakedQrState extends State<BakedQr> {
+  ui.Image? _image;
+  QrPainter? _painter;
+
+  @override
+  void dispose() {
+    _image?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
+        final side = widget.size ?? box.biggest.shortestSide;
+        final px = (side * MediaQuery.devicePixelRatioOf(context)).ceil();
+        final painter = _painter;
+        if (_image?.width != px ||
+            painter == null ||
+            widget.painter.shouldRepaint(painter)) {
+          _image?.dispose();
+          _image = recordImage(px, px,
+              (c) => widget.painter.paint(c, Size.square(px.toDouble())));
+          _painter = widget.painter;
+        }
+        return Semantics(
+          label: 'qr code',
+          child: RawImage(
+              image: _image, width: side, height: side, fit: BoxFit.fill),
+        );
+      });
+}
+
 /// Top app bar with an optional back button and a settings gear (mirrors the
 /// webapp's `layout/top.tsx` + `Navbar`).
+///
+/// Also the till's lock: [lockFlow] screens show a lock that keeps the till in
+/// that flow (see [lockableFlows]). While locked every screen of the flow
+/// shows only the unlock, which asks for the PIN and goes back to the hub.
 class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String? title;
   final bool showBack;
   final bool showSettings;
+
+  /// Where the gear goes. The rueda points it at its own config.
+  final String settingsRoute;
 
   /// Relay replication indicator, left of the settings gear. Spins while a
   /// sync is running; tapping it opens the progress and the log.
@@ -27,15 +98,20 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// Replaces the default pop. The payment wheel uses this to skip success.
   final VoidCallback? onBack;
 
+  /// The flow this screen starts, a key of [lockableFlows]. Shows the lock.
+  final String? lockFlow;
+
   const PosAppBar({
     super.key,
     this.title,
     this.showBack = true,
     this.showSettings = true,
+    this.settingsRoute = '/settings',
     this.showSync = true,
     this.actions = const [],
     this.showInvoiceDebug = true,
     this.onBack,
+    this.lockFlow,
   });
 
   @override
@@ -43,12 +119,30 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: lockedFlow,
+      builder: (context, locked, _) {
+        final isLocked = locked != null;
+        // The flow's first screen has nothing of the flow behind it.
+        final atStart = isLocked && locked == lockFlow;
+        return PopScope(
+          canPop: !atStart,
+          child: _bar(context, isLocked: isLocked, atStart: atStart),
+        );
+      },
+    );
+  }
+
+  Widget _bar(BuildContext context,
+      {required bool isLocked, required bool atStart}) {
+    final back = showBack && !atStart;
     return AppBar(
       backgroundColor: AppColors.background,
       elevation: 0,
       toolbarHeight: 72,
       leadingWidth: 68,
-      leading: showBack
+      automaticallyImplyLeading: false,
+      leading: back
           ? Padding(
               padding: const EdgeInsets.only(left: 12),
               child: Material(
@@ -75,22 +169,69 @@ class PosAppBar extends StatelessWidget implements PreferredSizeWidget {
                   const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
       actions: [
         ...actions,
-        if (showInvoiceDebug)
+        if (showInvoiceDebug && !isLocked)
           IconButton(
             tooltip: context.tr('Invoices generadas').toUpperCase(),
             icon: const Icon(Icons.bug_report_outlined, size: 26),
             onPressed: () => context.push('/invoice-debug'),
           ),
-        if (showSync) const _SyncAction(),
-        if (showSettings)
+        if (showSync && !isLocked) const _SyncAction(),
+        // Not mid-charge or mid-print: those screens hide back too.
+        FlowLockButton(flow: lockFlow, enabled: showBack),
+        if (showSettings && !isLocked)
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: IconButton(
               icon: const Icon(Icons.settings_outlined, size: 26),
-              onPressed: () => context.push('/settings'),
+              onPressed: () => context.push(settingsRoute),
             ),
           ),
       ],
+    );
+  }
+}
+
+/// The till's lock (see [lockableFlows]). Unlocked, on a [flow] screen, it
+/// locks to that flow; locked, on any screen, it asks for the PIN, unlocks and
+/// goes back to the hub. Nothing otherwise.
+class FlowLockButton extends StatelessWidget {
+  const FlowLockButton({super.key, this.flow, this.enabled = true, this.color});
+
+  final String? flow;
+  final bool enabled;
+
+  /// Of the open lock; the closed one is always the primary color.
+  final Color? color;
+
+  Future<void> _unlock(BuildContext context) async {
+    if (!await confirmMiniappPin(context, action: 'Desbloquear')) return;
+    lockedFlow.value = null;
+    if (context.mounted) {
+      context.go(merchantAddress.value.isEmpty ? '/' : '/hub');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: lockedFlow,
+      builder: (context, locked, _) {
+        if (locked != null) {
+          return IconButton(
+            key: const Key('flow-unlock'),
+            tooltip: context.tr('Desbloquear').toUpperCase(),
+            icon: const Icon(Icons.lock, size: 26, color: AppColors.primary),
+            onPressed: enabled ? () => _unlock(context) : null,
+          );
+        }
+        if (flow == null) return const SizedBox.shrink();
+        return IconButton(
+          key: const Key('flow-lock'),
+          tooltip: context.tr('Bloquear').toUpperCase(),
+          icon: Icon(Icons.lock_open_outlined, size: 26, color: color),
+          onPressed: () => lockedFlow.value = flow,
+        );
+      },
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:lottie/lottie.dart';
 import '../../core/i18n.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
+import '../../core/widgets.dart' show recordImage;
 
 /// Cinematic NFC charge. The timeline is staged so the cashier always sees
 /// the process moving; a real settlement disposes this widget and cuts it off.
@@ -192,42 +193,54 @@ class _Stage extends StatelessWidget {
   final _Beat beat;
   final bool tick;
 
+  // Impeller on GLES re-shaded this radial glow under every Lottie frame
+  // (~27 ms a frame on the Z92); a quarter-size bitmap of it is ~free.
+  static final _glow = recordImage(70, 70, (canvas) {
+    const box = Rect.fromLTWH(0, 0, 70, 70);
+    canvas.drawCircle(
+      box.center,
+      35,
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            AppColors.primary.withValues(alpha: 0.16),
+            AppColors.primary.withValues(alpha: 0),
+          ],
+          stops: const [0.2, 0.72],
+        ).createShader(box),
+    );
+  });
+
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: 280,
       height: 280,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [
-              AppColors.primary.withValues(alpha: 0.16),
-              AppColors.primary.withValues(alpha: 0),
-            ],
-            stops: const [0.2, 0.72],
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          RawImage(image: _glow, fit: BoxFit.fill),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 320),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeIn,
+            child: tick
+                ? Lottie.asset(
+                    'assets/lottie/tick.json',
+                    key: const ValueKey('tick'),
+                    repeat: false,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  )
+                : Lottie.asset(
+                    beat.asset,
+                    key: ValueKey(beat.asset),
+                    repeat: beat.loop,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
           ),
-        ),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 320),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeIn,
-          child: tick
-              ? Lottie.asset(
-                  'assets/lottie/tick.json',
-                  key: const ValueKey('tick'),
-                  repeat: false,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.high,
-                )
-              : Lottie.asset(
-                  beat.asset,
-                  key: ValueKey(beat.asset),
-                  repeat: beat.loop,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.high,
-                ),
-        ),
+        ],
       ),
     );
   }

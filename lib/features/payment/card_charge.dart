@@ -56,12 +56,17 @@ class CardCharge {
     if (!available) return;
     onChange();
     await NfcChannel.startSession();
-    _sub = NfcChannel.tags().listen((cardUrl) {
-      if (!waiting() || collecting || !canTap() || invoice() == null) return;
-      AppSounds.play(AppSound.card);
-      NfcChannel.vibrate();
-      _collect(cardUrl);
-    });
+    _sub = NfcChannel.tags().listen(tap);
+  }
+
+  /// A card tapped while the invoice waits. [arm] feeds the reader's taps
+  /// here; a screen that already holds the reader (Cards) calls it itself,
+  /// since a second listener would steal the native tag stream.
+  void tap(String cardUrl) {
+    if (!waiting() || collecting || !canTap() || invoice() == null) return;
+    AppSounds.play(AppSound.card);
+    NfcChannel.vibrate();
+    _collect(cardUrl);
   }
 
   void stop() {

@@ -54,8 +54,15 @@ class PrinterChannel {
   /// Cards miniapp slip: "LaWallet", [subtitle], the [qr] PNG and [caption].
   static Future<PrintResult> printCardQr(
           {required Uint8List qr, required String subtitle, String? caption}) =>
-      _invoke('printCardQr',
-          {'qr': qr, 'subtitle': subtitle, 'caption': caption});
+      _invoke(
+          'printCardQr', {'qr': qr, 'subtitle': subtitle, 'caption': caption});
+
+  /// Cards top-up slip: "LaWallet", +[amount], the [balance] after it, the
+  /// owner's [address] and the date. Amounts arrive formatted.
+  static Future<PrintResult> printCardTopUp(
+          {required String amount, String? balance, String? address}) =>
+      _invoke('printCardTopUp',
+          {'amount': amount, 'balance': balance, 'address': address});
 
   static Future<PrintResult> _invoke(String method, [dynamic args]) async {
     try {

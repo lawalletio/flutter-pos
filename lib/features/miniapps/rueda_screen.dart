@@ -27,7 +27,7 @@ bool _setRueda(List<PrizeCoupon>? next) {
 }
 
 /// Rueda de la fortuna miniapp: the wheel on its own, with the coupons from
-/// settings or a custom set. Gear and X ask for the miniapp PIN.
+/// settings or a custom set. The navbar's lock keeps players in it.
 class RuedaScreen extends StatelessWidget {
   const RuedaScreen({super.key});
 

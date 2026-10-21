@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/i18n.dart';
-import '../../core/pin_dialog.dart';
 import '../../core/print_error.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
@@ -98,8 +97,9 @@ class PrizeWheelScreen extends StatefulWidget {
   /// When set, back leaves the payment flow for this route instead of success.
   final String? returnTo;
 
-  /// Rueda de la fortuna miniapp: no back, gear and X behind the PIN, prints
-  /// only when the miniapp says so, and a prize resets for the next player.
+  /// Rueda de la fortuna miniapp: lockable from the navbar, gear opens its
+  /// config, prints only when the miniapp says so, and a prize resets for the
+  /// next player.
   final bool miniapp;
 
   @override
@@ -616,45 +616,20 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
     final busy = _phase == _Phase.spinning || _printGate;
     return PosAppBar(
       title: context.tr('Rueda de la fortuna'),
-      showBack: false,
-      showSettings: false,
+      lockFlow: '/rueda',
+      showBack: !busy,
+      showSettings: !busy,
+      settingsRoute: '/rueda/config',
       showSync: false,
       showInvoiceDebug: false,
-      actions: [
-        IconButton(
-          key: const Key('rueda-config'),
-          icon: const Icon(Icons.settings_outlined, size: 28),
-          onPressed: busy ? null : _openConfig,
-        ),
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: IconButton(
-            key: const Key('miniapp-close'),
-            icon: const Icon(Icons.close, size: 30),
-            onPressed: busy ? null : _close,
-          ),
-        ),
-      ],
     );
-  }
-
-  Future<void> _openConfig() async {
-    if (await confirmMiniappPin(context, action: 'Entrar') && mounted) {
-      context.push('/rueda/config');
-    }
-  }
-
-  Future<void> _close() async {
-    if (await confirmMiniappPin(context, action: 'Salir') && mounted) {
-      context.go('/');
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     final leavePayment = widget.returnTo != null && widget.returnTo!.isNotEmpty;
     return PopScope(
-      canPop: !widget.miniapp && !leavePayment && !_printGate,
+      canPop: !leavePayment && !_printGate,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _leave();
       },
@@ -684,7 +659,7 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
     return Stack(
       fit: StackFit.expand,
       children: [
-        RepaintBoundary(child: CustomPaint(painter: _BackdropPainter(geo))),
+        RawImage(image: art.backdrop, fit: BoxFit.fill),
         ClipRect(
           child: Stack(
             fit: StackFit.expand,
@@ -694,7 +669,7 @@ class _PrizeWheelScreenState extends State<PrizeWheelScreen>
                   painter: _DiscPainter(motion: _motion, art: art, arcs: _arcs),
                 ),
               ),
-              RepaintBoundary(child: CustomPaint(painter: _FramePainter(geo))),
+              RawImage(image: art.frame, fit: BoxFit.fill),
               RepaintBoundary(
                 child: CustomPaint(
                   painter: _RimPainter(motion: _motion, art: art),
@@ -930,11 +905,11 @@ bool _offscreen(Offset at, Size size, double pad) =>
     at.dx > size.width + pad ||
     at.dy > size.height + pad;
 
-/// Everything that moves, rasterized once per size. A frame is then a few
-/// image draws instead of paths, gradients and text.
+/// The wheel's art, moving and fixed, rasterized once per size. A frame is
+/// then a few image draws instead of paths, gradients and text.
 class _Art {
   _Art._(this.geo, this.dpr, this.disc, this.rays, this.bulb, this.pointer,
-      this.pointerRect);
+      this.pointerRect, this.backdrop, this.frame);
 
   factory _Art.paint(
       _Geo geo, double dpr, List<WheelSlice> slices, List<Color> colors) {
@@ -947,6 +922,8 @@ class _Art {
       _paintBulb(geo, dpr),
       pointer,
       pointerRect,
+      _bake(geo, dpr, _BackdropPainter(geo)),
+      _bake(geo, dpr, _FramePainter(geo)),
     );
   }
 
@@ -957,6 +934,8 @@ class _Art {
   final ui.Image bulb;
   final ui.Image pointer;
   final Rect pointerRect;
+  final ui.Image backdrop;
+  final ui.Image frame;
 
   double get raysRadius => geo.outer * 1.9;
 
@@ -965,16 +944,21 @@ class _Art {
     rays.dispose();
     bulb.dispose();
     pointer.dispose();
+    backdrop.dispose();
+    frame.dispose();
   }
 }
 
-ui.Image _record(int width, int height, void Function(Canvas canvas) draw) {
-  final recorder = ui.PictureRecorder();
-  draw(Canvas(recorder));
-  final picture = recorder.endRecording();
-  final image = picture.toImageSync(width, height);
-  picture.dispose();
-  return image;
+/// [painter] over the whole screen, once. Impeller has no raster cache, so
+/// its radial, sweep and diagonal gradients were re-shaded every frame; on
+/// the Z92's GPU that alone held the wheel to ~5 fps.
+ui.Image _bake(_Geo g, double dpr, CustomPainter painter) {
+  final size = g.size;
+  return recordImage((size.width * dpr).ceil(), (size.height * dpr).ceil(),
+      (canvas) {
+    canvas.scale(dpr);
+    painter.paint(canvas, size);
+  });
 }
 
 Color _shade(Color color, double amount) => amount < 0
@@ -985,7 +969,7 @@ ui.Image _paintDisc(
     _Geo g, double dpr, List<WheelSlice> slices, List<Color> colors) {
   final r = g.disc;
   final px = (2 * r * dpr).ceil();
-  return _record(px, px, (canvas) {
+  return recordImage(px, px, (canvas) {
     canvas.scale(px / (2 * r));
     canvas.translate(r, r);
     final bounds = Rect.fromCircle(center: Offset.zero, radius: r);
@@ -1131,7 +1115,7 @@ TextPainter _labelPainter(
 ui.Image _paintRays(_Geo g) {
   final r = g.outer * 1.9;
   final px = math.max(64, r.ceil());
-  return _record(px, px, (canvas) {
+  return recordImage(px, px, (canvas) {
     canvas.scale(px / (2 * r));
     canvas.translate(r, r);
     final bounds = Rect.fromCircle(center: Offset.zero, radius: r);
@@ -1165,7 +1149,7 @@ ui.Image _paintRays(_Geo g) {
 ui.Image _paintBulb(_Geo g, double dpr) {
   final r = g.bulb * 2.8;
   final px = math.max(8, (2 * r * dpr).ceil());
-  return _record(px, px, (canvas) {
+  return recordImage(px, px, (canvas) {
     canvas.scale(px / (2 * r));
     canvas.translate(r, r);
     canvas.drawCircle(
@@ -1204,7 +1188,7 @@ Path _flapperPath(double cap, double length) => Path()
   final length = g.pointerLength;
   final pad = cap * 0.7;
   final rect = Rect.fromLTRB(-cap - pad, -cap - pad, cap + pad, length + pad);
-  final image = _record(
+  final image = recordImage(
     (rect.width * dpr).ceil(),
     (rect.height * dpr).ceil(),
     (canvas) {
