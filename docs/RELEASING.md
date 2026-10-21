@@ -161,9 +161,31 @@ The workflow can't submit if one of these is true:
 - a license agreement is waiting to be accepted;
 - a previous version is still in review. Remove it from review, or wait for it
   to finish;
-- the build number was already uploaded.
+- the build number was already uploaded;
+- a previous version was rejected and its submission is still open.
 
 The job fails with Apple's message in each case.
+
+#### After a rejection
+
+When App Review rejects a version, or asks for more information (Guideline
+2.1), its submission stays open as **Unresolved issues** until you act on it:
+
+1. Answer Apple under **App Review › the submission › Reply to App Review**.
+   Attach files there, such as a screen recording. Also copy the answers into the
+   version's **App Review Information › Notes**, so later reviews have them.
+2. If the fix needs a new build, bump the version and publish the GitHub release
+   as usual. The workflow renames the rejected version to the new number,
+   uploads the build and attaches it. It then fails at the submit step with
+   `A review submission is already in progress`. That's expected.
+3. In App Store Connect, open the version page and click **Update Review**.
+   The item in the submission changes to *Ready for Review*. Then open the
+   submission and click **Resubmit to App Review**. Until you click Update
+   Review, the Resubmit button stays disabled. This keeps Apple's message
+   thread with your reply. Canceling the submission and creating a new one
+   loses it.
+
+If the answer alone resolves it and no new build is needed, skip step 2.
 
 ### Build and upload by hand
 
