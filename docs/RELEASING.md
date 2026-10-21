@@ -178,9 +178,12 @@ When App Review rejects a version, or asks for more information (Guideline
    as usual. The workflow renames the rejected version to the new number,
    uploads the build and attaches it. It then fails at the submit step with
    `A review submission is already in progress`. That's expected.
-3. In App Store Connect, open the submission and click **Resubmit to App
-   Review**. This keeps Apple's message thread with your reply. Canceling the
-   submission and creating a new one loses it.
+3. In App Store Connect, open the version page and click **Update Review**.
+   The item in the submission changes to *Ready for Review*. Then open the
+   submission and click **Resubmit to App Review**. Until you click Update
+   Review, the Resubmit button stays disabled. This keeps Apple's message
+   thread with your reply. Canceling the submission and creating a new one
+   loses it.
 
 If the answer alone resolves it and no new build is needed, skip step 2.
 
