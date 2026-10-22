@@ -92,7 +92,7 @@ class AppSounds {
     final specific = switch (sound) {
       // Much quieter than the other cues at the same slider position: it
       // plays on every press.
-      AppSound.button => settings.touchVolume * 0.15,
+      AppSound.button => settings.touchVolume * 0.105,
       AppSound.paid => settings.paidVolume,
       _ => 1.0,
     };

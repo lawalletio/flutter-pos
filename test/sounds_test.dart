@@ -23,7 +23,7 @@ void main() {
     AppSounds.play(AppSound.card);
     await Future<void>.delayed(Duration.zero);
 
-    expect(played['button'], closeTo(0.15, 1e-9));
+    expect(played['button'], closeTo(0.105, 1e-9));
     expect(played['card'], 1.0);
   });
 }
