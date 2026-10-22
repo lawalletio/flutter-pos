@@ -55,6 +55,7 @@ android {
                 signingConfigs.getByName("release")
             else
                 signingConfigs.getByName("debug")
+            proguardFiles("proguard-rules.pro")
         }
     }
 }

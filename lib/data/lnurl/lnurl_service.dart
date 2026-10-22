@@ -14,6 +14,21 @@ import '../nostr/signer.dart';
 import 'bech32_lnurl.dart';
 import 'lnurl_helpers.dart';
 
+/// Short cause of a failed request, for the error line.
+String _reason(Object e) {
+  if (e is! DioException) return e.runtimeType.toString();
+  final code = e.response?.statusCode;
+  if (code != null) return 'HTTP $code';
+  return switch (e.type) {
+    DioExceptionType.connectionTimeout ||
+    DioExceptionType.receiveTimeout ||
+    DioExceptionType.sendTimeout =>
+      'sin respuesta',
+    DioExceptionType.connectionError => 'sin conexión',
+    _ => e.type.name,
+  };
+}
+
 /// dio on web often hands back the JSON body as a String; normalize to a Map.
 Map<String, dynamic>? _asMap(dynamic data) {
   if (data is Map) return data.cast<String, dynamic>();
@@ -28,7 +43,10 @@ Map<String, dynamic>? _asMap(dynamic data) {
 
 class LnurlException implements Exception {
   final String message;
-  LnurlException(this.message);
+
+  /// The underlying error, for the on-screen debug box.
+  final String? detail;
+  LnurlException(this.message, {this.detail});
   @override
   String toString() => message;
 }
@@ -89,7 +107,9 @@ class LnurlService {
     try {
       res = await _dio.getUri(Uri.parse(lud16ToUrl(address)));
     } catch (e) {
-      throw LnurlException('No se pudo resolver la dirección Lightning');
+      throw LnurlException(
+          'No se pudo resolver la dirección Lightning (${_reason(e)})',
+          detail: 'GET ${lud16ToUrl(address)}\n$e');
     }
     final data = _asMap(res.data);
     if (data == null || data['tag'] != 'payRequest' || data['callback'] == null) {
@@ -176,7 +196,9 @@ class LnurlService {
     try {
       res = await _dio.getUri(Uri.parse('${params.callback}$sep$query'));
     } catch (e) {
-      throw LnurlException('No se pudo generar la invoice');
+      throw LnurlException(
+          'El proveedor no entregó la invoice (${_reason(e)})',
+          detail: 'GET ${params.callback}$sep$query\n$e');
     }
     final data = _asMap(res.data);
     if (data == null || data['pr'] == null) {
