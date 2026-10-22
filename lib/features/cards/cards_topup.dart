@@ -770,16 +770,10 @@ class _TopUpDoneState extends State<_TopUpDone> with TickerProviderStateMixin {
   late final _burst = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 1100))
     ..forward();
+  // The slip waits for the burst's first beat: 450 ms of a 1850 ms run.
   late final _slip = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 1400));
-
-  @override
-  void initState() {
-    super.initState();
-    Future<void>.delayed(const Duration(milliseconds: 450), () {
-      if (mounted) _slip.forward();
-    });
-  }
+      vsync: this, duration: const Duration(milliseconds: 1850))
+    ..forward();
 
   @override
   void dispose() {
@@ -793,7 +787,9 @@ class _TopUpDoneState extends State<_TopUpDone> with TickerProviderStateMixin {
     final t = Theme.of(context).textTheme;
     final r = widget.receipt;
     final after = r.after;
-    final slip = CurvedAnimation(parent: _slip, curve: Curves.easeOutCubic);
+    final slip = CurvedAnimation(
+        parent: _slip,
+        curve: const Interval(450 / 1850, 1, curve: Curves.easeOutCubic));
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
       child: Column(
