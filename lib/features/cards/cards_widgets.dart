@@ -682,24 +682,15 @@ class TokenScanPage extends StatefulWidget {
 }
 
 class _TokenScanPageState extends State<TokenScanPage> {
-  final _controller = MobileScannerController(
-    detectionSpeed: DetectionSpeed.noDuplicates,
-    formats: const [BarcodeFormat.qrCode],
-  );
+  // The scanner owns its controller: that way it also stops the camera when
+  // the app goes to the background, which a controller we pass in doesn't.
   bool _done = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: Colors.black,
         body: Stack(fit: StackFit.expand, children: [
           MobileScanner(
-            controller: _controller,
             onDetect: (capture) {
               final raw = capture.barcodes.firstOrNull?.rawValue;
               if (_done || raw == null) return;
