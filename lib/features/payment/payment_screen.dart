@@ -74,6 +74,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _invoice; // bolt11
   String? _verifyUrl; // LUD-21
   String? _invoiceError;
+
+  /// Raw cause behind [_invoiceError], shown in a box for debugging.
+  String? _invoiceDebug;
   bool _printStarted = false;
   late final _card = CardCharge(
     invoice: () => _invoice,
@@ -293,6 +296,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     _zap = null;
     setState(() {
       _invoiceError = null;
+      _invoiceDebug = null;
       _invoice = null;
       _verifyUrl = null;
     });
@@ -339,17 +343,26 @@ class _PaymentScreenState extends State<PaymentScreen> {
       _startZapWatch(inv); // NIP-57: watch relays for the zap receipt
       _card.arm(); // arm the card reader while pending
     } on LnurlException catch (e) {
+      debugPrint('Invoice: ${e.message}\n${e.detail ?? ''}');
       if (!mounted || gen != _invoiceGen) return;
       setState(() {
         _invoiceError = e.message;
+        _invoiceDebug = _debugContext(e.detail ?? e.message);
       });
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('Invoice: $e\n$st');
       if (!mounted || gen != _invoiceGen) return;
       setState(() {
-        _invoiceError = 'No se pudo generar la invoice';
+        _invoiceError = 'Error inesperado: ${e.runtimeType}';
+        _invoiceDebug = _debugContext('$e\n\n$st');
       });
     }
   }
+
+  String _debugContext(String cause) => 'Dirección: ${merchantAddress.value}\n'
+      'Monto: $_chargeSats sats\n'
+      'Relays: ${appSettings.value.relays.join(', ')}\n\n'
+      '$cause';
 
   void _startPolling() {
     final url = _verifyUrl;
@@ -844,6 +857,24 @@ class _PaymentScreenState extends State<PaymentScreen> {
           Text(context.tr(_invoiceError ?? ''),
               textAlign: TextAlign.center,
               style: const TextStyle(color: AppColors.muted)),
+          if (_invoiceDebug != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 220),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                border: Border.all(color: AppColors.muted.withValues(alpha: 0.4)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: SingleChildScrollView(
+                child: SelectableText(_invoiceDebug!,
+                    style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 11,
+                        color: AppColors.muted)),
+              ),
+            ),
+          ],
           const SizedBox(height: 28),
           Row(
             children: [
