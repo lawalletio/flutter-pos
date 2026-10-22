@@ -90,9 +90,9 @@ class AppSounds {
     final settings = appSettings.value;
     if (!settings.soundEnabled) return 0;
     final specific = switch (sound) {
-      // Half as loud as the other cues at the same slider position: it plays
-      // on every press.
-      AppSound.button => settings.touchVolume * 0.5,
+      // Much quieter than the other cues at the same slider position: it
+      // plays on every press.
+      AppSound.button => settings.touchVolume * 0.15,
       AppSound.paid => settings.paidVolume,
       _ => 1.0,
     };
