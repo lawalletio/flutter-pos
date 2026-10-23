@@ -13,6 +13,7 @@ class SettingsPersistence {
   static const _keySoundVolume = 'soundVolume';
   static const _keyTouchVolume = 'touchVolume';
   static const _keyPaidVolume = 'paidVolume';
+  static const _keyTipShowTotals = 'tipShowTotals';
   static const _keyTillByAddress = 'tillSettingsByAddress';
 
   SharedPreferences? _prefs;
@@ -47,6 +48,7 @@ class SettingsPersistence {
       soundVolume: _unit(p.getDouble(_keySoundVolume)),
       touchVolume: _unit(p.getDouble(_keyTouchVolume)),
       paidVolume: _unit(p.getDouble(_keyPaidVolume)),
+      tipShowTotals: p.getBool(_keyTipShowTotals) ?? true,
     );
     _ready = true;
     _boundAddress = '';
@@ -103,6 +105,11 @@ class SettingsPersistence {
     await p.setDouble(_keyPaidVolume, s.paidVolume);
   }
 
+  Future<void> saveTipShowTotals(bool v) async {
+    final p = await _p;
+    await p.setBool(_keyTipShowTotals, v);
+  }
+
   Future<void> savePaidSound(String id) async {
     final p = await _p;
     await p.setString(_keyPaidSound, id);
@@ -153,6 +160,11 @@ Future<void> flushPrizeSettings() => _prizeWrites;
 void setPaidSound(String id) {
   appSettings.value = appSettings.value.copyWith(paidSoundId: id);
   settingsPersistence.savePaidSound(id).ignore();
+}
+
+void setTipShowTotals(bool v) {
+  appSettings.value = appSettings.value.copyWith(tipShowTotals: v);
+  settingsPersistence.saveTipShowTotals(v).ignore();
 }
 
 void _persistSoundMix() {

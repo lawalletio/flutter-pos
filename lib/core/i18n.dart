@@ -128,6 +128,9 @@ const Map<String, String> _en = {
   'Propina': 'Tip',
   '¿Cuánto dejás de propina?': 'How much would you like to tip?',
   'Total sin propina': 'Total without tip',
+  'Totales en propina': 'Tip totals',
+  'Mostrar total en sats y ARS en cada opción':
+      'Show the sats and ARS total on each option',
   'NO QUIERO DEJAR PROPINA': 'NO TIP',
   'Continuar': 'Continue',
 
