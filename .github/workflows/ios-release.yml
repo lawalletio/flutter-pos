@@ -118,6 +118,44 @@ jobs:
             exit 1
           fi
 
+      - name: Check nothing is waiting in App Review
+        env:
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          # deliver renames a version that is in review and uploads the build
+          # before Apple refuses to attach it, so stop before it changes anything.
+          # The JWT is signed with the key written above.
+          token=$(ruby -rjson -ropenssl -rbase64 -e '
+            k = JSON.parse(File.read(ARGV[0]))
+            b64 = ->(s) { Base64.urlsafe_encode64(s, padding: false) }
+            now = Time.now.to_i
+            input = [{ alg: "ES256", kid: k["key_id"], typ: "JWT" },
+                     { iss: k["issuer_id"], iat: now, exp: now + 600, aud: "appstoreconnect-v1" }]
+                    .map { |h| b64.(JSON.dump(h)) }.join(".")
+            der = OpenSSL::PKey::EC.new(k["key"]).sign(OpenSSL::Digest.new("SHA256"), input)
+            sig = OpenSSL::ASN1.decode(der).value.map { |n| n.value.to_s(2).rjust(32, "\0") }.join
+            puts "#{input}.#{b64.(sig)}"' "$RUNNER_TEMP/asc_api_key.json")
+          api() { curl -gfsS -H "Authorization: Bearer $token" "https://api.appstoreconnect.apple.com/v1/$1"; }
+          versions=$(api "apps/6824332449/appStoreVersions?filter[platform]=IOS&include=build&fields[builds]=version&limit=200")
+          # Not UNRESOLVED_ISSUES: after a rejection the release is meant to run.
+          submissions=$(api "reviewSubmissions?filter[app]=6824332449&filter[platform]=IOS&filter[state]=WAITING_FOR_REVIEW,IN_REVIEW,CANCELING&include=appStoreVersionForReview")
+          problems=$(jq -nr --argjson v "$versions" --argjson s "$submissions" '
+            def names($r; $attr): $r.included // [] | map({key: .id, value: .attributes[$attr]}) | from_entries;
+            names($v; "version") as $builds | names($s; "versionString") as $forReview
+            | ($v.data[] | (.attributes.appStoreState // .attributes.appVersionState) as $state
+                | select($state | IN("WAITING_FOR_REVIEW", "IN_REVIEW", "PENDING_DEVELOPER_RELEASE"))
+                | "Version \(.attributes.versionString) is \($state) with build \($builds[.relationships.build.data.id // ""] // "none")"),
+              ($s.data[] | "Review submission for version \($forReview[.relationships.appStoreVersionForReview.data.id // ""] // "?") is \(.attributes.state)")')
+          if [[ -z "$problems" ]]; then
+            echo "Nothing is waiting in App Review."
+            exit 0
+          fi
+          level=error; [[ "$DRY_RUN" == true ]] && level=warning
+          while IFS= read -r p; do
+            echo "::$level::$p. Remove it from review in App Store Connect (or wait for it to finish) before releasing."
+          done <<< "$problems"
+          [[ "$DRY_RUN" == true ]] || exit 1
+
       - name: Write release notes
         env:
           RELEASE_BODY: ${{ github.event.release.body }}

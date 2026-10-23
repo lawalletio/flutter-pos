@@ -160,7 +160,7 @@ When the certificate or profile is renewed (next: 2027-10-18), update the three
 The workflow can't submit if one of these is true:
 - a license agreement is waiting to be accepted;
 - a previous version is still in review. Remove it from review, or wait for it
-  to finish;
+  to finish. A check stops the job before it renames or uploads anything;
 - the build number was already uploaded;
 - a previous version was rejected and its submission is still open.
 
