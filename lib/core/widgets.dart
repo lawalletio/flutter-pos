@@ -32,8 +32,15 @@ ui.Image recordImage(int width, int height, void Function(Canvas canvas) draw) {
 /// every module each frame anything on screen animates (a spinner, a
 /// breathing dot): ~28 ms a frame on the Z92.
 class BakedQr extends StatefulWidget {
-  const BakedQr({super.key, required this.painter, this.size});
+  const BakedQr(
+      {super.key, required this.painter, required this.moduleCount, this.size});
   final QrPainter painter;
+
+  /// The painted code's [QrCode.moduleCount]. QrPainter rounds a module to the
+  /// nearest half pixel; rounded up, the code outgrows the bitmap and its
+  /// edges are cut off. Sizing the bitmap to a whole number of half-pixel
+  /// modules keeps every module in.
+  final int moduleCount;
   final double? size;
 
   @override
@@ -53,7 +60,10 @@ class _BakedQrState extends State<BakedQr> {
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
         final side = widget.size ?? box.biggest.shortestSide;
-        final px = (side * MediaQuery.devicePixelRatioOf(context)).ceil();
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        final n = widget.moduleCount;
+        final module = (side * dpr / n * 2).floorToDouble() / 2;
+        final px = (module * n).round();
         final painter = _painter;
         if (_image?.width != px ||
             painter == null ||
@@ -63,10 +73,18 @@ class _BakedQrState extends State<BakedQr> {
               (c) => widget.painter.paint(c, Size.square(px.toDouble())));
           _painter = widget.painter;
         }
-        return Semantics(
-          label: 'qr code',
-          child: RawImage(
-              image: _image, width: side, height: side, fit: BoxFit.fill),
+        return SizedBox.square(
+          dimension: side,
+          child: Center(
+            child: Semantics(
+              label: 'qr code',
+              child: RawImage(
+                  image: _image,
+                  width: px / dpr,
+                  height: px / dpr,
+                  fit: BoxFit.fill),
+            ),
+          ),
         );
       });
 }

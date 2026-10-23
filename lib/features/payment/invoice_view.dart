@@ -246,19 +246,24 @@ class _InvoiceViewState extends State<InvoiceView>
                 ),
               ),
               child: ready
-                  ? BakedQr(
-                      key: const ValueKey('qr'),
-                      painter: QrPainter(
-                        data: (widget.invoice ?? '').toUpperCase(),
-                        version: QrVersions.auto,
-                        gapless: true,
-                      ),
-                    )
+                  ? _invoiceQr()
                   : const _QrScramble(key: ValueKey('scramble')),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _invoiceQr() {
+    final qr = QrValidator.validate(
+      data: (widget.invoice ?? '').toUpperCase(),
+      version: QrVersions.auto,
+    ).qrCode!;
+    return BakedQr(
+      key: const ValueKey('qr'),
+      moduleCount: qr.moduleCount,
+      painter: QrPainter.withQr(qr: qr, gapless: true),
     );
   }
 }
