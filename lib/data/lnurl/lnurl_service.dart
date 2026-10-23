@@ -29,6 +29,18 @@ String _reason(Object e) {
   };
 }
 
+/// The request may have reached the server: it timed out after connecting,
+/// dropped mid-flight, or a gateway (5xx) cut it off. Only a refused connection
+/// or a 4xx is a certain "not charged".
+bool _outcomeUnknown(DioException e) => switch (e.type) {
+      DioExceptionType.connectionTimeout ||
+      DioExceptionType.badCertificate ||
+      DioExceptionType.cancel =>
+        false,
+      DioExceptionType.badResponse => (e.response?.statusCode ?? 0) >= 500,
+      _ => true,
+    };
+
 /// dio on web often hands back the JSON body as a String; normalize to a Map.
 Map<String, dynamic>? _asMap(dynamic data) {
   if (data is Map) return data.cast<String, dynamic>();
@@ -318,13 +330,23 @@ class LnurlService {
 
     final Response cres;
     try {
-      cres = await _dio.getUri(Uri.parse(
-          '$callback${sep}k1=${Uri.encodeComponent(k1)}&pr=${Uri.encodeComponent(invoice)}'));
+      cres = await _dio.getUri(
+          Uri.parse(
+              '$callback${sep}k1=${Uri.encodeComponent(k1)}&pr=${Uri.encodeComponent(invoice)}'),
+          // The card server pays before it answers, and a cold start plus the
+          // wallet round trip can run past the default 10s.
+          options: Options(receiveTimeout: const Duration(seconds: 30)));
     } catch (e) {
+      // No answer is not a refusal: the card may already be charged. Return
+      // and let the verify poll decide, instead of telling the cashier it
+      // failed while the money lands.
+      if (e is DioException && _outcomeUnknown(e)) return;
       throw LnurlException('No se pudo completar el pago con la tarjeta');
     }
     final c = _asMap(cres.data);
     if (c != null && c['status'] == 'ERROR') {
+      // Retry-After marks "still being resolved", not a rejection.
+      if (cres.headers.value('retry-after') != null) return;
       throw LnurlException(c['reason']?.toString() ?? 'Pago con tarjeta rechazado');
     }
     // status OK — the withdraw service pays the invoice; settlement is detected

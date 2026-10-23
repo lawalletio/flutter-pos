@@ -585,14 +585,16 @@ class MainActivity : FlutterActivity() {
         p.setPrintAppendString("--------------------------------", normal)
         p.setPrintLine(1)
 
-        // Line items: "name (price) x qty".
+        // Line items: "name (price) x qty", larger than the rest so the bar can
+        // read what to serve at a glance.
+        val item = fmt(26, Layout.Alignment.ALIGN_NORMAL)
         val items = order["items"] as? List<*> ?: emptyList<Any>()
         for (it in items) {
             val m = it as? Map<*, *> ?: continue
             val name = m["name"]?.toString() ?: ""
             val qty = (m["qty"] as? Number)?.toInt() ?: 1
             val price = m["price"]?.toString() ?: ""
-            p.setPrintAppendString("$name ($price) x $qty", normal)
+            p.setPrintAppendString("$name ($price) x $qty", item)
             p.setPrintLine(1)
         }
 
