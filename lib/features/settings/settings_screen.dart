@@ -226,6 +226,18 @@ class SettingsSectionScreen extends StatelessWidget {
               ),
               const Divider(height: 1),
               SwitchListTile(
+                key: const Key('tip-show-totals'),
+                contentPadding: EdgeInsets.zero,
+                activeTrackColor: AppColors.primary,
+                title: Text(context.tr('Totales en propina')),
+                subtitle: Text(
+                    context.tr('Mostrar total en sats y ARS en cada opción'),
+                    style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                value: s.tipShowTotals,
+                onChanged: s.tipEnabled ? setTipShowTotals : null,
+              ),
+              const Divider(height: 1),
+              SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 activeTrackColor: AppColors.primary,
                 title: Text(context.tr('Cuentas (tabs)')),

@@ -134,6 +134,9 @@ class SettingsState {
   /// [WheelOffer.tipOnly] shows the spin button only after a tip.
   final WheelOffer wheelOffer;
 
+  /// Show "total sats · ≈ ARS" under each tip option.
+  final bool tipShowTotals;
+
   const SettingsState({
     this.tipEnabled = false, // webapp default: off
     this.tabEnabled = false, // webapp default: off
@@ -152,6 +155,7 @@ class SettingsState {
     this.wheelAcceleration = 1,
     this.wheelPracticePrint = false,
     this.wheelOffer = WheelOffer.tipOnly,
+    this.tipShowTotals = true,
   });
 
   SettingsState copyWith({
@@ -172,6 +176,7 @@ class SettingsState {
     double? wheelAcceleration,
     bool? wheelPracticePrint,
     WheelOffer? wheelOffer,
+    bool? tipShowTotals,
   }) =>
       SettingsState(
         tipEnabled: tipEnabled ?? this.tipEnabled,
@@ -191,6 +196,7 @@ class SettingsState {
         wheelAcceleration: wheelAcceleration ?? this.wheelAcceleration,
         wheelPracticePrint: wheelPracticePrint ?? this.wheelPracticePrint,
         wheelOffer: wheelOffer ?? this.wheelOffer,
+        tipShowTotals: tipShowTotals ?? this.tipShowTotals,
       );
 }
 

@@ -88,4 +88,15 @@ void main() {
     merchantAddress.value = 'a@shop.ar';
     expect(appSettings.value.wheelOffer, WheelOffer.always);
   });
+
+  test('tip totals toggle survives a reload, default shown', () async {
+    await settingsPersistence.load();
+    expect(appSettings.value.tipShowTotals, true);
+
+    setTipShowTotals(false);
+    await settingsPersistence.saveTipShowTotals(false);
+    appSettings.value = const SettingsState();
+    await settingsPersistence.load();
+    expect(appSettings.value.tipShowTotals, false);
+  });
 }
