@@ -590,6 +590,11 @@ class _LnurlQr extends StatelessWidget {
     return LayoutBuilder(builder: (context, box) {
       final side = math.min(box.maxWidth, 300.0);
       final inner = side - 32;
+      final qr = QrValidator.validate(
+        data: data,
+        version: QrVersions.auto,
+        errorCorrectionLevel: QrErrorCorrectLevel.H,
+      ).qrCode!;
       return Container(
         width: side,
         height: side,
@@ -608,11 +613,10 @@ class _LnurlQr extends StatelessWidget {
           BakedQr(
             key: const Key('topup-lnurl'),
             size: inner,
-            painter: QrPainter(
-              data: data,
-              version: QrVersions.auto,
+            moduleCount: qr.moduleCount,
+            painter: QrPainter.withQr(
+              qr: qr,
               gapless: true,
-              errorCorrectionLevel: QrErrorCorrectLevel.H,
               eyeStyle: const QrEyeStyle(
                   eyeShape: QrEyeShape.square, color: nearBlack),
               dataModuleStyle: const QrDataModuleStyle(
