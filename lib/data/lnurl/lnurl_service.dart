@@ -342,4 +342,5 @@ class LnurlService {
   }
 }
 
-final LnurlService lnurl = LnurlService();
+// Not final so a widget test can stand in a fake provider.
+LnurlService lnurl = LnurlService();
