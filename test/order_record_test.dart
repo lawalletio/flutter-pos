@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lawallet_pos/domain/order/current_order.dart';
 import 'package:lawallet_pos/domain/order/orders_store.dart';
+import 'package:lawallet_pos/features/payment/payment_screen.dart';
 
 void main() {
   test('OrderRecord round-trips items + recheck fields through JSON', () {
@@ -48,5 +49,24 @@ void main() {
     });
     expect(back.items, isEmpty);
     expect(back.canRecheck, isFalse);
+  });
+  test('a rechecked order replays the paid flow with its own tip and gross',
+      () {
+    const rec = OrderRecord(
+      id: 'o3',
+      createdAt: 1,
+      amountSats: 900, // net of the coupon, tip included
+      summary: 'x',
+      discountSats: 100,
+      tipSats: 50,
+    );
+    final back = OrderRecord.fromJson(
+        jsonDecode(jsonEncode(rec.toJson())) as Map<String, dynamic>);
+    expect(back.tipSats, 50);
+
+    final screen = PaymentScreen.paid(back, back: '/orders');
+    expect(screen.amountSats, 1000); // gross; the screen nets the discount
+    expect(screen.tipSats, 50); // drives the tip-only wheel offer
+    expect(screen.paidOrder, same(back));
   });
 }

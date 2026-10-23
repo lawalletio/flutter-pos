@@ -1,8 +1,8 @@
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/i18n.dart';
-import '../../core/print_error.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../core/widgets.dart';
@@ -10,7 +10,6 @@ import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/order/orders_store.dart';
-import '../../domain/order/receipt_printer.dart';
 import 'recheck_modal.dart';
 
 const Color _amber = Color(0xFFE0A82E);
@@ -169,33 +168,13 @@ class _OrderCard extends StatelessWidget {
   const _OrderCard({required this.order});
 
   /// Run the check process (LUD-21 + NIP-57 modal). If it confirms the payment,
-  /// the modal marks the order paid; we then run the payment pipeline — print the
-  /// ticket exactly like a normal paid order — and surface the printer result.
-  Future<void> _recheckAndPrint(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final thankYou = context.tr('Gracias por su pago');
-    await showRecheckModal(context, order);
-    final paidNow =
-        ordersStore.notifier.value.any((o) => o.id == order.id && o.isPaid);
-    if (!paidNow) return;
-    if (!context.mounted) return;
-    final printed = await printOrAskToContinue(
-      context,
-      print: () => printOrderReceipt(
-        amountSats: order.amountSats,
-        items: order.items,
-        thankYouMessage: thankYou,
-        couponName: order.couponName ?? '',
-        discountSats: order.discountSats,
-      ),
-    );
-    if (!context.mounted || !printed) return;
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(context.tr('Impreso correctamente')),
-        duration: const Duration(seconds: 2),
-      ),
-    );
+  /// continue exactly like a live payment: the payment screen's paid flow
+  /// prints the ticket, celebrates, and offers the wheel per settings.
+  Future<void> _recheck(BuildContext context) async {
+    final paid = await showRecheckModal(context, order);
+    if (!paid || !context.mounted) return;
+    context.go('/payment?back=${Uri.encodeQueryComponent('/orders')}',
+        extra: order);
   }
 
   @override
@@ -284,7 +263,7 @@ class _OrderCard extends StatelessWidget {
                     foregroundColor: AppColors.onDark,
                     minimumSize: const Size.fromHeight(46),
                   ),
-                  onPressed: () => _recheckAndPrint(context),
+                  onPressed: () => _recheck(context),
                   icon: const Icon(Icons.price_check_rounded, size: 20),
                   label: Text(context.tr('Checkear')),
                 ),
