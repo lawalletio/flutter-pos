@@ -3,25 +3,30 @@ import 'dart:math' as math;
 
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../core/amount_pad.dart' show CurrencySelector;
 import '../../core/i18n.dart';
 import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../core/widgets.dart' show BakedQr;
+import '../../data/pricing/pricing_service.dart';
+import '../../domain/config/currencies.dart';
+import '../../domain/config/formatter.dart';
 
 /// The invoice / QR screen shown while charging.
 ///
-/// It builds the whole template immediately — amount, fiat, QR slot and the
-/// action buttons — with a staggered entrance, and plays a "generating QR"
-/// scramble in the QR slot while the real invoice is fetched. Only **Cancelar**
+/// It builds the whole template immediately — amount, currency switcher, QR
+/// slot and the action buttons — with a staggered entrance, and plays a
+/// "generating QR" scramble in the QR slot while the real invoice is fetched.
+/// The switcher re-states the amount in SAT/USD/ARS at the live rate; the
+/// invoice itself stays in sats. Only **Cancelar**
 /// is enabled during loading. When [invoice] lands, the real QR cross-fades in,
 /// "Esperando el pago…" reveals with an animation, and the remaining actions
-/// (Copiar invoice, Check event, Agregar a tab) become available.
+/// (tap the QR to copy, Check event, Agregar a tab) become available.
 class InvoiceView extends StatefulWidget {
   const InvoiceView({
     super.key,
-    required this.satsStr,
-    required this.arsStr,
+    required this.sats,
     required this.invoice, // null while the invoice is still loading
     required this.nfcAvailable,
     required this.tabEnabled,
@@ -31,8 +36,7 @@ class InvoiceView extends StatefulWidget {
     required this.onAddTab,
   });
 
-  final String satsStr;
-  final String arsStr;
+  final int sats;
   final String? invoice;
   final bool nfcAvailable;
   final bool tabEnabled;
@@ -48,6 +52,9 @@ class InvoiceView extends StatefulWidget {
 class _InvoiceViewState extends State<InvoiceView>
     with SingleTickerProviderStateMixin {
   late final AnimationController _entrance;
+
+  /// What the headline shows [InvoiceView.sats] in. The invoice stays in sats.
+  Currency _currency = Currency.sat;
 
   bool get _ready => widget.invoice != null;
 
@@ -99,136 +106,154 @@ class _InvoiceViewState extends State<InvoiceView>
   @override
   Widget build(BuildContext context) {
     final ready = _ready;
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          const SizedBox(height: 8),
-          // "Esperando el pago…" — hidden while loading, revealed when ready.
-          SizedBox(
-            height: 24,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 450),
-              transitionBuilder: (child, anim) => FadeTransition(
-                opacity: anim,
-                child: SlideTransition(
-                  position:
-                      Tween<Offset>(begin: const Offset(0, 0.4), end: Offset.zero)
-                          .animate(anim),
-                  child: child,
+    // No scroll: everything fits on screen, the QR takes what the rest leaves.
+    return Column(
+      children: [
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 24,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // "Esperando el pago…" — hidden while loading, revealed when ready.
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 450),
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                            begin: const Offset(0, 0.4), end: Offset.zero)
+                        .animate(anim),
+                    child: child,
+                  ),
+                ),
+                child: ready
+                    ? Row(
+                        key: const ValueKey('waiting'),
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2)),
+                          const SizedBox(width: 10),
+                          Text(context.tr('Esperando el pago…'),
+                              style: const TextStyle(color: AppColors.muted)),
+                        ],
+                      )
+                    : const SizedBox.shrink(key: ValueKey('empty')),
+              ),
+              // Tap-to-pay: an icon in the corner, appearing with the live
+              // invoice, instead of a line of its own.
+              Align(
+                alignment: Alignment.centerRight,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  child: (ready && widget.nfcAvailable)
+                      ? Icon(Icons.contactless_outlined,
+                          key: const ValueKey('nfc'),
+                          size: 24,
+                          color: AppColors.primary,
+                          semanticLabel:
+                              context.tr('Acercá la tarjeta para pagar'))
+                      : const SizedBox.shrink(key: ValueKey('nonfc')),
                 ),
               ),
-              child: ready
-                  ? Row(
-                      key: const ValueKey('waiting'),
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2)),
-                        const SizedBox(width: 10),
-                        Text(context.tr('Esperando el pago…'),
-                            style: const TextStyle(color: AppColors.muted)),
-                      ],
-                    )
-                  : const SizedBox.shrink(key: ValueKey('empty')),
-            ),
+            ],
           ),
-          const SizedBox(height: 8),
-          _stagger(
-            1,
-            Text('${widget.satsStr} sats',
+        ),
+        const SizedBox(height: 8),
+        _stagger(
+          1,
+          // Rebuilds on each rate refresh, so fiat follows the live price.
+          ValueListenableBuilder(
+            valueListenable: pricing.notifier,
+            builder: (context, _, __) => Text(_amountLabel(),
                 style:
                     const TextStyle(fontSize: 34, fontWeight: FontWeight.w700)),
           ),
-          const SizedBox(height: 4),
-          _stagger(
-            2,
-            Text('≈ ${widget.arsStr} ARS',
-                style: const TextStyle(color: AppColors.muted)),
-          ),
-          const SizedBox(height: 12),
-          _stagger(3, _qrCard(ready)),
-          const SizedBox(height: 4),
-          _stagger(
-            4,
-            TextButton.icon(
-              onPressed: ready ? widget.onCopy : null,
-              icon: const Icon(Icons.copy, size: 15),
-              label: Text(context.tr('Copiar invoice')),
+        ),
+        const SizedBox(height: 4),
+        _stagger(
+          2,
+          Theme(
+            data: Theme.of(context).copyWith(
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
+            child: CurrencySelector(
+                value: _currency,
+                onChanged: (c) => setState(() => _currency = c)),
           ),
-          const SizedBox(height: 2),
-          // Tap-to-pay hint appears with the live invoice.
+        ),
+        const SizedBox(height: 12),
+        Expanded(child: _stagger(3, _qrCard(ready))),
+        const SizedBox(height: 12),
+        _stagger(
+          5,
           SizedBox(
-            height: 26,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
-              child: (ready && widget.nfcAvailable)
-                  ? Row(
-                      key: const ValueKey('nfc'),
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.contactless_outlined,
-                            size: 18, color: AppColors.primary),
-                        const SizedBox(width: 8),
-                        Text(context.tr('Acercá la tarjeta para pagar'),
-                            style: const TextStyle(color: AppColors.primary)),
-                      ],
-                    )
-                  : const SizedBox.shrink(key: ValueKey('nonfc')),
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: widget.onCancel, // always available
+              child: Text(context.tr('Cancelar')),
             ),
           ),
-          const SizedBox(height: 4),
-          _stagger(
-            5,
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: widget.onCancel, // always available
-                child: Text(context.tr('Cancelar')),
-              ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          _stagger(
-            6,
-            Row(
-              children: [
-                if (widget.tabEnabled)
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: ready ? widget.onAddTab : null,
-                      icon: const Icon(Icons.add_card, size: 18),
-                      label: Text(context.tr('Agregar a tab')),
-                    ),
-                  ),
+        ),
+        const SizedBox(height: 4),
+        _stagger(
+          6,
+          Row(
+            children: [
+              if (widget.tabEnabled)
                 Expanded(
-                  child: TextButton(
-                    onPressed: ready ? widget.onCheck : null,
-                    child: Text(context.tr('Check event')),
+                  child: TextButton.icon(
+                    onPressed: ready ? widget.onAddTab : null,
+                    icon: const Icon(Icons.add_card, size: 18),
+                    label: Text(context.tr('Agregar a tab')),
                   ),
                 ),
-              ],
-            ),
+              Expanded(
+                child: TextButton(
+                  onPressed: ready ? widget.onCheck : null,
+                  child: Text(context.tr('Check event')),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-        ],
-      ),
+        ),
+        const SizedBox(height: 8),
+      ],
     );
   }
 
-  /// The big white QR card. While loading it shows the scramble generator
-  /// effect; when the invoice lands the real QR cross-fades in.
+  /// "21 sats", or the fiat equivalent ("≈ ARS 1.500"); "…" until rates load.
+  String _amountLabel() {
+    if (_currency == Currency.sat) {
+      return '${formatToPreference(Currency.sat, widget.sats)} sats';
+    }
+    final fiat = pricing.satsToFiat(widget.sats, _currency);
+    if (fiat == null) return '${_currency.code} …';
+    return '≈ ${_currency.code} ${formatToPreference(_currency, fiat)}';
+  }
+
+  /// The big white QR card, as large as the space left allows (up to almost
+  /// the screen width). While loading it shows the scramble generator effect;
+  /// when the invoice lands the real QR cross-fades in.
   Widget _qrCard(bool ready) {
     final screenW = MediaQuery.of(context).size.width;
-    final card = screenW - 50;
+    return LayoutBuilder(
+      builder: (context, box) => _qrCardSized(
+          ready, screenW, math.min(screenW - 50, box.maxHeight)),
+    );
+  }
+
+  Widget _qrCardSized(bool ready, double screenW, double card) {
     return SizedBox(
       height: card,
       child: OverflowBox(
         maxWidth: screenW,
         child: GestureDetector(
-          onLongPress: ready ? widget.onCopy : null,
+          onTap: ready ? widget.onCopy : null, // the copy button
           child: Container(
             width: card,
             height: card,

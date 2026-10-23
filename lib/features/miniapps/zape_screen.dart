@@ -296,8 +296,7 @@ class _ZapeScreenState extends State<ZapeScreen> {
   }
 
   Widget _qr() => InvoiceView(
-        satsStr: _satsStr(_sats),
-        arsStr: _arsStr(_sats),
+        sats: _sats,
         invoice: _invoice,
         nfcAvailable: _card.available,
         tabEnabled: false,

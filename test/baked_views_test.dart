@@ -22,8 +22,7 @@ void main() {
     Widget view(String? invoice) => MaterialApp(
           home: Scaffold(
             body: InvoiceView(
-              satsStr: '21',
-              arsStr: '30',
+              sats: 21,
               invoice: invoice,
               nfcAvailable: false,
               tabEnabled: false,

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lawallet_pos/core/flow_lock.dart';
+import 'package:lawallet_pos/core/widgets.dart' show BakedQr;
 import 'package:lawallet_pos/features/cards/cards_api.dart';
 import 'package:lawallet_pos/features/cards/cards_screen.dart';
 import 'package:lawallet_pos/features/cards/cards_topup.dart';
@@ -681,7 +682,7 @@ void main() {
         }
         return null;
       });
-      await tester.tap(find.text('COPIAR INVOICE', findRichText: true));
+      await tester.tap(find.byType(BakedQr)); // tapping the QR copies it
       expect(copied, 'lnbc5n1fake');
 
       taps.add('lnurlw://x.io/api/cards/payer/scan?p=1&c=2');

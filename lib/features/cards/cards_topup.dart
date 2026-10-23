@@ -415,8 +415,7 @@ class _TopUpViewState extends State<TopUpView>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: InvoiceView(
-        satsStr: _satsStr(_sats),
-        arsStr: _arsStr(_sats),
+        sats: _sats,
         invoice: _invoice,
         nfcAvailable: _charge.available,
         tabEnabled: false,

@@ -139,7 +139,6 @@ const Map<String, String> _en = {
 
   // Payment
   'Esperando el pago…': 'Waiting for payment…',
-  'Copiar invoice': 'Copy invoice',
   'Invoice copiada': 'Invoice copied',
   'Acercá la tarjeta para pagar': 'Tap the card to pay',
   'Cancelar': 'Cancel',
