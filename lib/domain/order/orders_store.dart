@@ -37,6 +37,10 @@ class OrderRecord {
   final String? couponNonce;
   final int discountSats;
 
+  /// The tip folded into [amountSats], so a re-verified order offers the
+  /// wheel exactly as the live payment would have.
+  final int tipSats;
+
   const OrderRecord({
     required this.id,
     required this.createdAt,
@@ -53,6 +57,7 @@ class OrderRecord {
     this.couponName,
     this.couponNonce,
     this.discountSats = 0,
+    this.tipSats = 0,
   });
 
   DateTime get createdAtDate => DateTime.fromMillisecondsSinceEpoch(createdAt);
@@ -81,6 +86,7 @@ class OrderRecord {
         if (couponName != null) 'couponName': couponName,
         if (couponNonce != null) 'couponNonce': couponNonce,
         if (discountSats > 0) 'discountSats': discountSats,
+        if (tipSats > 0) 'tipSats': tipSats,
       };
 
   /// What the order would have cost without the coupon.
@@ -107,6 +113,7 @@ class OrderRecord {
         couponName: j['couponName'] as String?,
         couponNonce: j['couponNonce'] as String?,
         discountSats: (j['discountSats'] as num?)?.toInt() ?? 0,
+        tipSats: (j['tipSats'] as num?)?.toInt() ?? 0,
       );
 }
 

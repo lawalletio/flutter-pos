@@ -51,6 +51,10 @@ class PaymentScreen extends StatefulWidget {
   final bool initiallyPaid;
   final bool openAddTab; // preview affordance: auto-open the add-to-tab sheet
   final String? back;
+
+  /// An order a recheck just confirmed. Opens straight into the paid flow —
+  /// ticket, success screen, wheel — priced from the order, not the live cart.
+  final OrderRecord? paidOrder;
   const PaymentScreen({
     super.key,
     required this.amountSats,
@@ -58,7 +62,17 @@ class PaymentScreen extends StatefulWidget {
     this.initiallyPaid = false,
     this.openAddTab = false,
     this.back,
+    this.paidOrder,
   });
+
+  /// The paid flow for [order], reached after a recheck confirms it.
+  factory PaymentScreen.paid(OrderRecord order, {String? back}) =>
+      PaymentScreen(
+        amountSats: order.grossSats,
+        tipSats: order.tipSats,
+        paidOrder: order,
+        back: back,
+      );
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
@@ -66,7 +80,8 @@ class PaymentScreen extends StatefulWidget {
 enum _View { waiting, printing, paid, addedToTab }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  late _View _view = widget.initiallyPaid ? _View.printing : _View.waiting;
+  bool get _startsPaid => widget.initiallyPaid || widget.paidOrder != null;
+  late _View _view = _startsPaid ? _View.printing : _View.waiting;
   String? _tabName;
   int? _tabTotalSats;
 
@@ -78,6 +93,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// Raw cause behind [_invoiceError], shown in a box for debugging.
   String? _invoiceDebug;
   bool _printStarted = false;
+  late String? _orderId = widget.paidOrder?.id; // recorded order in the store
   late final _card = CardCharge(
     invoice: () => _invoice,
     verifyUrl: () => _verifyUrl,
@@ -99,7 +115,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool get _collecting => _card.collecting; // pulling payment from a tapped card
   Timer? _poll;
   ZapWatcher? _zap; // NIP-57 zap-receipt subscription (live relay connection)
-  String? _orderId; // recorded order in the persisted store
   int? _orderCreatedAt; // kept across re-quotes so the order keeps its identity
   static int _liveScreens = 0;
   final int _screenId = DateTime.now().microsecondsSinceEpoch;
@@ -131,7 +146,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
         if (scan != null) scan,
       ], goodsSats: _goodsSats);
 
-  int get _discountSats => _stacked(_scanQuote).discountSats;
+  int get _discountSats =>
+      widget.paidOrder?.discountSats ?? _stacked(_scanQuote).discountSats;
   List<DiscountEntry> get _discountEntries => _stacked(_scanQuote).entries;
 
   /// Every coupon on this order, for its `coupon` tags.
@@ -153,6 +169,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// The applied coupons' names, for the ticket, the success screen and the
   /// stored order. Null when there are none.
   String? get _couponNames {
+    final paid = widget.paidOrder;
+    if (paid != null) return paid.couponName;
     final names = _orderCoupons(_coupon).map((c) => c.name).join(' + ');
     return names.isEmpty ? null : names;
   }
@@ -190,13 +208,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
     catalog.notifier.addListener(_onCatalog);
     _onCatalog();
     catalog.ensureLoaded(merchantAddress.value);
-    if (!widget.initiallyPaid && widget.amountSats > 0) {
+    if (!_startsPaid && widget.amountSats > 0) {
       _fetchInvoice(reason: 'init');
     }
     if (widget.openAddTab && widget.amountSats > 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _openAddToTab());
     }
-    if (widget.initiallyPaid) {
+    if (widget.paidOrder != null) AppSounds.play(AppSound.paid);
+    if (_startsPaid) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _finishPrint());
     }
   }
@@ -465,6 +484,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       couponName: _couponNames,
       couponNonce: _coupon?.nonce,
       discountSats: _discountSats,
+      tipSats: widget.tipSats,
     ));
   }
 
@@ -688,7 +708,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   /// Payment finished (paid or moved to a tab): clear the order and return.
   void _finishAndBack() {
-    resetOrder();
+    // A rechecked order was never the live cart; leave whatever is rung up.
+    if (widget.paidOrder == null) resetOrder();
     _goBack();
   }
 

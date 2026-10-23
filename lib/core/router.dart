@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../domain/config/session.dart';
+import '../domain/order/orders_store.dart';
 import '../features/home/home_screen.dart';
 import '../features/destination/hub_screen.dart';
 import '../features/cart/menu_screen.dart';
@@ -96,6 +97,11 @@ final appRouter = GoRouter(
       pageBuilder: (c, s) {
         final sats = int.tryParse(s.uri.queryParameters['sats'] ?? '') ?? 0;
         final paid = s.uri.queryParameters['paid'] == '1';
+        final order = s.extra;
+        if (order is OrderRecord) {
+          return _page(
+              PaymentScreen.paid(order, back: s.uri.queryParameters['back']));
+        }
         return _page(PaymentScreen(
           amountSats: sats,
           tipSats: int.tryParse(s.uri.queryParameters['tip'] ?? '') ?? 0,
