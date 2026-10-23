@@ -12,6 +12,7 @@ import '../../core/widgets.dart' show BakedQr;
 import '../../data/pricing/pricing_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
+import '../../domain/config/selected_currency.dart';
 
 /// The invoice / QR screen shown while charging.
 ///
@@ -52,9 +53,6 @@ class InvoiceView extends StatefulWidget {
 class _InvoiceViewState extends State<InvoiceView>
     with SingleTickerProviderStateMixin {
   late final AnimationController _entrance;
-
-  /// What the headline shows [InvoiceView.sats] in. The invoice stays in sats.
-  Currency _currency = Currency.sat;
 
   bool get _ready => widget.invoice != null;
 
@@ -165,10 +163,11 @@ class _InvoiceViewState extends State<InvoiceView>
         const SizedBox(height: 8),
         _stagger(
           1,
-          // Rebuilds on each rate refresh, so fiat follows the live price.
-          ValueListenableBuilder(
-            valueListenable: pricing.notifier,
-            builder: (context, _, __) => Text(_amountLabel(),
+          // Rebuilds on each rate refresh and currency pick, so the amount
+          // follows both.
+          ListenableBuilder(
+            listenable: Listenable.merge([pricing.notifier, selectedCurrency]),
+            builder: (context, _) => Text(_amountLabel(),
                 style:
                     const TextStyle(fontSize: 34, fontWeight: FontWeight.w700)),
           ),
@@ -181,9 +180,11 @@ class _InvoiceViewState extends State<InvoiceView>
               visualDensity: VisualDensity.compact,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: CurrencySelector(
-                value: _currency,
-                onChanged: (c) => setState(() => _currency = c)),
+            child: ValueListenableBuilder(
+              valueListenable: selectedCurrency,
+              builder: (context, currency, _) => CurrencySelector(
+                  value: currency, onChanged: setSelectedCurrency),
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -227,13 +228,15 @@ class _InvoiceViewState extends State<InvoiceView>
   }
 
   /// "21 sats", or the fiat equivalent ("≈ ARS 1.500"); "…" until rates load.
+  /// The invoice itself stays in sats.
   String _amountLabel() {
-    if (_currency == Currency.sat) {
+    final currency = selectedCurrency.value;
+    if (currency == Currency.sat) {
       return '${formatToPreference(Currency.sat, widget.sats)} sats';
     }
-    final fiat = pricing.satsToFiat(widget.sats, _currency);
-    if (fiat == null) return '${_currency.code} …';
-    return '≈ ${_currency.code} ${formatToPreference(_currency, fiat)}';
+    final fiat = pricing.satsToFiat(widget.sats, currency);
+    if (fiat == null) return '${currency.code} …';
+    return '≈ ${currency.code} ${formatToPreference(currency, fiat)}';
   }
 
   /// The big white QR card, as large as the space left allows (up to almost

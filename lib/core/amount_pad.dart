@@ -1,6 +1,7 @@
 import '../data/pricing/pricing_service.dart';
 import '../domain/config/currencies.dart';
 import '../domain/config/formatter.dart';
+import '../domain/config/selected_currency.dart';
 import 'numpad.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -21,7 +22,7 @@ class AmountPad extends StatefulWidget {
 }
 
 class _AmountPadState extends State<AmountPad> {
-  Currency _currency = Currency.ars;
+  Currency _currency = selectedCurrency.value;
   String _raw = '0'; // integer string in the selected currency's minor logic
 
   @override
@@ -29,14 +30,23 @@ class _AmountPadState extends State<AmountPad> {
     super.initState();
     pricing.ensureLoaded();
     pricing.notifier.addListener(_onRates);
+    selectedCurrency.addListener(_onCurrency);
     widget.reset?.addListener(_onReset);
   }
 
   @override
   void dispose() {
     pricing.notifier.removeListener(_onRates);
+    selectedCurrency.removeListener(_onCurrency);
     widget.reset?.removeListener(_onReset);
     super.dispose();
+  }
+
+  /// Picked here or on another screen (the invoice above this one).
+  void _onCurrency() {
+    if (mounted && selectedCurrency.value != _currency) {
+      _switchCurrency(selectedCurrency.value);
+    }
   }
 
   void _onRates() {
@@ -96,7 +106,7 @@ class _AmountPadState extends State<AmountPad> {
     return Column(
       children: [
         const SizedBox(height: 12),
-        CurrencySelector(value: _currency, onChanged: _switchCurrency),
+        CurrencySelector(value: _currency, onChanged: setSelectedCurrency),
         // The amount takes what the numpad leaves and shrinks on short
         // screens rather than pushing the button off.
         Expanded(
