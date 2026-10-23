@@ -841,8 +841,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Widget _waitingView() {
     if (_invoiceError != null) return _invoiceErrorView();
     return InvoiceView(
-      satsStr: _satsStr,
-      arsStr: _arsStr,
+      sats: _chargeSats,
       invoice: _invoice, // null → shows the loading template + QR scramble
       nfcAvailable: _card.available,
       tabEnabled: appSettings.value.tabEnabled,
