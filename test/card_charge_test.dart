@@ -11,8 +11,14 @@ import 'package:lawallet_pos/features/payment/card_charge.dart';
 /// The invoice reads settled once an OK callback has paid it.
 class _CardNet implements HttpClientAdapter {
   _CardNet(
-      {this.callback = '{"status":"OK"}', this.answer, this.failPolls = 0});
+      {this.callback = '{"status":"OK"}',
+      this.answer,
+      this.failPolls = 0,
+      this.callbackTimesOut = false});
   final String callback;
+
+  /// The card server pays, but its reply never arrives in time.
+  final bool callbackTimesOut;
 
   /// The card server pays at once but holds its reply until this completes.
   final Future<void>? answer;
@@ -34,6 +40,10 @@ class _CardNet implements HttpClientAdapter {
       case '/cb':
         paidInvoices.add(uri.queryParameters['pr']!);
         _settled = !callback.contains('ERROR');
+        if (callbackTimesOut) {
+          throw DioException(
+              requestOptions: options, type: DioExceptionType.receiveTimeout);
+        }
         await answer;
         body = callback;
       default:
@@ -147,6 +157,17 @@ void main() {
 
     expect(c.events, ['idle', 'collecting', 'paid']);
     reply.complete();
+    c.card.stop();
+  });
+
+  test('a card server that pays but times out still settles as paid', () async {
+    final net = _CardNet(callbackTimesOut: true);
+    tapCard('lnurlw://card.test/card');
+    final c = charge(net);
+    await c.card.arm();
+    await settle();
+
+    expect(c.events, ['idle', 'collecting', 'paid']);
     c.card.stop();
   });
 
