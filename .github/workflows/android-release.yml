@@ -1,0 +1,139 @@
+name: Android release
+
+# Builds the signed AAB and uploads it to a Google Play track. Runs when a
+# GitHub release is published (the same release that carries the APKs and
+# ships iOS), or by hand. See docs/RELEASING.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      track:
+        description: Play track to release to
+        type: choice
+        options: [alpha, internal, production]
+        default: alpha
+      release_notes:
+        description: "What's new (Spanish, 500 chars). Empty uses 'Mejoras y correcciones.'"
+        required: false
+      dry_run:
+        description: Only build the AAB and validate the upload; publish nothing
+        type: boolean
+        default: false
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  google-play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PACKAGE_NAME: ar.lawallet.lawallet_pos
+      # alpha = "Closed testing - Alpha". Move to production once Play grants
+      # production access (12 testers opted in for 14 days).
+      TRACK: ${{ inputs.track || 'alpha' }}
+      FASTLANE_DISABLE_COLORS: 1
+      FASTLANE_SKIP_UPDATE_CHECK: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          full=$(grep -m1 '^version:' pubspec.yaml | sed 's/^version: *//')
+          name=${full%%+*}
+          if [[ -n "$TAG" && "$TAG" != "v$name" ]]; then
+            echo "::error::Release tag $TAG does not match pubspec version v$name"
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "build=${full##*+}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.4
+          cache: true
+
+      - name: Write upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/upload.jks"
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=upload
+          storeFile=$RUNNER_TEMP/upload.jks
+          EOF
+
+      - name: Build AAB
+        run: |
+          flutter pub get
+          flutter build appbundle --release
+          # Gradle falls back to debug signing without a usable key.properties,
+          # and Play rejects that, so check the certificate here.
+          keytool -printcert -jarfile build/app/outputs/bundle/release/app-release.aab \
+            | grep -q 'CN=LaWallet POS' \
+            || { echo "::error::AAB is not signed with the LaWallet POS upload key"; exit 1; }
+
+      - name: Write release notes
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+          INPUT_NOTES: ${{ inputs.release_notes }}
+          BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          notes="${RELEASE_BODY:-$INPUT_NOTES}"
+          notes="${notes:-Mejoras y correcciones.}"
+          # en-US is the listing's default language; the notes stay in Spanish.
+          dir="$RUNNER_TEMP/metadata/en-US/changelogs"
+          mkdir -p "$dir"
+          # Plain text, 500 characters max: drop markdown headings, bold, code,
+          # links and tables (the release body's APK table means nothing on Play).
+          printf '%s\n' "$notes" \
+            | sed -E '/^\|/d; s/^#+ *//; s/\*\*//g; s/`//g; s/\[([^]]*)\]\([^)]*\)/\1/g' \
+            | cat -s | python3 -c 'import sys; t=sys.stdin.read().strip(); print(t if len(t)<=500 else t[:497].rstrip()+"...")' \
+            > "$dir/$BUILD.txt"
+          cat "$dir/$BUILD.txt"
+
+      - name: Upload to Google Play
+        env:
+          PLAY_JSON_KEY: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          VALIDATE_ONLY: ${{ inputs.dry_run || false }}
+        run: |
+          gem install fastlane --no-document --user-install
+          PATH="$(ruby -e 'print Gem.user_dir')/bin:$PATH"
+          # Only the changelog is in metadata_path; the listing, screenshots and
+          # declarations are left as they are. dry_run validates the edit with
+          # Play (proving the key and version code) and commits nothing.
+          fastlane supply \
+            --package_name "$PACKAGE_NAME" \
+            --json_key_data "$PLAY_JSON_KEY" \
+            --aab build/app/outputs/bundle/release/app-release.aab \
+            --track "$TRACK" \
+            --release_status completed \
+            --version_name "${{ steps.version.outputs.name }} (${{ steps.version.outputs.build }})" \
+            --metadata_path "$RUNNER_TEMP/metadata" \
+            --skip_upload_metadata true \
+            --skip_upload_images true \
+            --skip_upload_screenshots true \
+            --validate_only "$VALIDATE_ONLY"
+
+      - name: Clean up keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.jks" android/key.properties
