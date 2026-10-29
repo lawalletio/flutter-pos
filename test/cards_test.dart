@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lawallet_pos/core/flow_lock.dart';
 import 'package:lawallet_pos/core/widgets.dart' show BakedQr;
+import 'package:lawallet_pos/domain/config/miniapp_pin.dart';
 import 'package:lawallet_pos/features/cards/cards_api.dart';
 import 'package:lawallet_pos/features/cards/cards_screen.dart';
 import 'package:lawallet_pos/features/cards/cards_topup.dart';
@@ -518,7 +519,7 @@ void main() {
 
   group('top-up invoice', () {
     const topUpCard = CardDetail(
-        id: 'abc-1', status: 'Activated', owned: true, disabled: false);
+        id: 'abc-1', status: 'Activated', owned: true, blocked: false, disabled: false);
     final printed = <Map>[];
     late StreamController<String> taps;
     var done = false;
@@ -718,7 +719,7 @@ void main() {
     });
   });
 
-  testWidgets('RECOVER says why it is off', (tester) async {
+  testWidgets('RECOVER is hidden when owner fetch fails', (tester) async {
     final app = await pumpCards(
         tester,
         FakeNet({
@@ -728,25 +729,151 @@ void main() {
     app.tap(cardUrl);
     await app.settle();
     expect(find.text('Balance unavailable'), findsOneWidget);
-    expect(find.text('Owner info unavailable'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pump();
+    expect(find.byKey(const Key('cards-recover')), findsNothing,
+        reason: 'RECOVER hidden when owner info unavailable');
+    expect(find.byKey(const Key('cards-activate')), findsOneWidget);
+  });
 
-    // Typed by hand: no SUN proof, so recovery needs a real tap.
+  testWidgets('RECOVER is hidden for manual entry (no SUN proof)',
+      (tester) async {
     final net = FakeNet({
       'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
       'GET /api/cards/abc-1/owner': (200, owner),
     });
-    await tester.pumpWidget(const SizedBox());
-    final manual = await pumpCards(tester, net);
+    final app = await pumpCards(tester, net);
     await tester.tap(find.text('Enter manually'));
     await tester.pump();
     await tester.enterText(
         find.byKey(const Key('cards-manual-field')), 'abc-1');
     await tester.pump();
     await tester.tap(find.byKey(const Key('cards-find')));
-    await manual.settle();
-    expect(find.text('Tap the card to recover'), findsOneWidget);
+    await app.settle();
+    expect(find.byKey(const Key('cards-recover')), findsNothing,
+        reason: 'RECOVER hidden when no SUN proof');
+    expect(find.text('ACTIVATE'), findsOneWidget);
+  });
+
+  testWidgets('RECOVER is hidden when owner disabled recovery', (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+          'GET /api/cards/abc-1/owner': (
+            200,
+            {...owner, 'cardRecoveryEnabled': false}
+          ),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.byKey(const Key('cards-recover')), findsNothing,
+        reason: 'RECOVER hidden when cardRecoveryEnabled is false');
+    expect(find.byKey(const Key('cards-topup')), findsOneWidget);
+  });
+
+  testWidgets('RECOVER is hidden when card is blocked', (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (
+            200,
+            {'id': 'abc-1', 'username': 'a', 'blocked': true}
+          ),
+          'GET /api/cards/abc-1/owner': (200, owner),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.text('Blocked'), findsOneWidget);
+    expect(find.byKey(const Key('cards-recover')), findsNothing,
+        reason: 'RECOVER hidden when card is blocked');
+  });
+
+  testWidgets('RECOVER is hidden when card is disabled (paused)',
+      (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (
+            200,
+            {'id': 'abc-1', 'username': 'a', 'disabled': true}
+          ),
+          'GET /api/cards/abc-1/owner': (200, owner),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.text('Paused'), findsOneWidget);
+    expect(find.byKey(const Key('cards-recover')), findsNothing,
+        reason: 'RECOVER hidden when card is disabled');
+  });
+
+  testWidgets('RECOVER is hidden when cardDisabled in owner is true',
+      (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+          'GET /api/cards/abc-1/owner': (
+            200,
+            {...owner, 'cardDisabled': true}
+          ),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.byKey(const Key('cards-recover')), findsNothing,
+        reason: 'RECOVER hidden when cardDisabled is true');
+  });
+
+  testWidgets('RECOVER is hidden when /owner returns 404 (older backend)',
+      (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.byKey(const Key('cards-recover')), findsNothing,
+        reason: 'RECOVER hidden for older backend without /owner');
+    expect(find.byKey(const Key('cards-activate')), findsOneWidget);
+  });
+
+  testWidgets('RECOVER shown in row layout when recoverable', (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+          'GET /api/cards/abc-1/owner': (200, owner),
+          'POST /api/cards/abc-1/recovery-tokens': (
+            200,
+            {'qrPayload': 'https://x.io/recover'}
+          ),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.byKey(const Key('cards-topup')), findsOneWidget);
+    expect(find.byKey(const Key('cards-recover')), findsOneWidget,
+        reason: 'RECOVER shown in row when recoverable');
+  });
+
+  testWidgets('RECOVER treats missing cardRecoveryEnabled as true (server default)',
+      (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+          'GET /api/cards/abc-1/owner': (
+            200,
+            {
+              'owned': true,
+              'primaryAddress': 'a@x.io',
+              'lightningAddresses': ['a@x.io'],
+              'balanceSats': 21,
+            }
+          ),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
+    expect(find.byKey(const Key('cards-recover')), findsOneWidget,
+        reason: 'RECOVER shown when cardRecoveryEnabled is missing (default true)');
   });
 
   testWidgets('an unknown card fails and goes back', (tester) async {
@@ -890,5 +1017,129 @@ void main() {
     await app.settle();
     expect(find.text('home'), findsOneWidget, reason: 'no PIN, no address');
     expect(lockedFlow.value, isNull);
+  });
+
+  group('RECOVER with PIN', () {
+    setUp(() {
+      miniappPin.value = null;
+    });
+
+    tearDown(() {
+      miniappPin.value = null;
+    });
+
+    testWidgets('no PIN configured => no dialog, recovery proceeds',
+        (tester) async {
+      final net = FakeNet({
+        'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+        'GET /api/cards/abc-1/owner': (200, owner),
+        'POST /api/cards/abc-1/recovery-tokens': (
+          200,
+          {'qrPayload': 'https://x.io/recover'}
+        ),
+      });
+      final app = await pumpCards(tester, net);
+      app.tap(cardUrl);
+      await app.settle();
+      await tester.tap(find.byKey(const Key('cards-recover')));
+      await app.settle();
+      expect(find.byKey(const Key('miniapp-pin')), findsNothing,
+          reason: 'no PIN dialog when no PIN is configured');
+      expect(find.text('Print to recover your account'), findsOneWidget,
+          reason: 'recovery proceeds without PIN');
+      expect(net.calls, contains('POST /api/cards/abc-1/recovery-tokens'));
+    });
+
+    testWidgets('PIN set + cancel => no POST, stays on detail',
+        (tester) async {
+      miniappPin.value = '1234';
+      final net = FakeNet({
+        'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+        'GET /api/cards/abc-1/owner': (200, owner),
+        'POST /api/cards/abc-1/recovery-tokens': (
+          200,
+          {'qrPayload': 'https://x.io/recover'}
+        ),
+      });
+      final app = await pumpCards(tester, net);
+      app.tap(cardUrl);
+      await app.settle();
+
+      net.calls.clear();
+      await tester.tap(find.byKey(const Key('cards-recover')));
+      await tester.pump();
+      expect(find.byKey(const Key('miniapp-pin')), findsOneWidget,
+          reason: 'PIN dialog shown when PIN is configured');
+
+      await tester.tap(find.byKey(const Key('pin-cancel')));
+      await tester.pump();
+      expect(find.byKey(const Key('miniapp-pin')), findsNothing);
+      expect(net.calls, isNot(contains('POST /api/cards/abc-1/recovery-tokens')),
+          reason: 'no POST when PIN dialog cancelled');
+      expect(find.byKey(const Key('cards-recover')), findsOneWidget,
+          reason: 'stays on detail view');
+    });
+
+    testWidgets('PIN set + wrong PIN => no POST, can retry', (tester) async {
+      miniappPin.value = '1234';
+      final net = FakeNet({
+        'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+        'GET /api/cards/abc-1/owner': (200, owner),
+        'POST /api/cards/abc-1/recovery-tokens': (
+          200,
+          {'qrPayload': 'https://x.io/recover'}
+        ),
+      });
+      final app = await pumpCards(tester, net);
+      app.tap(cardUrl);
+      await app.settle();
+
+      net.calls.clear();
+      await tester.tap(find.byKey(const Key('cards-recover')));
+      await tester.pump();
+      await tester.enterText(find.byKey(const Key('miniapp-pin')), '9999');
+      await tester.pump();
+      await tester.tap(find.text('Recuperar'));
+      await tester.pump();
+
+      expect(find.text('PIN INCORRECTO'), findsOneWidget);
+      expect(net.calls, isNot(contains('POST /api/cards/abc-1/recovery-tokens')),
+          reason: 'no POST when wrong PIN');
+      expect(find.byKey(const Key('miniapp-pin')), findsOneWidget,
+          reason: 'PIN dialog stays open for retry');
+
+      await tester.tap(find.byKey(const Key('pin-cancel')));
+      await tester.pump();
+    });
+
+    testWidgets('PIN set + correct PIN => POST and recovery QR',
+        (tester) async {
+      miniappPin.value = '1234';
+      final net = FakeNet({
+        'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+        'GET /api/cards/abc-1/owner': (200, owner),
+        'POST /api/cards/abc-1/recovery-tokens': (
+          200,
+          {'qrPayload': 'https://x.io/recover'}
+        ),
+      });
+      final app = await pumpCards(tester, net);
+      app.tap(cardUrl);
+      await app.settle();
+
+      await tester.tap(find.byKey(const Key('cards-recover')));
+      await tester.pump();
+      await tester.enterText(find.byKey(const Key('miniapp-pin')), '1234');
+      await tester.pump();
+      await tester.tap(find.text('Recuperar'));
+      await app.settle();
+
+      expect(find.byKey(const Key('miniapp-pin')), findsNothing,
+          reason: 'PIN dialog dismissed after correct PIN');
+      expect(net.calls, contains('POST /api/cards/abc-1/recovery-tokens'),
+          reason: 'POST made after correct PIN');
+      expect(find.text('Print to recover your account'), findsOneWidget,
+          reason: 'recovery QR view shown');
+    });
   });
 }
