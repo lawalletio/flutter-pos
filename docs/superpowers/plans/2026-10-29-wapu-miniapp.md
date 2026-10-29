@@ -120,11 +120,13 @@
   - `class WapuOrder` with:
     - `String` fields `id` (from `tentative_id`, via `toString()`), `status`, `payoutStatus` and `payoutAddress`;
     - `int` fields `amountArsCents`, `amountOut` and `networkFeeOut`;
-    - `DateTime?` fields `expiresAt` and `lateWatchUntil`, parsed as UTC;
+    - `DateTime?` fields `createdAt`, `expiresAt` and `lateWatchUntil`, parsed as UTC;
     - `bool watchPending`;
+    - `int?` fields `totalAmountUsdt` and `fundingAmountUsdt`, null when the body has none;
     - `String?` fields `alias`, `cvu`, `paymentHash`, `errorCode` and `type`;
     - `factory WapuOrder.fromJson(Map<String, dynamic>)`;
     - `bool get hasBankDetails`;
+    - `int get totalSats`, equal to `((amountOut + networkFeeOut) * totalAmountUsdt + fundingAmountUsdt ~/ 2) ~/ fundingAmountUsdt`, or `amountOut + networkFeeOut` without both figures, and `int get feeSats`, equal to `totalSats - amountOut`;
     - `bool isInProgress(DateTime now)`, true when `watchPending`, or when status is CREATED and `now` is before `expiresAt`.
   - `class WapuApi` with:
     - `WapuApi({required String baseUrl, required String apiKey, Dio? dio})`;
@@ -411,7 +413,7 @@
 | EXPIRED, or CREATED past `expiresAt` | `'Orden vencida'` |
 | EXECUTED + `sending` | The Wapu logo (`Key('wapu-logo')`, `assets/images/wapu_logo.png`) on a white plate, then `'Pago recibido'`, a small spinner beside `'Enviando los sats…'`, and the sats and the payout address. |
 | EXECUTED + `review` | `'En revisión'`, plus `'Guardá el ID de la orden: '` + id |
-| COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, with `paymentHash` in a `SelectableText` |
+| COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, then the `WapuReceipt` (`lib/features/wapu/wapu_receipt.dart`, `Key('wapu-receipt')`): the rows `'Comprado'`, `'Fecha'` (only with `createdAt`), `'Estado'`, `'Para'` (`shortDestination`), the id with its copy (`Key('wapu-copy-id')`) and QR (`Key('wapu-id-qr')`) buttons, `'Comisión de la operación'`, `'Depósito del cliente'` and `'Total'`. |
 | SETTLED_TO_BALANCE | `'No se pudieron enviar los sats'`, plus `'El monto quedó en tu saldo de Wapu.'` |
 | any other status | the raw `status` |
 

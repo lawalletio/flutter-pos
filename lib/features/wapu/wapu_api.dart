@@ -98,8 +98,11 @@ class WapuOrder {
     required this.amountOut,
     required this.networkFeeOut,
     required this.watchPending,
+    this.createdAt,
     this.expiresAt,
     this.lateWatchUntil,
+    this.totalAmountUsdt,
+    this.fundingAmountUsdt,
     this.alias,
     this.cvu,
     this.paymentHash,
@@ -116,8 +119,11 @@ class WapuOrder {
         amountOut: _int(j['amount_out']),
         networkFeeOut: _int(j['network_fee_out']),
         watchPending: _flag(j['watch_pending']),
+        createdAt: _utc(j['created_at']),
         expiresAt: _utc(j['expires_at']),
         lateWatchUntil: _utc(j['late_watch_until']),
+        totalAmountUsdt: _intOrNull(j['total_amount_usdt']),
+        fundingAmountUsdt: _intOrNull(j['funding_amount_usdt']),
         alias: _str(j['alias']),
         cvu: _str(j['cvu']),
         paymentHash: _str(j['payment_hash']),
@@ -143,6 +149,10 @@ class WapuOrder {
   final int amountOut;
   final int networkFeeOut;
 
+  /// When the order was created. Null while the backend only sends it in the
+  /// list of orders.
+  final DateTime? createdAt;
+
   /// When the payment window closes.
   final DateTime? expiresAt;
 
@@ -151,6 +161,11 @@ class WapuOrder {
 
   /// True while the backend still waits for, or acts on, a transfer.
   final bool watchPending;
+
+  /// In USDT cents: what the ARS bought, and the part of it that is the sats
+  /// and their network fee. Their ratio carries Wapu's commission into sats.
+  final int? totalAmountUsdt;
+  final int? fundingAmountUsdt;
 
   /// The bank alias and CVU to transfer to. Set once funding issued them.
   final String? alias;
@@ -162,6 +177,23 @@ class WapuOrder {
   final String? type;
 
   bool get hasBankDetails => alias != null && cvu != null;
+
+  /// What the ARS bought, in sats: the sats and their network fee, scaled by
+  /// the total over the funding so the commission is in it. Without both USDT
+  /// figures, the sats and the network fee alone.
+  int get totalSats {
+    final sent = amountOut + networkFeeOut;
+    final total = totalAmountUsdt;
+    final funding = fundingAmountUsdt;
+    if (total == null || funding == null || total <= 0 || funding <= 0) {
+      return sent;
+    }
+    return (sent * total + funding ~/ 2) ~/ funding;
+  }
+
+  /// What the order cost on top of the [amountOut] sats: the network fee and
+  /// the commission.
+  int get feeSats => totalSats - amountOut;
 
   /// Whether the order still needs attention at [now]: the backend watches it,
   /// or it was created and its window has not closed.
@@ -388,8 +420,11 @@ String? _str(Object? v) {
 
 String _text(Object? v) => _str(v) ?? '';
 
-/// A whole number that may arrive as a decimal or as text. Missing is 0.
-int _int(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+/// A whole number that may arrive as a decimal or as text. Missing is null.
+int? _intOrNull(Object? v) => v is num ? v.toInt() : int.tryParse('$v');
+
+/// [_intOrNull], where missing is 0.
+int _int(Object? v) => _intOrNull(v) ?? 0;
 
 bool _flag(Object? v) => v == true || v == 1;
 

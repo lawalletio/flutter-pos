@@ -1852,7 +1852,14 @@ void main() {
       expect(calls(_detailRoute), 3);
       expect(find.text('¡Listo! El cliente recibió 12.500 sats'),
           findsOneWidget);
-      expect(find.text(_hash), findsOneWidget);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('t1'), findsOneWidget, reason: 'the id, in the receipt');
+      expect(find.text('Comprado'), findsOneWidget);
+      expect(find.text('12.500 SAT'), findsOneWidget);
+      expect(find.text('Depósito del cliente'), findsOneWidget);
+      expect(find.text('15.000,37 ARS'), findsOneWidget);
+      expect(find.text(_hash), findsNothing,
+          reason: 'the receipt has the order id, not the payment hash');
       expect(paid(), 1);
 
       await tester.pump(const Duration(seconds: 30));

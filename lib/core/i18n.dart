@@ -450,6 +450,17 @@ const Map<String, String> _en = {
   'No se pudieron enviar los sats': 'The sats could not be sent',
   'El monto quedó en tu saldo de Wapu.':
       'The amount went to your Wapu balance.',
+  'Comprado': 'Purchased',
+  'Monto': 'Amount',
+  'Fecha': 'Date',
+  'Estado': 'Status',
+  'Acreditada en saldo Wapu': 'Credited to Wapu balance',
+  'Para': 'To',
+  'ID de transacción': 'Transaction ID',
+  'Comisión de la operación': 'Transaction fee',
+  'Depósito del cliente': 'Client deposit',
+  'Depósito esperado': 'Expected deposit',
+  'Mostrar QR': 'Show QR',
   'Nueva venta': 'New sale',
   'La orden queda abierta hasta que venza. La podés retomar desde el Historial.':
       'The order stays open until it expires. You can resume it from the History.',

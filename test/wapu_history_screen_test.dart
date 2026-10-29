@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:lawallet_pos/core/flow_lock.dart';
 import 'package:lawallet_pos/core/i18n.dart';
 import 'package:lawallet_pos/core/router.dart';
@@ -116,6 +117,7 @@ Map<String, Object?> orderJson(
   int out = 12500,
   Duration expiresIn = const Duration(minutes: 15),
   String? hash,
+  String? created,
 }) {
   final bank = status == 'FUNDING_ISSUED' || (status == 'EXPIRED' && watch);
   return {
@@ -127,6 +129,7 @@ Map<String, Object?> orderJson(
     'amount_ars_cents': ars,
     'amount_out': out,
     'network_fee_out': 21,
+    if (created != null) 'created_at': created,
     'expires_at': DateTime.now().toUtc().add(expiresIn).toIso8601String(),
     'late_watch_until': null,
     'watch_pending': watch,
@@ -137,14 +140,16 @@ Map<String, Object?> orderJson(
 }
 
 /// An order that was sent and received.
-Map<String, Object?> doneJson(String id, {int out = 17000}) => orderJson(id,
-    status: 'COMPLETED',
-    payout: 'completed',
-    watch: false,
-    hash: _hash,
-    out: out,
-    ars: 2000000,
-    address: 'carol@example.com');
+Map<String, Object?> doneJson(String id, {int out = 17000, String? created}) =>
+    orderJson(id,
+        status: 'COMPLETED',
+        payout: 'completed',
+        watch: false,
+        hash: _hash,
+        out: out,
+        ars: 2000000,
+        address: 'carol@example.com',
+        created: created);
 
 /// What the backend answers to the list of orders, in [orders]' order.
 (int, Object) listReply(List<Map<String, Object?>> orders) =>
@@ -672,12 +677,46 @@ void main() {
 
       expect(find.text('¡Listo! El cliente recibió 17.000 sats'),
           findsOneWidget);
-      expect(find.text(_hash), findsOneWidget);
+      expect(find.text(_hash), findsNothing,
+          reason: 'the receipt has the order id, not the payment hash');
       expect(find.text('alias.a'), findsNothing);
       await tester.pump(const Duration(seconds: 30));
       expect(calls(_read('a')), 1, reason: 'nothing is left to wait for');
       expect(played.where((n) => n == 'arpeggio'), isEmpty,
           reason: 'nothing was paid just now');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a completed order from the History shows its receipt',
+        (tester) async {
+      const created = '2026-10-29T16:50:34Z';
+      final clock = DateFormat('yyyy-MM-dd HH:mm:ss')
+          .format(DateTime.utc(2026, 10, 29, 16, 50, 34).toLocal());
+      net.routes[_listRoute] =
+          listReply([doneJson('a', created: created), orderJson('b')]);
+      net.routes[_read('a')] = (200, doneJson('a', created: created));
+      await open(tester);
+
+      await pick(tester, 'a');
+
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      for (final text in [
+        'Comprado',
+        '17.000 SAT',
+        'Fecha',
+        clock,
+        'Completada',
+        'carol@example.com',
+        'a', // the id
+        'Comisión de la operación',
+        '21 SAT',
+        'Depósito del cliente',
+        '20.000,00 ARS',
+        'Total',
+        '17.021 SAT',
+      ]) {
+        expect(find.text(text), findsOneWidget, reason: text);
+      }
       await tester.pumpWidget(const SizedBox());
     });
 

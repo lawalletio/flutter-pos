@@ -79,7 +79,7 @@ The contract comes from survivors `develop` at 6c0f1dbe. All paths are relative 
 - identity and status: `tentative_id`, `type`, `direction`, `status`, `payout_status`;
 - payout target: `payout_currency`, `payout_network`, `payout_address`;
 - amounts: `amount_ars_cents`, `amount_out`, `amount_out_unit`, `network_fee_out`, and the USDT amounts;
-- timing: `expires_at`, `late_watch_until` (nullable), `watch_pending`;
+- timing: `created_at` (UTC; the list of orders has it, and every order body will), `expires_at`, `late_watch_until` (nullable), `watch_pending`;
 - results: `txid`, `payment_hash`, `error_code`;
 - bank details, present after funding only: `alias`, `cvu`.
 
@@ -158,7 +158,7 @@ All copy is Spanish source text with English translations (`context.tr`).
    - If funding fails, Retry calls funding again, which is safe.
 4. **Status.** The status screen polls every 10 s.
    - Waiting for the transfer: alias, CVU and the exact amount with cents, each with a copy button, plus a countdown to `expires_at`.
-   - Sending, then "Listo" with the payment hash. Reaching COMPLETED plays the existing paid sound (`AppSounds.play(AppSound.paid)`).
+   - Sending, then "Listo" with the order's receipt. Reaching COMPLETED plays the existing paid sound (`AppSounds.play(AppSound.paid)`). The receipt lists the sats, the date (local time, when the body has `created_at`), the status, the destination (a BOLT11 invoice is shortened), the order id with a copy button and a QR, the fee, the ARS the customer paid and the total in sats. The total is `round((amount_out + network_fee_out) × total_amount_usdt / funding_amount_usdt)`, and the fee is that minus `amount_out`; without the two USDT figures they are `amount_out + network_fee_out` and `network_fee_out`. The History opens the same view, so it is the detail of an order too.
    - In review: tells the operator to keep the order ID.
    - Settled to balance: says the customer did not get the sats and the money is in the merchant's Wapu balance.
    - Expired: if `watch_pending` is still true, says a late transfer is still detected until `late_watch_until`.

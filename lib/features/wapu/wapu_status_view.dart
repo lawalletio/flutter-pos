@@ -8,14 +8,10 @@ import '../../core/ui.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import 'wapu_api.dart';
-
-/// Pesos with dots between the thousands and a comma before the cents.
-final _pesosAndCents = NumberFormat.decimalPattern('es_AR')
-  ..minimumFractionDigits = 2
-  ..maximumFractionDigits = 2;
+import 'wapu_receipt.dart';
 
 /// [cents] as pesos, always with the two decimals: `1500037` is `$ 15.000,37`.
-String formatArsCents(int cents) => '\$ ${_pesosAndCents.format(cents / 100)}';
+String formatArsCents(int cents) => '\$ ${formatPesos(cents)}';
 
 /// [d] as `mm:ss`. Time that has run out is `00:00`.
 String formatCountdown(Duration d) {
@@ -198,19 +194,13 @@ class WapuStatusView extends StatelessWidget {
       ];
 
   List<Widget> _completed(BuildContext context) {
-    final hash = order.paymentHash;
     final sats = formatToPreference(Currency.sat, order.amountOut);
     return [
       _title(
         '${context.tr('¡Listo! El cliente recibió ')}$sats sats',
         color: AppColors.primary,
       ),
-      if (hash != null)
-        SelectableText(
-          hash,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 13, color: AppColors.muted),
-        ),
+      WapuReceipt(order: order),
       _newSale(context),
     ];
   }

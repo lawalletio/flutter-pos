@@ -30,8 +30,11 @@ WapuOrder _order({
   String payoutAddress = 'cliente@wallet.com',
   int amountOut = 12500,
   bool watchPending = true,
+  DateTime? createdAt,
   DateTime? expiresAt,
   DateTime? lateWatchUntil,
+  int? totalAmountUsdt,
+  int? fundingAmountUsdt,
   String? alias,
   String? cvu,
   String? paymentHash,
@@ -45,8 +48,11 @@ WapuOrder _order({
       amountOut: amountOut,
       networkFeeOut: 21,
       watchPending: watchPending,
+      createdAt: createdAt,
       expiresAt: expiresAt,
       lateWatchUntil: lateWatchUntil,
+      totalAmountUsdt: totalAmountUsdt,
+      fundingAmountUsdt: fundingAmountUsdt,
       alias: alias,
       cvu: cvu,
       paymentHash: paymentHash,
@@ -127,6 +133,7 @@ void main() {
   });
 
   final newSaleBig = find.byKey(const Key('wapu-new-sale-big'));
+  final receipt = find.byKey(const Key('wapu-receipt'));
   final fund = find.byKey(const Key('wapu-fund'));
   final logo = find.byKey(const Key('wapu-logo'));
 
@@ -435,23 +442,68 @@ void main() {
   });
 
   group('COMPLETED', () {
-    testWidgets('says what the customer received, with the payment hash',
+    testWidgets('says what the customer received, then shows the receipt',
         (tester) async {
       await show(tester, _completed);
 
-      expect(
-          find.text('¡Listo! El cliente recibió 12.500 sats'), findsOneWidget);
-      expect(find.byType(SelectableText), findsOneWidget);
-      expect(tester.widget<SelectableText>(find.byType(SelectableText)).data,
-          _hash);
+      final headline = find.text('¡Listo! El cliente recibió 12.500 sats');
+      expect(headline, findsOneWidget);
+      expect(receipt, findsOneWidget);
+      // The receipt is of this order: its id and its sats, fee and total.
+      expect(find.text(_id), findsOneWidget);
+      expect(find.text('12.500 SAT'), findsOneWidget);
+      expect(find.text('21 SAT'), findsOneWidget);
+      expect(find.text('12.521 SAT'), findsOneWidget);
+      expect(find.text('15.000,37 ARS'), findsOneWidget);
+      expect(find.text('Completada'), findsOneWidget);
+      expect(tester.getTopLeft(headline).dy,
+          lessThan(tester.getTopLeft(receipt).dy));
+      expect(tester.getTopLeft(receipt).dy,
+          lessThan(tester.getTopLeft(newSaleBig).dy));
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('has no hash line when the backend sent none', (tester) async {
+    testWidgets('no longer shows the payment hash on its own', (tester) async {
+      await show(tester, _completed);
+
+      expect(find.text(_hash), findsNothing);
+      expect(find.byType(SelectableText), findsOneWidget,
+          reason: 'only the id in the receipt');
+      expect(
+          tester.widget<SelectableText>(find.byType(SelectableText)).data, _id);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('shows the receipt without a date when the body has none',
+        (tester) async {
       await show(tester, _order(status: 'COMPLETED', watchPending: false));
 
       expect(find.textContaining('¡Listo!'), findsOneWidget);
-      expect(find.byType(SelectableText), findsNothing);
+      expect(receipt, findsOneWidget);
+      expect(find.text('Fecha'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('shows the date of the order in the device time',
+        (tester) async {
+      final created = DateTime.utc(2026, 10, 29, 16, 50, 34);
+      await show(
+          tester,
+          _order(
+              status: 'COMPLETED',
+              watchPending: false,
+              createdAt: created,
+              totalAmountUsdt: 105,
+              fundingAmountUsdt: 100));
+
+      expect(find.text('Fecha'), findsOneWidget);
+      expect(
+          find.text(
+              DateFormat('yyyy-MM-dd HH:mm:ss').format(created.toLocal())),
+          findsOneWidget);
+      // 12.521 sats at a 5% commission: 13.147, and 647 of them are fee.
+      expect(find.text('13.147 SAT'), findsOneWidget);
+      expect(find.text('647 SAT'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -680,6 +732,21 @@ void main() {
       await showOnTill(tester, _completed);
 
       expect(tester.getSize(newSaleBig).height, greaterThanOrEqualTo(74));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the receipt fits the width and scrolls on a short screen',
+        (tester) async {
+      await showOnTill(tester, _completed,
+          size: const Size(720, 450)); // 300 dp
+
+      expect(tester.takeException(), isNull);
+      expect(tester.getRect(receipt).right, lessThanOrEqualTo(480));
+      // The id is selectable text, which scrolls on its own: the view's is first.
+      await tester.scrollUntilVisible(newSaleBig, 100,
+          scrollable: find.byType(Scrollable).first);
+      expect(newSaleBig, findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     });

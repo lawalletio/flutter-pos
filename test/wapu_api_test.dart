@@ -526,6 +526,60 @@ void main() {
     expect(o.errorCode, 'E1');
   });
 
+  test('an order carries when it was created and its USDT figures', () {
+    final o = WapuOrder.fromJson(orderJson({
+      'created_at': '2026-10-29T16:50:34Z',
+      'total_amount_usdt': 1030,
+      'funding_amount_usdt': '1000',
+    }));
+
+    expect(o.createdAt, DateTime.utc(2026, 10, 29, 16, 50, 34));
+    expect(o.totalAmountUsdt, 1030);
+    expect(o.fundingAmountUsdt, 1000);
+
+    // Absent is null, never a made-up zero or a made-up time.
+    final bare = WapuOrder.fromJson(orderJson()
+      ..remove('total_amount_usdt')
+      ..remove('funding_amount_usdt'));
+    expect(bare.createdAt, isNull, reason: 'the body of an order has none yet');
+    expect(bare.totalAmountUsdt, isNull);
+    expect(bare.fundingAmountUsdt, isNull);
+  });
+
+  test('totalSats and feeSats put the commission into the sats', () {
+    // Sats, network fee, total and funding in USDT cents, then what the
+    // receipt says: the total in sats, and the fee as that minus the sats.
+    for (final (out, networkFee, total, funding, wantTotal, wantFee)
+        in <(int, Object?, Object?, Object?, int, int)>[
+      // (10,000 + 3) sats * 1000 / 975: 10,259.49, so a 2.5% commission.
+      (10000, 3, 1000, 975, 10259, 259),
+      // A half rounds up.
+      (1, 0, 3, 2, 2, 1),
+      // No commission leaves the network fee alone.
+      (10000, 3, 1000, 1000, 10003, 3),
+      // No network fee in the body is no fee.
+      (10000, null, 1000, 975, 10256, 256),
+      // Without figures that can scale it, the sats and the network fee.
+      (10000, 3, null, null, 10003, 3),
+      (10000, 3, 1000, null, 10003, 3),
+      (10000, 3, null, 975, 10003, 3),
+      (10000, 3, 1000, 0, 10003, 3),
+      (10000, 3, 1000, -5, 10003, 3),
+      (10000, 3, 0, 975, 10003, 3),
+    ]) {
+      final o = WapuOrder.fromJson(orderJson({
+        'amount_out': out,
+        'network_fee_out': networkFee,
+        'total_amount_usdt': total,
+        'funding_amount_usdt': funding,
+      }));
+
+      final why = '$out + $networkFee sats, $total over $funding';
+      expect(o.totalSats, wantTotal, reason: why);
+      expect(o.feeSats, wantFee, reason: why);
+    }
+  });
+
   test('bank details need both an alias and a cvu, and blank is absent', () {
     bool has(Map<String, Object?> over) =>
         WapuOrder.fromJson(orderJson(over)).hasBankDetails;
