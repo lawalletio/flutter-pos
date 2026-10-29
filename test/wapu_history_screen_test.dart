@@ -326,7 +326,9 @@ void main() {
       await settle(tester);
 
       expect(rowIds(tester), ['b']);
-      expect(keys, ['key-2'], reason: "their key, not another merchant's");
+      // The sale builds a client of its own too: every one has their key.
+      expect(keys, isNotEmpty);
+      expect(keys.toSet(), {'key-2'}, reason: "their key, not another's");
       await tester.pumpWidget(const SizedBox());
     });
 

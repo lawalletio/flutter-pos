@@ -56,6 +56,9 @@ class FakeNet implements HttpClientAdapter {
   /// The host each of [calls] went to.
   final hosts = <String>[];
 
+  /// The API key each of [calls] carried.
+  final keys = <Object?>[];
+
   /// Routes that fail as a transport error instead of answering.
   final failures = <String, DioException>{};
 
@@ -69,6 +72,7 @@ class FakeNet implements HttpClientAdapter {
     final key = '${o.method} ${o.uri.path}';
     calls.add(key);
     hosts.add(o.uri.host);
+    keys.add(o.headers['X-API-Key']);
     queries.add(o.uri.queryParameters);
     bodies.add(o.data is String ? jsonDecode(o.data as String) : null);
     final failure = failures[key];
@@ -1899,6 +1903,45 @@ void main() {
 
       await tester.pump(const Duration(seconds: 40));
       expect(calls(_detailRoute), 1, reason: 'the new key does not read it');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('one client serves the quote, the order and its polls',
+        (tester) async {
+      var built = 0;
+      final make = wapuApiFor;
+      wapuApiFor = (baseUrl, apiKey) {
+        built++;
+        return make(baseUrl, apiKey);
+      };
+
+      await toWaiting(tester); // the quote, the create and the funding
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump(const Duration(seconds: 10));
+
+      expect(calls(_quoteRoute), 1);
+      expect(calls(_detailRoute), 2, reason: 'two polls');
+      expect(built, 1, reason: 'one client for the key, not one per request');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a key the config swapped gets a client of its own',
+        (tester) async {
+      await toAmount(tester);
+      await price(tester);
+      expect(net.keys.last, 'key-1');
+
+      await tester.tap(gear); // no PIN is set: straight in
+      await settle(tester);
+      await tester.enterText(find.byKey(const Key('wapu-key')), 'other-key');
+      await tester.tap(find.byKey(const Key('wapu-save')));
+      await settle(tester);
+      await submit(tester, 'bob@example.com');
+      await price(tester);
+
+      expect(net.calls.last, _quoteRoute);
+      expect(net.keys.last, 'other-key',
+          reason: 'the price is asked with the new key, not a kept client');
       await tester.pumpWidget(const SizedBox());
     });
 

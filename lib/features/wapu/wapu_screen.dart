@@ -86,6 +86,11 @@ class _WapuScreenState extends State<WapuScreen> {
   /// [_loaded].
   WapuCredentials? _credentials;
 
+  /// The client for [_credentials], so the quote, the order and its polls share
+  /// one connection. It is built when [_load] swaps the account, and null with
+  /// no key. The old one is not closed: a new one comes only with a new key.
+  WapuApi? _api;
+
   /// [_credentials] is the current POS user's, not the previous one's.
   bool _loaded = false;
 
@@ -196,6 +201,7 @@ class _WapuScreenState extends State<WapuScreen> {
     setState(() {
       _resetSale();
       _credentials = null;
+      _api = null;
       _loaded = false;
     });
     _load();
@@ -233,6 +239,9 @@ class _WapuScreenState extends State<WapuScreen> {
         // wrong account, and a price from the old backend is not this one's.
         // The order is not lost: its account's History has it.
         _resetSale();
+        _api = credentials == null
+            ? null
+            : wapuApiFor(credentials.baseUrl, credentials.apiKey);
       }
       _credentials = credentials;
       _loaded = true;
@@ -359,17 +368,16 @@ class _WapuScreenState extends State<WapuScreen> {
       }
     });
     if (n > 0) {
-      final credentials = _credentials!; // the pad only shows with a key
-      _debounce = Timer(_quoteDelay, () => _fetchQuote(credentials));
+      final api = _api!; // the pad only shows with a key
+      _debounce = Timer(_quoteDelay, () => _fetchQuote(api));
     }
   }
 
   /// Asks the backend what the amount on screen costs.
-  Future<void> _fetchQuote(WapuCredentials credentials) async {
+  Future<void> _fetchQuote(WapuApi api) async {
     final gen = _quoteGen;
-    final answer = await _answer(() =>
-        wapuApiFor(credentials.baseUrl, credentials.apiKey)
-            .quote(arsCents: _arsCents, sats: _sats));
+    final answer =
+        await _answer(() => api.quote(arsCents: _arsCents, sats: _sats));
     if (!mounted || gen != _quoteGen) return;
     setState(() {
       _quote = answer.reply;
@@ -396,11 +404,11 @@ class _WapuScreenState extends State<WapuScreen> {
   /// once. When it fails the sale stays on the amount, and trying again is for
   /// the operator to decide.
   Future<void> _confirm() async {
-    final credentials = _credentials;
+    final api = _api;
     final address = _address;
     // The button is off then, but a second tap can get here before it is
     // rebuilt.
-    if (!_canConfirm || credentials == null || address == null) return;
+    if (!_canConfirm || api == null || address == null) return;
     final ars = _arsCents;
     final sats = _sats;
     final gen = ++_gen;
@@ -408,7 +416,6 @@ class _WapuScreenState extends State<WapuScreen> {
       _busy = true;
       _createError = null;
     });
-    final api = wapuApiFor(credentials.baseUrl, credentials.apiKey);
     final created = await _answer(
         () => api.createOrder(address: address, arsCents: ars, sats: sats));
     if (!mounted || gen != _gen) return;
@@ -445,14 +452,14 @@ class _WapuScreenState extends State<WapuScreen> {
 
   /// The button of an order that was created and has no bank details yet.
   void _requestFunding() {
-    final credentials = _credentials;
+    final api = _api;
     final order = _order;
-    if (_busy || credentials == null || order == null) return;
+    if (_busy || api == null || order == null) return;
     setState(() {
       _busy = true;
       _orderError = null;
     });
-    _fund(wapuApiFor(credentials.baseUrl, credentials.apiKey), order.id, _gen);
+    _fund(api, order.id, _gen);
   }
 
   /// Starts or stops what the order on screen needs, after it changed: a read
@@ -486,14 +493,13 @@ class _WapuScreenState extends State<WapuScreen> {
   /// off the screen while the customer may be using them.
   Future<void> _readOrder() async {
     final order = _order;
-    final credentials = _credentials;
+    final api = _api;
     // A read that is still out is not overlapped: its answer could land after
     // a newer one and put an older state on screen.
-    if (order == null || credentials == null || _reading) return;
+    if (order == null || api == null || _reading) return;
     final gen = _gen;
     _reading = true;
-    final read = await _answer(() =>
-        wapuApiFor(credentials.baseUrl, credentials.apiKey).order(order.id));
+    final read = await _answer(() => api.order(order.id));
     if (!mounted || gen != _gen) return;
     final done =
         read.reply?.status == 'COMPLETED' && _order?.status != 'COMPLETED';
@@ -570,15 +576,14 @@ class _WapuScreenState extends State<WapuScreen> {
   /// question asked, and the first step waits while the order is read. If it
   /// cannot be read, the first step says why. Nothing happens without a key.
   Future<void> _resume(String orderId) async {
-    final credentials = _credentials;
-    if (credentials == null) return;
+    final api = _api;
+    if (api == null) return;
     setState(() {
       _resetSale();
       _checking = true;
     });
     final gen = _gen;
-    final read = await _answer(() =>
-        wapuApiFor(credentials.baseUrl, credentials.apiKey).order(orderId));
+    final read = await _answer(() => api.order(orderId));
     if (!mounted || gen != _gen) return;
     final order = read.reply;
     setState(() {
