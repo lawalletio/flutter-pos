@@ -427,7 +427,6 @@ const Map<String, String> _en = {
   'Confirmar': 'Confirm',
   'Esperando la transferencia': 'Waiting for the transfer',
   'Alias': 'Alias',
-  'CVU': 'CVU',
   'Monto exacto': 'Exact amount',
   'Transferí exactamente este monto, con centavos':
       'Transfer exactly this amount, including the cents',

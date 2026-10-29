@@ -29,7 +29,7 @@ String formatCountdown(Duration d) {
 /// are the screen's to carry out, and [now] is the screen's clock, so the
 /// countdown moves when the screen repaints with a later one.
 ///
-/// What the operator reads out or copies (alias, CVU, amounts, ids, hashes) is
+/// What the operator reads out or copies (alias, amounts, ids, hashes) is
 /// Material [m.Text] or [SelectableText]: the app's [Text] would uppercase it
 /// and squeeze it onto one line. The app's [Text] is for the buttons only.
 class WapuStatusView extends StatelessWidget {
@@ -84,15 +84,13 @@ class WapuStatusView extends StatelessWidget {
 
   List<Widget> _waiting(BuildContext context) {
     final alias = order.alias;
-    final cvu = order.cvu;
     final expiresAt = order.expiresAt;
     return [
       _title(context.tr('Esperando la transferencia')),
+      // The alias only: the CVU is not shown.
       if (alias != null)
         _bankRow(
             context, const Key('wapu-copy-alias'), context.tr('Alias'), alias),
-      if (cvu != null)
-        _bankRow(context, const Key('wapu-copy-cvu'), context.tr('CVU'), cvu),
       _bankRow(
         context,
         const Key('wapu-copy-amount'),

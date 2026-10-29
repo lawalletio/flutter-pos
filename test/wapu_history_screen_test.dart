@@ -653,7 +653,6 @@ void main() {
       expect(destination, findsNothing, reason: 'the order, not the first step');
       expect(find.text('Esperando la transferencia'), findsOneWidget);
       expect(find.text('alias.b'), findsOneWidget);
-      expect(find.text(_cvu), findsOneWidget);
       expect(find.text(r'$ 15.000,37'), findsOneWidget);
       expect(calls(_read('b')), 1);
 

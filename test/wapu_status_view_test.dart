@@ -187,28 +187,27 @@ void main() {
   });
 
   group('FUNDING_ISSUED', () {
-    testWidgets('shows the bank details, the exact amount and the countdown',
+    testWidgets('shows the alias, the exact amount and the countdown',
         (tester) async {
       await show(tester, _waiting);
 
       expect(find.text('Esperando la transferencia'), findsOneWidget);
       expect(find.text('Alias'), findsOneWidget);
       expect(find.text(_alias), findsOneWidget);
-      expect(find.text('CVU'), findsOneWidget);
-      expect(find.text(_cvu), findsOneWidget);
+      expect(find.text('CVU'), findsNothing);
+      expect(find.text(_cvu), findsNothing, reason: 'the alias only');
       expect(find.text('Monto exacto'), findsOneWidget);
       expect(find.text(r'$ 15.000,37'), findsOneWidget);
       expect(find.text('Transferí exactamente este monto, con centavos'),
           findsOneWidget);
       expect(find.text('Vence en 14:59'), findsOneWidget);
-      expect(find.text('Copiar'), findsNWidgets(3));
+      expect(find.text('Copiar'), findsNWidgets(2));
       expect(newSaleBig, findsNothing, reason: 'the order is still open');
       await tester.pumpWidget(const SizedBox());
     });
 
     for (final (what, key, text) in [
       ('the alias', 'wapu-copy-alias', _alias),
-      ('the CVU', 'wapu-copy-cvu', _cvu),
       ('the amount, as a plain decimal', 'wapu-copy-amount', '15000.37'),
     ]) {
       testWidgets('copying $what puts $text on the clipboard and says so',
@@ -231,7 +230,7 @@ void main() {
       await show(tester, _waiting);
 
       // The app's Text would uppercase these, and wrap each in a FittedBox.
-      for (final value in [_alias, _cvu, r'$ 15.000,37']) {
+      for (final value in [_alias, r'$ 15.000,37']) {
         expect(drawn(tester, find.text(value)), value);
         expect(
             find.descendant(
@@ -246,9 +245,8 @@ void main() {
       await show(tester, _order(cvu: _cvu));
 
       expect(find.text('Alias'), findsNothing);
-      expect(find.text('CVU'), findsOneWidget);
       expect(find.text('Monto exacto'), findsOneWidget);
-      expect(find.text('Copiar'), findsNWidgets(2));
+      expect(find.text('Copiar'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -511,7 +509,6 @@ void main() {
         [
           'Waiting for the transfer',
           'Alias',
-          'CVU',
           'Exact amount',
           'Transfer exactly this amount, including the cents',
           'Expires in 14:59',
@@ -558,12 +555,12 @@ void main() {
     testWidgets('the copy buttons and what they say are translated',
         (tester) async {
       await show(tester, _waiting, english: true);
-      expect(find.text('Copy'), findsNWidgets(3));
+      expect(find.text('Copy'), findsNWidgets(2));
 
-      await tester.tap(find.byKey(const Key('wapu-copy-cvu')));
+      await tester.tap(find.byKey(const Key('wapu-copy-alias')));
       await tester.pump();
 
-      expect(copied, _cvu, reason: 'the value is never translated');
+      expect(copied, _alias, reason: 'the value is never translated');
       expect(find.text('Copied'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
@@ -600,7 +597,7 @@ void main() {
               expiresAt: _now.add(const Duration(minutes: 15))));
 
       expect(tester.takeException(), isNull);
-      for (final value in [longAlias, _cvu]) {
+      for (final value in [longAlias]) {
         // A selection over the whole text has one box per line.
         final lines = tester
             .renderObject<RenderParagraph>(find.descendant(
@@ -610,7 +607,7 @@ void main() {
         expect(lines.length, greaterThan(1), reason: '$value wraps');
         expect(tester.getSize(find.text(value)).width, lessThan(480));
       }
-      for (final key in ['alias', 'cvu', 'amount']) {
+      for (final key in ['alias', 'amount']) {
         final button = find.byKey(Key('wapu-copy-$key'));
         expect(tester.getRect(button).right, lessThanOrEqualTo(480),
             reason: key);

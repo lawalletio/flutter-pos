@@ -1380,7 +1380,6 @@ void main() {
       expect(amount, findsNothing);
       expect(find.text('Esperando la transferencia'), findsOneWidget);
       expect(find.text(_alias), findsOneWidget);
-      expect(find.text(_cvu), findsOneWidget);
       expect(find.text(r'$ 15.000,37'), findsOneWidget,
           reason: 'what funding says the customer pays');
       expect(find.text(r'$ 15.000,00'), findsNothing,
@@ -2098,7 +2097,6 @@ void main() {
       expect(find.text('La API key no es válida'), findsOneWidget);
       expect(find.text('invalid api key'), findsOneWidget);
       expect(find.text(_alias), findsOneWidget);
-      expect(find.text(_cvu), findsOneWidget);
       expect(find.text(r'$ 15.000,37'), findsOneWidget);
       expect(
           tester.getTopLeft(find.text('La API key no es válida')).dy,
