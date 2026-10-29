@@ -9,6 +9,12 @@ void main() {
     );
   });
 
+  test('accepts the lightning:// prefix', () {
+    const raw = 'lightning://Alice@Example.com';
+    expect(normalizeDestination(raw), 'alice@example.com');
+    expect(classifyDestination(raw), DestinationKind.lightningAddress);
+  });
+
   test('accepts backend-valid addresses', () {
     expect(isWapuLightningAddress('alice@walletofsatoshi.com'), isTrue);
     expect(isWapuLightningAddress('a.b-c_d+e@sub.example.co'), isTrue);

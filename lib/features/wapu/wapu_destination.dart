@@ -5,13 +5,13 @@ library;
 
 enum DestinationKind { lightningAddress, invoice, lnurl, invalid }
 
-final RegExp _scheme = RegExp(r'^lightning:');
+final RegExp _scheme = RegExp(r'^lightning:(//)?');
 final RegExp _localPart = RegExp(r'^[a-z0-9\-_.+]{1,64}$');
 final RegExp _domain = RegExp(
   r'^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$',
 );
 
-/// Trim, lowercase and drop a leading `lightning:` scheme.
+/// Trim, lowercase and drop a leading `lightning:` or `lightning://` scheme.
 String normalizeDestination(String raw) =>
     raw.trim().toLowerCase().replaceFirst(_scheme, '').trim();
 
