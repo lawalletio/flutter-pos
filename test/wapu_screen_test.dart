@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:bech32/bech32.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,8 @@ import 'package:lawallet_pos/features/cards/cards_widgets.dart'
 import 'package:lawallet_pos/features/miniapps/miniapps.dart';
 import 'package:lawallet_pos/features/wapu/wapu_account.dart';
 import 'package:lawallet_pos/features/wapu/wapu_api.dart';
+import 'package:lawallet_pos/features/wapu/wapu_receipt.dart'
+    show shortDestination;
 import 'package:lawallet_pos/features/wapu/wapu_screen.dart';
 import 'package:lawallet_pos/features/wapu/wapu_settings_screen.dart';
 import 'package:lawallet_pos/features/wapu/wapu_status_view.dart'
@@ -32,14 +35,18 @@ const _other = 'other@lacrypta.ar';
 
 const _signIn = 'Ingresá con la dirección del comercio para usar Wapu';
 const _configure = 'Configurá tu API key de Wapu';
-const _invoiceHint =
-    'Eso es un invoice. Pedile al cliente su lightning address';
+const _invalidInvoice = 'El invoice no es válido';
+const _notMainnet = 'El invoice no es de la red principal de Bitcoin';
+const _noAmount = 'El invoice no tiene monto. Pedile al cliente uno con monto.';
+const _expiresSoon =
+    'El invoice vence en menos de 15 minutos. Pedile al cliente uno nuevo.';
 const _lnurlHint = 'Eso es un LNURL. Pedile al cliente su lightning address';
 const _notAnAddress = 'La lightning address no es válida';
 const _unverified = 'No se pudo verificar la lightning address';
 const _reconnecting = 'Problema en la conexión. Intentando reconectar.';
 
-const _invoice = 'lnbc10u1p3xyz';
+/// Looks like an invoice, and is too short to be one.
+const _brokenInvoice = 'lnbc10u1p3xyz';
 const _lnurl =
     'LNURL1DP68GURN8GHJ7UM5V93KKETJ9EHX2AMN9UH8WETVDSKKKMN0WAHZ7MRWW4'
     'EXCUP0DAJX2MRV92X9XP';
@@ -294,6 +301,34 @@ const _profileRoute = 'GET /users/profile';
 /// username is not known.
 const _expiredInvoice = 'La orden expiró pero se detectó el depósito en ARS, '
     'el saldo fue acreditado en';
+
+/// A BOLT11 invoice as a wallet makes it, but for the signature, which nothing
+/// checks. By default it is a mainnet invoice for [sats] that has [left] to live
+/// from now; [hrp] is the network and the amount when it is another.
+String invoiceFor({
+  int sats = 2500,
+  String? hrp,
+  Duration left = const Duration(hours: 1),
+}) {
+  // The words of [n], most significant first: [count] of them, or the fewest.
+  List<int> words(int n, [int? count]) {
+    count ??= (n.bitLength + 4) ~/ 5;
+    return [for (var i = count - 1; i >= 0; i--) (n >> (5 * i)) & 31];
+  }
+
+  // A field is its type, its length in two words, and its words.
+  List<int> field(int type, List<int> data) =>
+      [type, ...words(data.length, 2), ...data];
+  return Bech32Codec().encode(
+    Bech32(hrp ?? 'lnbc${sats * 10}n', [
+      ...words(DateTime.now().millisecondsSinceEpoch ~/ 1000, 7),
+      ...field(1, List.filled(52, 0)), // `p`: the payment hash
+      ...field(6, words(left.inSeconds)), // `x`: the expiry
+      ...List.filled(104, 0), // the signature
+    ]),
+    4000,
+  );
+}
 
 /// The [value] on the quote line named [label].
 Finder line(String label, String value) => find.descendant(
@@ -550,16 +585,17 @@ void main() {
     });
   });
 
-  testWidgets('rejects invoices and lnurls with a hint', (tester) async {
+  testWidgets('rejects broken invoices and lnurls with a hint', (tester) async {
     seed({_me: 'key-1'});
     await open(tester);
 
-    await submit(tester, _invoice);
-    expect(find.text(_invoiceHint), findsOneWidget);
+    await submit(tester, _brokenInvoice);
+    expect(find.text(_invalidInvoice), findsOneWidget);
 
     await submit(tester, _lnurl);
     expect(find.text(_lnurlHint), findsOneWidget);
-    expect(find.text(_invoiceHint), findsNothing, reason: 'one hint at a time');
+    expect(find.text(_invalidInvoice), findsNothing,
+        reason: 'one hint at a time');
 
     await submit(tester, 'hello');
     expect(find.text(_notAnAddress), findsOneWidget);
@@ -574,7 +610,8 @@ void main() {
     seed({_me: 'key-1'});
     await open(tester);
     expect(find.text('nombre@dominio.com'), findsOneWidget);
-    expect(find.text('Lightning address del cliente'), findsOneWidget);
+    expect(
+        find.text('Lightning address o invoice del cliente'), findsOneWidget);
 
     await submit(tester, '  LIGHTNING:Alice@Example.COM ');
 
@@ -738,7 +775,7 @@ void main() {
     Future<void> openScanner() async {
       await tester.tap(find.text('Escanear QR'));
       await settle(tester);
-      expect(find.text('Escaneá la lightning address del cliente'),
+      expect(find.text('Escaneá la lightning address o el invoice del cliente'),
           findsOneWidget);
     }
 
@@ -839,16 +876,14 @@ void main() {
     seed({_me: 'key-1'});
     await open(tester, english: true);
 
-    expect(find.text("Customer's Lightning address"), findsOneWidget);
+    expect(
+        find.text("Customer's Lightning address or invoice"), findsOneWidget);
     expect(find.text('name@domain.com'), findsOneWidget);
     expect(find.text('Scan QR'), findsOneWidget);
     expect(find.text('Continue'), findsOneWidget);
 
     for (final (text, copy) in [
-      (
-        _invoice,
-        'That is an invoice. Ask the customer for their Lightning address'
-      ),
+      (_brokenInvoice, 'The invoice is not valid'),
       (
         _lnurl,
         'That is an LNURL. Ask the customer for their Lightning address'
@@ -865,7 +900,8 @@ void main() {
 
     await tester.tap(find.text('Scan QR'));
     await settle(tester);
-    expect(find.text("Scan the customer's Lightning address"), findsOneWidget);
+    expect(find.text("Scan the customer's Lightning address or invoice"),
+        findsOneWidget);
     await tester.tap(find.byIcon(Icons.close));
     await settle(tester);
 
@@ -1306,6 +1342,223 @@ void main() {
       await typeDigits(tester, '5');
       await tester.pump(const Duration(milliseconds: 600));
       expect(line('The customer pays', '\$ 224,00'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('invoice', () {
+    setUp(() {
+      seed({_me: 'key-1'});
+      // The price of the 2,500 sats of the invoices below.
+      net.routes[_quoteRoute] = quoteReply(ars: 300000, out: 2500);
+      net.routes[_createRoute] = createdReply();
+      net.routes[_fundRoute] = orderReply(code: 201);
+    });
+
+    final setByInvoice = find.text('Monto fijado por el invoice');
+    final pad = find.byIcon(Icons.backspace_outlined);
+
+    VoidCallback? confirmAction(WidgetTester tester) =>
+        tester.widget<FilledButton>(confirm).onPressed;
+
+    /// Opens the sale and pastes a good invoice, which it returns. It is made
+    /// after the sale opens, so that it has all its life.
+    Future<String> toInvoice(WidgetTester tester) async {
+      await open(tester);
+      final invoice = invoiceFor();
+      await submit(tester, invoice);
+      expect(amount, findsOneWidget, reason: 'the invoice was taken');
+      return invoice;
+    }
+
+    testWidgets('an invoice sets the amount, which cannot be typed over',
+        (tester) async {
+      await open(tester);
+      final text = invoiceFor();
+      await tester.enterText(destination, 'LIGHTNING:${text.toUpperCase()}');
+      await tester.tap(next);
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(amount, findsOneWidget);
+      expect(net.calls, [_quoteRoute],
+          reason: 'asked at once, not after the 500 ms of the pad');
+      expect(net.queries.single, containsPair('amount_out', '2500'));
+      expect(net.queries.single, isNot(contains('amount_ars_cents')));
+      expect(fake.validated, isEmpty, reason: 'an invoice is not looked up');
+      await settle(tester);
+
+      expect(find.text(shortDestination(text)), findsOneWidget,
+          reason: 'the invoice, short, where the address goes');
+      expect(find.text(text), findsNothing);
+      expect(find.text('2.500 sats'), findsNWidgets(2),
+          reason: 'the amount, and what the customer receives');
+      expect(setByInvoice, findsOneWidget);
+      expect(inArs, findsNothing);
+      expect(inSats, findsNothing);
+      expect(pad, findsNothing);
+      // The lines of the sats mode: what the customer pays comes first.
+      expect(line('El cliente paga', r'$ 3.000,00'), findsOneWidget);
+      expect(line('El cliente recibe', '2.500 sats'), findsOneWidget);
+      expect(line('Tipo de cambio', r'$ 120.000.000 por BTC'), findsOneWidget);
+      expect(confirmAction(tester), isNotNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('confirm creates the order for the invoice and its sats',
+        (tester) async {
+      final text = await toInvoice(tester);
+
+      await tester.tap(confirm);
+      await settle(tester);
+
+      expect(net.calls, [_quoteRoute, _createRoute, _fundRoute]);
+      expect(net.bodies[1], {
+        'type': 'crypto_purchase',
+        'payout_currency': 'SAT',
+        'payout_network': 'LIGHTNING',
+        'payout_address': text,
+        'amount_out': 2500,
+      });
+      expect(find.text(_alias), findsOneWidget, reason: 'the order is funded');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an invoice with 14 minutes left is refused at Continuar',
+        (tester) async {
+      await open(tester);
+
+      await submit(tester, invoiceFor(left: const Duration(minutes: 14)));
+      expect(find.text(_expiresSoon), findsOneWidget);
+      expect(destination, findsOneWidget, reason: 'still on the first step');
+      expect(net.calls, isEmpty, reason: 'nothing was priced');
+      expect(fake.validated, isEmpty);
+
+      await submit(tester, invoiceFor());
+      expect(amount, findsOneWidget, reason: 'a good one is taken');
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pump();
+      expect(find.text(_expiresSoon), findsNothing,
+          reason: 'the message was about the last invoice');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('says why any other invoice is refused', (tester) async {
+      await open(tester);
+
+      for (final (text, message) in [
+        (invoiceFor(hrp: 'lntb25u'), _notMainnet),
+        (invoiceFor(hrp: 'lnbcrt25u'), _notMainnet),
+        (invoiceFor(hrp: 'lnbc'), _noAmount),
+        (invoiceFor(hrp: 'lnbc1p'), _invalidInvoice), // a tenth of a sat
+        (invoiceFor(left: const Duration(seconds: 1)), _expiresSoon),
+        (_brokenInvoice, _invalidInvoice),
+      ]) {
+        await submit(tester, text);
+        expect(find.text(message), findsOneWidget, reason: text);
+      }
+      expect(destination, findsOneWidget);
+      expect(net.calls, isEmpty);
+      expect(fake.validated, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an invoice that crossed the 15-minute line is not paid',
+        (tester) async {
+      await open(tester);
+      // 3 s over the line: it passes the first step, and not the third.
+      final text = invoiceFor(left: const Duration(minutes: 15, seconds: 3));
+      await submit(tester, text);
+      expect(amount, findsOneWidget, reason: 'it had more than 15 minutes');
+      expect(confirmAction(tester), isNotNull);
+
+      // The invoice reads the device's clock, which a test cannot move: let it
+      // really go by.
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 3100)));
+      await tester.tap(confirm);
+      await settle(tester);
+
+      expect(net.calls, [_quoteRoute], reason: 'no order was made');
+      expect(find.text(_expiresSoon), findsOneWidget);
+      expect(destination, findsOneWidget, reason: 'back, to ask for another');
+      expect(amount, findsNothing);
+      expect(fieldText(tester), text, reason: 'the old one, to be replaced');
+
+      final fresh = invoiceFor();
+      await submit(tester, fresh);
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(net.calls, [_quoteRoute, _quoteRoute, _createRoute, _fundRoute]);
+      expect(net.bodies[2], containsPair('payout_address', fresh));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the pencil drops the invoice and its amount', (tester) async {
+      final text = await toInvoice(tester);
+
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pump();
+      expect(destination, findsOneWidget);
+      expect(fieldText(tester), text, reason: 'what was typed stays');
+
+      await submit(tester, 'alice@example.com');
+      expect(fake.validated, ['alice@example.com']);
+      expect(find.text(r'$ 0'), findsOneWidget, reason: 'a sale in pesos');
+      expect(inArs, findsOneWidget);
+      expect(inSats, findsOneWidget);
+      expect(pad, findsOneWidget);
+      expect(setByInvoice, findsNothing);
+      expect(confirmAction(tester), isNull, reason: "the invoice's sats went");
+
+      await typeDigits(tester, '15000');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(net.queries.last, containsPair('amount_ars_cents', '1500000'));
+      expect(net.queries.last, isNot(contains('amount_out')));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Nueva venta after an invoice starts an ordinary sale',
+        (tester) async {
+      await toInvoice(tester);
+
+      await tester.tap(newSale); // nothing waits for a transfer: no question
+      await settle(tester);
+      expect(destination, findsOneWidget);
+      expect(fieldText(tester), isEmpty);
+
+      await submit(tester, 'alice@example.com');
+      expect(find.text(r'$ 0'), findsOneWidget);
+      expect(inSats, findsOneWidget);
+      expect(pad, findsOneWidget);
+      expect(setByInvoice, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the invoice copy is translated', (tester) async {
+      await open(tester, english: true);
+
+      for (final (text, copy) in [
+        (
+          invoiceFor(hrp: 'lntb25u'),
+          'The invoice is not for the Bitcoin mainnet'
+        ),
+        (
+          invoiceFor(hrp: 'lnbc'),
+          'The invoice has no amount. Ask the customer for one with an amount.'
+        ),
+        (
+          invoiceFor(left: const Duration(minutes: 14)),
+          'The invoice expires in less than 15 minutes. '
+              'Ask the customer for a new one.'
+        ),
+      ]) {
+        await submit(tester, text);
+        expect(find.text(copy), findsOneWidget, reason: text);
+      }
+
+      await submit(tester, invoiceFor());
+      expect(find.text('Amount set by the invoice'), findsOneWidget);
+      expect(line('The customer receives', '2.500 sats'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });

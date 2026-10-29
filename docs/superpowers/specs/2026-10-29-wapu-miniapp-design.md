@@ -7,18 +7,18 @@ Status: approved. The user approved the flow and waived further spec review.
 
 A merchant uses the POS to sell bitcoin to a walk-in customer:
 
-1. The customer gives a lightning address.
+1. The customer gives a lightning address or a BOLT11 invoice.
 2. The POS shows a WapuPay bank alias, a CVU and an exact ARS amount.
 3. The customer pays that amount by bank transfer from their own bank.
-4. WapuPay sends the sats to the customer's lightning address.
+4. WapuPay sends the sats to the customer's lightning address, or pays their invoice.
 
 The mini-app drives the WapuPay ramp-on (`type=crypto_purchase`) with the merchant's API key. It covers only the ARS to Lightning path of the wapu-app "swaps" screen, and it behaves the way that path does in wapu-app today.
 
 ## Decisions
 
-1. **Who sells to whom.** The POS sells BTC to walk-in customers. Orders, limits and history belong to the merchant's WapuPay account (the API key owner). The customer's lightning address receives the sats.
+1. **Who sells to whom.** The POS sells BTC to walk-in customers. Orders, limits and history belong to the merchant's WapuPay account (the API key owner). The customer's lightning address, or their invoice, receives the sats.
 2. **Payment.** The customer pays only by bank transfer to the alias or CVU the POS shows. There is no cash payment.
-3. **Destination first.** The sale starts with the customer's lightning address, then the amount.
+3. **Destination first.** The sale starts with the customer's lightning address or BOLT11 invoice, then the amount. An invoice sets its own amount.
 4. **Credentials per POS user.** The API key and backend URL are stored per POS user, meaning per `merchantAddress`.
    - A different POS user is asked for a key.
    - Coming back to a user who already saved a key does not ask again.
@@ -40,7 +40,6 @@ The mini-app drives the WapuPay ramp-on (`type=crypto_purchase`) with the mercha
 ## Out of scope
 
 - **Cancelling an order.** survivors has no cancel route for ramp-on orders. Abandoned orders expire.
-- **BOLT11 invoices as the destination.** The backend accepts only LUD-16 lightning addresses. Accepting invoices needs a survivors change; it is noted as a later phase.
 - **Backend changes.** The open-order cap stays a global setting. Ops raises `ramp_on_user_open_cap` with the Telegram `/settings` command.
 - **Ticket printing.**
 - **iOS.**
@@ -60,7 +59,7 @@ The contract comes from survivors `develop` at 6c0f1dbe. All paths are relative 
 | Call | Request | Result |
 |---|---|---|
 | Quote | `GET /transactions/direct-fiat/quote?type=crypto_purchase&payout_currency=SAT&payout_network=LIGHTNING` plus exactly one of `amount_ars_cents` or `amount_out` (digits only) | 200 with a quote |
-| Create | `POST /transactions/direct-fiat/tentatives` with `{type, payout_currency: "SAT", payout_network: "LIGHTNING", payout_address, amount_ars_cents \| amount_out}` | 201 with an order. Not idempotent. |
+| Create | `POST /transactions/direct-fiat/tentatives` with `{type, payout_currency: "SAT", payout_network: "LIGHTNING", payout_address, amount_ars_cents \| amount_out}`. For an invoice, see **BOLT11 invoices** below. | 201 with an order. Not idempotent. |
 | Funding | `POST /transactions/direct-fiat/tentatives/{id}/funding` with `{}` | 201 with the order, now including `alias` and `cvu`. A replay returns the same order. |
 | Detail | `GET /transactions/direct-fiat/tentatives/{id}` | 200 with the order, or 404 if it is not the caller's order |
 | List | `GET /transactions/direct-fiat/tentatives` | 200 with `{"tentatives": [order, ...]}` |
@@ -105,7 +104,7 @@ Funding can raise `amount_ars_cents` by up to 100 cents so that each pending amo
 
 | Status | Typical backend message | What the POS shows |
 |---|---|---|
-| 400 | `payout_address is required`, `lightning address rejected: …` | the destination or amount is invalid |
+| 400 | `payout_address is required`, `lightning address rejected: …`, or why an invoice was refused | the destination or amount is invalid |
 | 401 | invalid key | the key is not valid; open config |
 | 403 | `crypto purchases are disabled` / `require beta access` / `an active registered user is required` | the account cannot buy (feature off, beta off, inactive) |
 | 404 | not found | the order does not exist for this account |
@@ -114,13 +113,19 @@ Funding can raise `amount_ars_cents` by up to 100 cents so that each pending amo
 | 429 | `too many open purchase orders`, `too many purchase orders`, `monthly purchase limit reached` | wait for open orders to expire, or the monthly limit is reached |
 | 503 | `lightning address unreachable`, payout provider unavailable | try again later |
 
-**Lightning addresses (LUD-16 only):**
+**Lightning addresses (LUD-16):**
 
 - The address is lowercased and may have a `lightning:` prefix.
 - It has exactly one `@`.
 - The local part matches `^[a-z0-9\-_.+]{1,64}$`.
 - The domain is a fully qualified domain name with an alphabetic top-level domain.
 - The backend resolves the address through LNURL. `amount_out` must be within the address's min and max sendable.
+
+**BOLT11 invoices** (a survivors change that follows the commit above):
+
+- `payout_address` is the invoice, and the order is made in sats mode: `amount_out` is the invoice's amount, and `amount_ars_cents` is never sent.
+- The backend takes only a mainnet (`lnbc`) invoice whose amount is exactly `amount_out`, with more than 15 minutes of life left. It checks that when the order is created and again when it is funded, and answers 400 with a message otherwise.
+- The POS checks the same before it asks for a quote and again before it creates the order, so that it refuses what the backend would refuse.
 
 **Limits** come from global backend settings:
 
@@ -137,13 +142,19 @@ All copy is Spanish source text with English translations (`context.tr`).
 0. **Entry.**
    - If no POS user is signed in, the mini-app says a POS user is needed.
    - If the user has no saved key, it opens the config.
-1. **Destination.** The operator scans the customer's wallet QR with the existing `TokenScanPage`, or types or pastes the address.
+1. **Destination.** The operator scans the customer's wallet QR with the existing `TokenScanPage`, or types or pastes a lightning address or a BOLT11 invoice into the same field. The POS tells them apart by their form.
    - Scanned text is normalized: trimmed, lowercased, with the `lightning:` prefix stripped.
-   - A BOLT11 invoice or LNURL string is rejected with "Pedile al cliente su lightning address".
-   - The format is checked with the backend rules, then the address is resolved with the existing `lnurl.validate`. The operator cannot continue until it resolves.
+   - An address has an `@`, an invoice starts with `lnbc` or `lntb`, and an LNURL string with `lnurl`. An LNURL string is rejected with "Pedile al cliente su lightning address".
+   - An address is checked with the backend rules, then resolved with the existing `lnurl.validate`. The operator cannot continue until it resolves.
+   - An invoice is decoded on the device with `bolt11_decoder`, and it is not looked up. It is refused, each problem with its own message, unless it:
+     - decodes with a valid checksum, and its amount is a whole number of sats;
+     - is for the Bitcoin mainnet (`lnbc`, not regtest, testnet or signet);
+     - has an amount;
+     - has more than 15 minutes of life left. Its life ends at its timestamp plus its `x` expiry, or an hour when it has none. Exactly 15 minutes left is refused.
 2. **Amount.** The amount pad is built on the existing `Numpad`. It takes whole pesos by default, with a toggle to sats.
    - `AmountPad` is not reused: it yields only sats at POS rates, and it rewrites the global currency.
    - The quote refreshes 500 ms after the last keypress.
+   - An invoice sets the amount, so the sale is in sats mode with the invoice's sats, shown with the note "Monto fijado por el invoice". There is no unit toggle and no pad, and the quote is asked for at once with `amount_out`. The destination shows the invoice shortened (first 12 characters, an ellipsis, last 8). Its pencil goes back to step 1 and drops the invoice with its amount.
 
    The screen shows:
    - the sats the customer receives;
@@ -155,11 +166,12 @@ All copy is Spanish source text with English translations (`context.tr`).
 
    Confirm is enabled only with a fresh quote that has liquidity and is not below the minimum.
 3. **Confirm.** One tap creates the order and then requests funding.
+   - With an invoice, the POS first reads it again, as it has kept ageing. If it has 15 minutes or less left, no order is made: the sale goes back to step 1, with the message and the old invoice still in the field. Otherwise the order is created with the invoice as `payout_address` and its sats as `amount_out`.
    - If create times out, the POS does not retry. It says the result is unknown and to check Historial.
    - If funding fails, Retry calls funding again, which is safe.
 4. **Status.** The status screen polls every 10 s.
    - Waiting for the transfer: alias, CVU and the exact amount with cents, each with a copy button, plus a countdown to `expires_at`.
-   - Sending, then "Listo" with the order's receipt. Reaching COMPLETED plays the existing paid sound (`AppSounds.play(AppSound.paid)`). The receipt lists the sats, the date (local time, when the body has `created_at`), the status, the destination (a BOLT11 invoice is shortened), the order id with a copy button and a QR, the fee, the ARS the customer paid and the total in sats. The total is `round((amount_out + network_fee_out) × total_amount_usdt / funding_amount_usdt)`, and the fee is that minus `amount_out`; without the two USDT figures they are `amount_out + network_fee_out` and `network_fee_out`. The History opens the same view, so it is the detail of an order too.
+   - Sending, then "Listo" with the order's receipt. Reaching COMPLETED plays the existing paid sound (`AppSounds.play(AppSound.paid)`). The receipt lists the sats, the date (local time, when the body has `created_at`), the status, the destination (a BOLT11 invoice is shortened, as it is in the History's rows and in the line that says the sats are on their way), the order id with a copy button and a QR, the fee, the ARS the customer paid and the total in sats. The total is `round((amount_out + network_fee_out) × total_amount_usdt / funding_amount_usdt)`, and the fee is that minus `amount_out`; without the two USDT figures they are `amount_out + network_fee_out` and `network_fee_out`. The History opens the same view, so it is the detail of an order too.
    - In review: tells the operator to keep the order ID.
    - Settled to balance: says the customer did not get the sats and the money is in the merchant's Wapu balance, and shows the receipt with the status "Acreditada en saldo Wapu". When `error_code` is `invoice_expired`, the message says that the order expired but the ARS deposit was detected, and that the balance was credited to the Wapu account, naming its `username` (read once per key with `GET /users/profile`; "tu cuenta de Wapu" when it cannot be read).
    - Expired (`EXPIRED`, or `FUNDING_ISSUED` and `CREATED` once `expires_at` has passed, before the poll says so): the countdown gives way to the order's details. It says that no ARS was received and no sats were sent, and shows the receipt with the status "Vencida" and the deposit that was expected. If `watch_pending` is still true, it also says a late transfer is still detected until `late_watch_until`.
@@ -185,7 +197,7 @@ New code lives in `lib/features/wapu/`, and each file has one job:
 |---|---|
 | `wapu_api.dart` | `WapuApi`: one Dio per base URL and key, with the `X-API-Key` header, a 15 s default timeout and 45 s for create and funding. Parses `WapuQuote` and `WapuOrder`. Maps errors to `WapuApiException(statusCode, message)`, with a `timeout` flag for unknown outcomes. No Flutter imports. |
 | `wapu_account.dart` | `WapuAccounts`: per-merchant credentials (`apiKey`, `baseUrl`) in `flutter_secure_storage`, under one JSON map keyed by `merchantAddress.trim().toLowerCase()`. Provides load, save and forget. A failed read, for example while the Keystore is busy, counts as no saved key when loading and deletes nothing, while a save or a forget fails instead of writing over entries it could not read. Each merchant's entry is parsed on its own, so a malformed one is skipped without hiding the others. After Android restores a backup that cannot carry Keystore keys, the plugin resets its own storage (`resetOnError`), and the key is asked for again. |
-| `wapu_destination.dart` | Pure helpers: normalize scanned text, validate LUD-16 with the backend regexes, and detect BOLT11 and LNURL strings. |
+| `wapu_destination.dart` | Pure helpers: normalize scanned text, validate LUD-16 with the backend regexes, detect BOLT11 and LNURL strings, and read a BOLT11 invoice: its network, its sats and its life left. |
 | `wapu_screen.dart` | The sale flow: destination, then amount, then confirm, then status. App bar actions are Historial, Nueva venta and the gear. Owns the order poller. |
 | `wapu_status_view.dart` | Presentation of one order: the state copy, bank details with copy buttons, the countdown and the actions. |
 | `wapu_history_screen.dart` | The order list and resume. |
@@ -227,10 +239,10 @@ No new package is added. `flutter_secure_storage` is already declared in `pubspe
   - parsing of the quote, the order and the list;
   - error mapping, including timeouts on create.
 - **Credential store tests:** per-merchant isolation, load, save, forget, and the default URL.
-- **Pure helper tests:** address normalization, LUD-16 validation, BOLT11 and LNURL detection.
+- **Pure helper tests:** address normalization, LUD-16 validation, BOLT11 and LNURL detection, and invoice reading (network, amount, default expiry, the 15-minute line).
 - **Widget tests:**
   - setup is required without a key;
-  - the destination gate, with a fake `lnurl`;
+  - the destination gate, with a fake `lnurl`, and an invoice that locks the amount;
   - the debounced quote and the minimum or liquidity gating;
   - confirm leads to the status with bank details and copy buttons;
   - polling transitions to "Listo" and to "settled to balance";
