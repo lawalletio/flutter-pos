@@ -455,7 +455,7 @@ void main() {
       expect(find.text('Depósito esperado'), findsOneWidget);
       expect(find.text('Depósito del cliente'), findsNothing);
       expect(find.text('Monto'), findsOneWidget);
-      expect(find.text('12.500 SAT'), findsOneWidget);
+      expect(find.text('12.521 SAT'), findsOneWidget);
       expect(find.text(_id), findsOneWidget);
       expect(newSaleBig, findsOneWidget);
       await tester.pumpWidget(const SizedBox());
@@ -570,11 +570,12 @@ void main() {
       final headline = find.text('¡Listo! El cliente recibió 12.500 sats');
       expect(headline, findsOneWidget);
       expect(receipt, findsOneWidget);
-      // The receipt is of this order: its id and its sats, fee and total.
+      // The receipt is of this order: its id and its purchased sats, fee and
+      // total, the total being the sats of the headline.
       expect(find.text(_id), findsOneWidget);
-      expect(find.text('12.500 SAT'), findsOneWidget);
-      expect(find.text('21 SAT'), findsOneWidget);
       expect(find.text('12.521 SAT'), findsOneWidget);
+      expect(find.text('21 SAT'), findsOneWidget);
+      expect(find.text('12.500 SAT'), findsOneWidget);
       expect(find.text('15.000,37 ARS'), findsOneWidget);
       expect(find.text('Completada'), findsOneWidget);
       expect(tester.getTopLeft(headline).dy,
@@ -622,9 +623,11 @@ void main() {
           find.text(
               DateFormat('yyyy-MM-dd HH:mm:ss').format(created.toLocal())),
           findsOneWidget);
-      // 12.521 sats at a 5% commission: 13.147, and 647 of them are fee.
+      // 12.521 sats at a 5% commission: 13.147 bought, with the 21 of network
+      // fee and the 12.500 the customer got.
       expect(find.text('13.147 SAT'), findsOneWidget);
-      expect(find.text('647 SAT'), findsOneWidget);
+      expect(find.text('21 SAT'), findsOneWidget);
+      expect(find.text('12.500 SAT'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });

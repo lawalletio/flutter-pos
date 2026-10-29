@@ -20,7 +20,8 @@ final _createdClock =
 const _invoice = 'lnbc10u1p3xyzabcdefghijklmnopqrstuvwxyz0123456789';
 
 /// 689 sats and a 1 sat network fee, bought at a 5% commission (105 USDT cents
-/// for 100): 725 sats in all, 36 of them fee. The customer paid $ 1.234,56.
+/// for 100): the pesos bought 725 sats, 35 of them commission. The customer
+/// paid $ 1.234,56.
 WapuOrder _order({
   String status = 'COMPLETED',
   String payoutAddress = 'cliente@wallet.com',
@@ -108,6 +109,15 @@ void main() {
     await tester.pump(); // the language loads before the first frame
   }
 
+  /// What the receipt says on the row of [label]: the text next to it.
+  String valueOf(WidgetTester tester, String label) => tester
+      .widget<Wrap>(
+          find.ancestor(of: find.text(label), matching: find.byType(Wrap)))
+      .children
+      .whereType<Text>()
+      .last
+      .data!;
+
   group('formatPesos', () {
     test('is the pesos of formatArsCents, with no sign', () {
       expect(formatPesos(123456), '1.234,56');
@@ -146,13 +156,13 @@ void main() {
 
       expect(receipt, findsOneWidget);
       final rows = [
-        ('Comprado', '689 SAT'),
+        ('Comprado', '725 SAT'),
         ('Fecha', _createdClock),
         ('Estado', 'Completada'),
         ('Para', 'cliente@wallet.com'),
-        ('Comisión de la operación', '36 SAT'),
+        ('Comisión de la operación', '1 SAT'),
         ('Depósito del cliente', '1.234,56 ARS'),
-        ('Total', '725 SAT'),
+        ('Total', '689 SAT'),
       ];
       final card = tester.getRect(receipt);
       for (final (label, value) in rows) {
@@ -207,18 +217,45 @@ void main() {
         'Client deposit',
         'Total',
         // The values are not translated.
-        '689 SAT',
+        '725 SAT',
         _createdClock,
         'cliente@wallet.com',
         _id,
-        '36 SAT',
+        '1 SAT',
         '1.234,56 ARS',
-        '725 SAT',
+        '689 SAT',
       ]) {
         expect(find.text(text), findsOneWidget, reason: text);
       }
       expect(find.byTooltip('COPY'), findsOneWidget);
       expect(find.byTooltip('SHOW QR'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'matches the merchant receipt: 689 purchased, a 30 fee and a 620 total',
+        (tester) async {
+      // The pesos bought 689 sats (a 6% commission: 689 USDT cents for 650). The
+      // client got 620 of them and the network took 30: Wapu kept the other 39.
+      await show(
+          tester,
+          const WapuOrder(
+            id: _id,
+            status: 'COMPLETED',
+            payoutStatus: 'completed',
+            payoutAddress: 'cliente@wallet.com',
+            amountArsCents: 65000,
+            amountOut: 620,
+            networkFeeOut: 30,
+            watchPending: false,
+            totalAmountUsdt: 689,
+            fundingAmountUsdt: 650,
+          ),
+          english: true);
+
+      expect(valueOf(tester, 'Purchased'), '689 SAT');
+      expect(valueOf(tester, 'Transaction fee'), '30 SAT');
+      expect(valueOf(tester, 'Total'), '620 SAT');
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -256,6 +293,10 @@ void main() {
         expect(find.text('1.234,56 ARS'), findsOneWidget);
         expect(
             find.text(amount == 'Monto' ? 'Comprado' : 'Monto'), findsNothing);
+        // The three amounts mean the same whatever the status.
+        expect(valueOf(tester, amount), '725 SAT');
+        expect(valueOf(tester, 'Comisión de la operación'), '1 SAT');
+        expect(valueOf(tester, 'Total'), '689 SAT');
 
         await show(tester, _order(status: status), english: true);
 
@@ -290,9 +331,9 @@ void main() {
             watchPending: false,
           ));
 
-      expect(find.text('1.250.000 SAT'), findsOneWidget);
+      expect(find.text('1.250.021 SAT'), findsOneWidget, reason: 'purchased');
       expect(find.text('21 SAT'), findsOneWidget, reason: 'the fee alone');
-      expect(find.text('1.250.021 SAT'), findsOneWidget, reason: 'the total');
+      expect(find.text('1.250.000 SAT'), findsOneWidget, reason: 'the total');
       expect(find.text('1.234.567,89 ARS'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });

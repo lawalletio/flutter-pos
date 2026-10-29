@@ -178,10 +178,13 @@ class WapuOrder {
 
   bool get hasBankDetails => alias != null && cvu != null;
 
-  /// What the ARS bought, in sats: the sats and their network fee, scaled by
-  /// the total over the funding so the commission is in it. Without both USDT
-  /// figures, the sats and the network fee alone.
-  int get totalSats {
+  /// What the customer's ARS bought, in sats at the order's own rate: the sats
+  /// and their network fee, scaled by the total over the funding so the
+  /// commission is in it. Without both USDT figures, the sats and the network
+  /// fee alone. Take the [networkFeeOut] and the [amountOut] sats off it and
+  /// what is left is the Wapu commission, which the quote shows as 'Comisión
+  /// incluida'.
+  int get purchasedSats {
     final sent = amountOut + networkFeeOut;
     final total = totalAmountUsdt;
     final funding = fundingAmountUsdt;
@@ -190,10 +193,6 @@ class WapuOrder {
     }
     return (sent * total + funding ~/ 2) ~/ funding;
   }
-
-  /// What the order cost on top of the [amountOut] sats: the network fee and
-  /// the commission.
-  int get feeSats => totalSats - amountOut;
 
   /// Whether the order still needs attention at [now]: the backend watches it,
   /// or it was created and its window has not closed.

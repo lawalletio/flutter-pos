@@ -733,7 +733,7 @@ void main() {
       expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
       for (final text in [
         'Comprado',
-        '17.000 SAT',
+        '17.021 SAT', // no USDT figures to scale: the sats and the fee
         'Fecha',
         clock,
         'Completada',
@@ -744,7 +744,7 @@ void main() {
         'Depósito del cliente',
         '20.000,00 ARS',
         'Total',
-        '17.021 SAT',
+        '17.000 SAT', // what the customer got
       ]) {
         expect(find.text(text), findsOneWidget, reason: text);
       }

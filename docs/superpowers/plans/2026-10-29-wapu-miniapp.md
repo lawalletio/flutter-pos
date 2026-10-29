@@ -138,7 +138,7 @@
     - `String?` fields `alias`, `cvu`, `paymentHash`, `errorCode` and `type`;
     - `factory WapuOrder.fromJson(Map<String, dynamic>)`;
     - `bool get hasBankDetails`;
-    - `int get totalSats`, equal to `((amountOut + networkFeeOut) * totalAmountUsdt + fundingAmountUsdt ~/ 2) ~/ fundingAmountUsdt`, or `amountOut + networkFeeOut` without both figures, and `int get feeSats`, equal to `totalSats - amountOut`;
+    - `int get purchasedSats`, the sats the customer's ARS bought, equal to `((amountOut + networkFeeOut) * totalAmountUsdt + fundingAmountUsdt ~/ 2) ~/ fundingAmountUsdt`, or `amountOut + networkFeeOut` without both figures;
     - `bool isInProgress(DateTime now)`, true when `watchPending`, or when status is CREATED and `now` is before `expiresAt`.
   - `class WapuApi` with:
     - `WapuApi({required String baseUrl, required String apiKey, Dio? dio})`;
@@ -434,7 +434,7 @@
 | EXPIRED, FUNDING_ISSUED with `expiresAt` not after `now`, or CREATED past `expiresAt` | Title `'Orden vencida'`, then `'No se recibieron ARS ni se enviaron sats.'`. With `watchPending` and `lateWatchUntil`, also `'Si el cliente ya transfirió, lo seguimos buscando hasta las '` + `HH:mm`, the local time of `lateWatchUntil`. Then the `WapuReceipt`, with the status `'Vencida'` and the deposit row `'Depósito esperado'`. The big `'Nueva venta'` shows only without `watchPending`. |
 | EXECUTED + `sending` | The Wapu logo (`Key('wapu-logo')`, `assets/images/wapu_logo.png`) on a white plate, then `'Pago recibido'`, a small spinner beside `'Enviando los sats…'`, and the sats and the payout address (`shortDestination`: an invoice is shortened). |
 | EXECUTED + `review` | `'En revisión'`, plus `'Guardá el ID de la orden: '` + id |
-| COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, then the `WapuReceipt` (`lib/features/wapu/wapu_receipt.dart`, `Key('wapu-receipt')`): the rows `'Comprado'`, `'Fecha'` (only with `createdAt`), `'Estado'`, `'Para'` (`shortDestination`), the id with its copy (`Key('wapu-copy-id')`) and QR (`Key('wapu-id-qr')`) buttons, `'Comisión de la operación'`, `'Depósito del cliente'` and `'Total'`. |
+| COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, then the `WapuReceipt` (`lib/features/wapu/wapu_receipt.dart`, `Key('wapu-receipt')`): the rows `'Comprado'` (`purchasedSats`), `'Fecha'` (only with `createdAt`), `'Estado'`, `'Para'` (`shortDestination`), the id with its copy (`Key('wapu-copy-id')`) and QR (`Key('wapu-id-qr')`) buttons, `'Comisión de la operación'` (`networkFeeOut`), `'Depósito del cliente'` and `'Total'` (`amountOut`, the sats of the headline). |
 | SETTLED_TO_BALANCE | `'No se pudieron enviar los sats'`, plus `'El monto quedó en tu saldo de Wapu.'`, then the `WapuReceipt` (status `'Acreditada en saldo Wapu'`). With `errorCode == 'invoice_expired'` the message is `'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en la cuenta de Wapu '` + the `wapuUser` the screen passes, or `'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en tu cuenta de Wapu.'` when it is null. |
 | any other status | the raw `status` |
 
