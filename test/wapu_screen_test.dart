@@ -1480,6 +1480,36 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('the amount cannot be retyped under a pending create',
+        (tester) async {
+      net.failures[_createRoute] = DioException(
+          requestOptions: RequestOptions(),
+          type: DioExceptionType.receiveTimeout);
+      final held = holdOn('POST', _tentatives);
+      await toAmount(tester);
+      await price(tester);
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(calls(_createRoute), 1, reason: 'the create is out');
+      expect(find.text(r'$ 15.000'), findsOneWidget);
+
+      await tester.tap(find.text('7'));
+      await tester.tap(find.byIcon(Icons.backspace_outlined));
+      await tester.tap(inSats);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.text(r'$ 15.000'), findsOneWidget,
+          reason: 'the amount is the one being created');
+      expect(find.text('0 sats'), findsNothing, reason: 'still in pesos');
+      expect(calls(_quoteRoute), 1, reason: 'no price was asked for');
+
+      held.complete(); // the create fails: the sale is where it was
+      await settle(tester);
+      expect(find.text(r'$ 15.000'), findsOneWidget);
+      expect(confirmAction(tester), isNotNull, reason: 'its price still stands');
+      expect(calls(_quoteRoute), 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('Confirmar waits while the key is read again after the config',
         (tester) async {
       final slow = SlowAccounts();
@@ -1876,6 +1906,83 @@ void main() {
 
       await tester.pump(const Duration(seconds: 30));
       expect(calls(_detailRoute), 1, reason: 'the old order is not followed');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a sale that got paid while the question was up is not reset',
+        (tester) async {
+      await toWaiting(tester);
+      await tester.tap(newSale);
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsOneWidget);
+
+      // The customer pays while the operator is still reading the question.
+      net.routes[_detailRoute] =
+          orderReply(status: 'EXECUTED', payout: 'sending', bank: false);
+      await tester.pump(const Duration(seconds: 10));
+      expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget);
+
+      await confirmDialog(tester);
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(destination, findsNothing, reason: 'the paid sale is not reset');
+      expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget);
+
+      // It is still followed to the end.
+      net.routes[_detailRoute] = completedReply();
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      expect(find.textContaining('¡Listo!'), findsOneWidget);
+      expect(paid(), 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets("the question of one user does not reset the next user's sale",
+        (tester) async {
+      seed({_me: 'key-1', _other: 'key-2'});
+      await toWaiting(tester);
+      await tester.tap(newSale);
+      await settle(tester);
+
+      merchantAddress.value = _other; // the till changes hands under the question
+      await settle(tester);
+      expect(destination, findsOneWidget);
+      tester.widget<TextField>(destination).controller!.text =
+          'carol@example.com';
+
+      await confirmDialog(tester);
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(fieldText(tester), 'carol@example.com',
+          reason: 'their sale was not reset');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('two presses in one frame ask the question once',
+        (tester) async {
+      await toWaiting(tester);
+
+      // Not two tap gestures: after the first one pushes the dialog, the
+      // Navigator absorbs every pointer of that frame. This is the other ways
+      // in (a key, an accessibility action) pressing the button twice.
+      final press = tester.widget<IconButton>(newSale).onPressed!;
+      press();
+      press(); // the first question is not even built yet
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsNothing,
+          reason: 'there was no second one under the first');
+      expect(find.text(_alias), findsOneWidget);
+
+      await tester.tap(newSale); // it was answered: it can be asked again
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
 

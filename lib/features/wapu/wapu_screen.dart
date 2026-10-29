@@ -128,6 +128,10 @@ class _WapuScreenState extends State<WapuScreen> {
   /// An order is being read again, so the next tick leaves it be.
   bool _reading = false;
 
+  /// The question of Nueva venta is on screen, or on its way: asking it again
+  /// does nothing, so there is never one dialog under another.
+  bool _asking = false;
+
   /// Why the order could not be created. The sale stays on the amount step.
   WapuApiException? _createError;
 
@@ -319,8 +323,9 @@ class _WapuScreenState extends State<WapuScreen> {
   }
 
   /// Digits typed as pesos are not sats, so the other unit starts from nothing.
+  /// Not while an order is being created for the amount on screen.
   void _setMode(_Mode mode) {
-    if (mode == _mode) return;
+    if (mode == _mode || _busy) return;
     setState(() {
       _clearAmount();
       _mode = mode;
@@ -341,9 +346,10 @@ class _WapuScreenState extends State<WapuScreen> {
       _type(_raw.length <= 1 ? '0' : _raw.substring(0, _raw.length - 1));
 
   /// The digits became [raw]. The price on screen is of the old amount, so it
-  /// goes, and the new one is asked for once the operator pauses.
+  /// goes, and the new one is asked for once the operator pauses. Not while an
+  /// order is being created for the amount on screen: it is not typed over.
   void _type(String raw) {
-    if (raw == _raw) return;
+    if (raw == _raw || _busy) return;
     final n = int.parse(raw);
     setState(() {
       _clearAmount();
@@ -515,8 +521,32 @@ class _WapuScreenState extends State<WapuScreen> {
   /// order on screen is let go: it expires on its own, and the History has it.
   /// One that waits for the customer's transfer asks first.
   Future<void> _newSale() async {
+    if (_asking) return;
     if (_order?.status == 'FUNDING_ISSUED') {
-      final ok = await showDialog<bool>(
+      final gen = _gen;
+      var confirmed = false;
+      _asking = true;
+      try {
+        confirmed = await _askNewSale() ?? false;
+      } finally {
+        _asking = false;
+      }
+      // The poll goes on under the question: the customer may have paid, or the
+      // till changed hands, while it was up. What was asked about is then not
+      // what is on screen, and the answer must not reset it.
+      if (!confirmed ||
+          !mounted ||
+          gen != _gen ||
+          _order?.status != 'FUNDING_ISSUED') {
+        return;
+      }
+    }
+    setState(_resetSale);
+  }
+
+  /// Whether the operator lets the order that waits for the transfer go. Null
+  /// when the question was dismissed.
+  Future<bool?> _askNewSale() => showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: AppColors.surface,
@@ -537,10 +567,6 @@ class _WapuScreenState extends State<WapuScreen> {
           ],
         ),
       );
-      if (ok != true || !mounted) return;
-    }
-    setState(_resetSale);
-  }
 
   /// Opens [orderId], an order of the History, on the status step and follows
   /// it as it does an order just created, without the paid cue: nothing was
