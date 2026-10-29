@@ -422,4 +422,26 @@ const Map<String, String> _en = {
   'Fee de red estimado': 'Estimated network fee',
   'El mínimo es ': 'The minimum is ',
   'Confirmar': 'Confirm',
+  'Esperando la transferencia': 'Waiting for the transfer',
+  'Alias': 'Alias',
+  'CVU': 'CVU',
+  'Monto exacto': 'Exact amount',
+  'Transferí exactamente este monto, con centavos':
+      'Transfer exactly this amount, including the cents',
+  'Vence en ': 'Expires in ',
+  'Copiado': 'Copied',
+  'Orden creada': 'Order created',
+  'Pedir datos de transferencia': 'Request transfer details',
+  'Venció el plazo': 'The time limit has passed',
+  'Si el cliente ya transfirió, lo seguimos buscando hasta las ':
+      'If the customer already transferred, we keep looking until ',
+  'Orden vencida': 'Order expired',
+  'Pago recibido. Enviando los sats…': 'Payment received. Sending the sats…',
+  'En revisión': 'Under review',
+  'Guardá el ID de la orden: ': 'Save the order ID: ',
+  '¡Listo! El cliente recibió ': 'Done! The customer received ',
+  'No se pudieron enviar los sats': 'The sats could not be sent',
+  'El monto quedó en tu saldo de Wapu.':
+      'The amount went to your Wapu balance.',
+  'Nueva venta': 'New sale',
 };
