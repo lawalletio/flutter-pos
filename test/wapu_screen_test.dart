@@ -53,6 +53,9 @@ class FakeNet implements HttpClientAdapter {
   /// The JSON body of each of [calls], or null when it sent none.
   final bodies = <Object?>[];
 
+  /// The host each of [calls] went to.
+  final hosts = <String>[];
+
   /// Routes that fail as a transport error instead of answering.
   final failures = <String, DioException>{};
 
@@ -65,6 +68,7 @@ class FakeNet implements HttpClientAdapter {
       RequestOptions o, Stream<Uint8List>? _, Future<void>? __) async {
     final key = '${o.method} ${o.uri.path}';
     calls.add(key);
+    hosts.add(o.uri.host);
     queries.add(o.uri.queryParameters);
     bodies.add(o.data is String ? jsonDecode(o.data as String) : null);
     final failure = failures[key];
@@ -1116,20 +1120,14 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a base URL changed in the config drops the old quote',
+    testWidgets('a base URL changed in the config starts the sale over',
         (tester) async {
-      final asked =
-          <String>[]; // the backend of each client the screens ask for
-      final swapped = wapuApiFor;
-      wapuApiFor = (baseUrl, apiKey) {
-        asked.add(baseUrl);
-        return swapped(baseUrl, apiKey);
-      };
       await toAmount(tester);
       await typeDigits(tester, '15000');
       await tester.pump(const Duration(milliseconds: 600));
       expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
       expect(confirmAction(tester), isNotNull);
+      expect(net.hosts.last, 'be-prod.wapu.app');
 
       await tester.tap(gear); // no PIN is set: straight in
       await settle(tester);
@@ -1141,8 +1139,12 @@ void main() {
       await settle(tester);
 
       expect(find.byType(WapuSettingsScreen), findsNothing);
-      expect(amount, findsOneWidget,
-          reason: 'the sale goes on from the amount');
+      expect(destination, findsOneWidget,
+          reason: 'a sale on the old backend does not go on on the new one');
+      expect(amount, findsNothing);
+      expect(fieldText(tester), isEmpty);
+
+      await submit(tester, 'alice@example.com');
       expect(find.text('\$ 0'), findsOneWidget);
       expect(find.text('El cliente recibe'), findsNothing,
           reason: "the old backend's price is not the new one's");
@@ -1152,8 +1154,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
       expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
       expect(confirmAction(tester), isNotNull);
-      expect(asked.first, kWapuDefaultBaseUrl);
-      expect(asked.last, 'https://be-stage.wapu.app',
+      expect(net.hosts.last, 'be-stage.wapu.app',
           reason: 'the new price is asked of the new backend');
       await tester.pumpWidget(const SizedBox());
     });
@@ -1875,6 +1876,46 @@ void main() {
       expect(find.text(_alias), findsNothing);
       await tester.pump(const Duration(seconds: 40));
       expect(calls(_detailRoute), 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('another key from the config resets the sale and its poll',
+        (tester) async {
+      await toWaiting(tester);
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 1, reason: 'the old key reads the order');
+
+      await tester.tap(gear); // no PIN is set: straight in
+      await settle(tester);
+      await tester.enterText(find.byKey(const Key('wapu-key')), 'other-key');
+      await tester.tap(find.byKey(const Key('wapu-save')));
+      await settle(tester);
+
+      expect(find.byType(WapuSettingsScreen), findsNothing);
+      expect(destination, findsOneWidget,
+          reason: "a new sale: the order was the old key's");
+      expect(find.text(_alias), findsNothing);
+      expect(fieldText(tester), isEmpty);
+
+      await tester.pump(const Duration(seconds: 40));
+      expect(calls(_detailRoute), 1, reason: 'the new key does not read it');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a config closed with the same key keeps the order',
+        (tester) async {
+      await toWaiting(tester);
+
+      await tester.tap(gear);
+      await settle(tester);
+      await tester.tap(find.byIcon(Icons.arrow_back)); // nothing changed
+      await settle(tester);
+
+      expect(find.byType(WapuSettingsScreen), findsNothing);
+      expect(find.text(_alias), findsOneWidget);
+      expect(destination, findsNothing);
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 1, reason: 'and it is still followed');
       await tester.pumpWidget(const SizedBox());
     });
 

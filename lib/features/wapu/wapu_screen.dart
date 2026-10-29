@@ -226,15 +226,13 @@ class _WapuScreenState extends State<WapuScreen> {
     final credentials = await wapuAccounts.load(merchantAddress.value);
     if (!mounted || load != _loads) return;
     setState(() {
-      if (credentials == null && _credentials != null) {
-        // The key is gone (forgotten in the config): the order on screen can no
-        // longer be followed, and would be stale if a key came back. The
-        // History has it.
+      if (!_sameAccount(_credentials, credentials)) {
+        // The key is gone (forgotten in the config), or another key or backend
+        // took its place: the sale on screen is the old account's. Its order
+        // would be read with the new key and never found, or funded on the
+        // wrong account, and a price from the old backend is not this one's.
+        // The order is not lost: its account's History has it.
         _resetSale();
-      } else if (!_sameAccount(_credentials, credentials)) {
-        // Another key or backend (the config changed them): a price from the
-        // old one is not this one's, so none stays on screen to be confirmed.
-        _clearAmount();
       }
       _credentials = credentials;
       _loaded = true;
