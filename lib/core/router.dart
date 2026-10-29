@@ -19,6 +19,7 @@ import '../features/settings/settings_screen.dart';
 import '../features/cards/cards_screen.dart';
 import '../features/miniapps/rueda_screen.dart';
 import '../features/miniapps/zape_screen.dart';
+import '../features/wapu/wapu_history_screen.dart';
 import '../features/wapu/wapu_screen.dart';
 import '../features/wapu/wapu_settings_screen.dart';
 import 'flow_lock.dart';
@@ -155,6 +156,10 @@ final appRouter = GoRouter(
         GoRoute(
           path: 'config',
           pageBuilder: (c, s) => _page(const WapuSettingsScreen()),
+        ),
+        GoRoute(
+          path: 'historial',
+          pageBuilder: (c, s) => _page(const WapuHistoryScreen()),
         ),
       ],
     ),

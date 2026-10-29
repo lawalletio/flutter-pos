@@ -2104,10 +2104,11 @@ void main() {
         containsAll(['/wapu', '/wapu/historial', '/wapu/config']));
   });
 
-  test('the router serves /wapu with its config', () {
+  test('the router serves /wapu with its config and history', () {
     final wapu = appRouter.configuration.routes
         .whereType<GoRoute>()
         .singleWhere((r) => r.path == '/wapu');
-    expect([for (final r in wapu.routes) (r as GoRoute).path], ['config']);
+    expect([for (final r in wapu.routes) (r as GoRoute).path],
+        ['config', 'historial']);
   });
 }

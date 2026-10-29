@@ -568,12 +568,18 @@ class _WapuScreenState extends State<WapuScreen> {
         ),
       );
 
+  /// The History, and the order it hands back, if one was chosen. The sale
+  /// stays as it was when it is left with none.
+  Future<void> _openHistory() async {
+    final id = await context.push<String>('/wapu/historial');
+    if (id != null && mounted) _resume(id);
+  }
+
   /// Opens [orderId], an order of the History, on the status step and follows
   /// it as it does an order just created, without the paid cue: nothing was
   /// paid just now. The sale on screen is let go as by Nueva venta, with no
   /// question asked, and the first step waits while the order is read. If it
   /// cannot be read, the first step says why. Nothing happens without a key.
-  // ignore: unused_element -- the History (Task 9) is its only caller.
   Future<void> _resume(String orderId) async {
     final credentials = _credentials;
     if (credentials == null) return;
@@ -608,6 +614,15 @@ class _WapuScreenState extends State<WapuScreen> {
         showSync: false,
         showInvoiceDebug: false,
         actions: [
+          // The orders of this key, to follow one that was left or whose create
+          // got no answer. Within reach while the till is locked too.
+          if (_inSale)
+            IconButton(
+              key: const Key('wapu-history'),
+              tooltip: context.tr('Historial').toUpperCase(),
+              icon: const Icon(Icons.history, size: 26),
+              onPressed: _openHistory,
+            ),
           // Within reach on every step, and while the till is locked too: it is
           // how the next customer is served.
           if (_inSale)
