@@ -71,27 +71,31 @@ class WapuAccounts {
     if (all.remove(_id(merchantAddress)) != null) await _writeAll(all);
   }
 
+  /// Every entry that can be read, and nothing else: it never changes the
+  /// store. A read that fails (a locked or busy Keystore) counts as no keys for
+  /// this call, and must not cost any merchant theirs. On Android the plugin
+  /// itself resets its storage after the Keystore key is lost. Each entry is
+  /// parsed on its own, so a malformed one is skipped and the others stay. Text
+  /// that is not our map reads as empty, and a save then starts the map over.
   Future<Map<String, WapuCredentials>> _readAll() async {
+    final String? raw;
     try {
-      final raw = await _storage.read(key: _storageKey);
-      if (raw == null) return {};
-      return (jsonDecode(raw) as Map<String, dynamic>).map(
-        (id, e) => MapEntry(
-          id,
-          WapuCredentials(
-            apiKey: e['apiKey'] as String,
-            baseUrl: e['baseUrl'] as String,
-          ),
-        ),
-      );
+      raw = await _storage.read(key: _storageKey);
     } catch (_) {
-      // A lost Keystore key, or text that is not our map. Drop it, so the
-      // merchant is asked for the key again instead of failing on every read.
-      try {
-        await _storage.delete(key: _storageKey);
-      } catch (_) {}
       return {};
     }
+    if (raw == null) return {};
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } on FormatException {
+      return {};
+    }
+    if (decoded is! Map<String, dynamic>) return {};
+    return {
+      for (final e in decoded.entries)
+        if (_credentials(e.value) case final c?) e.key: c,
+    };
   }
 
   Future<void> _writeAll(Map<String, WapuCredentials> all) => _storage.write(
@@ -104,6 +108,16 @@ class WapuAccounts {
 }
 
 String _id(String merchantAddress) => merchantAddress.trim().toLowerCase();
+
+/// The credentials in one stored entry, or null when it is not a usable one.
+WapuCredentials? _credentials(Object? entry) {
+  if (entry is! Map) return null;
+  final apiKey = entry['apiKey'];
+  final baseUrl = entry['baseUrl'];
+  return apiKey is String && baseUrl is String
+      ? WapuCredentials(apiKey: apiKey, baseUrl: baseUrl)
+      : null;
+}
 
 /// The app's store. Tests swap it.
 WapuAccounts wapuAccounts = WapuAccounts();

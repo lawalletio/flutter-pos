@@ -11,12 +11,9 @@ const _stage = 'https://be-stage.wapu.app';
 /// A store holding one merchant's key.
 const _saved = '{"a@x.ar":{"apiKey":"k","baseUrl":"$_stage"}}';
 
-/// A storage whose reads fail the way a lost Keystore key does. With
-/// [failDelete] the cleanup fails too.
+/// A storage whose reads fail, the way a locked or busy Keystore does.
 class _BrokenStorage extends FlutterSecureStorage {
-  const _BrokenStorage({this.failDelete = false});
-
-  final bool failDelete;
+  const _BrokenStorage();
 
   @override
   Future<String?> read({
@@ -29,18 +26,6 @@ class _BrokenStorage extends FlutterSecureStorage {
     WindowsOptions? wOptions,
   }) async =>
       throw PlatformException(code: 'x');
-
-  @override
-  Future<void> delete({
-    required String key,
-    AppleOptions? iOptions,
-    AndroidOptions? aOptions,
-    LinuxOptions? lOptions,
-    WebOptions? webOptions,
-    AppleOptions? mOptions,
-    WindowsOptions? wOptions,
-  }) =>
-      failDelete ? throw PlatformException(code: 'y') : super.delete(key: key);
 }
 
 /// What the secure store holds, read around [WapuAccounts].
@@ -166,14 +151,47 @@ void main() {
     expect(await accounts.load('a@x.ar'), isNull);
   });
 
-  test('storage that cannot be read is cleared', () async {
-    FlutterSecureStorage.setMockInitialValues({'wapu.accounts': 'not json'});
-    await WapuAccounts().load('a@x.ar');
-    expect(await _raw(), isNull);
-
+  test('a failing read leaves the stored bytes alone', () async {
     FlutterSecureStorage.setMockInitialValues({'wapu.accounts': _saved});
-    await WapuAccounts(storage: const _BrokenStorage()).load('a@x.ar');
-    expect(await _raw(), isNull);
+    final accounts = WapuAccounts(storage: const _BrokenStorage());
+
+    expect(await accounts.load('a@x.ar'), isNull);
+    await accounts.forget('a@x.ar');
+
+    expect(await _raw(), _saved);
+    // Once the store reads again, the key is still there.
+    expect((await WapuAccounts().load('a@x.ar'))?.apiKey, 'k');
+  });
+
+  test('storage that is not our map is never deleted', () async {
+    for (final blob in ['not json', 'null', '[]', '{"a@x.ar": "oops"}']) {
+      FlutterSecureStorage.setMockInitialValues({'wapu.accounts': blob});
+
+      expect(await WapuAccounts().load('a@x.ar'), isNull, reason: blob);
+      expect(await _raw(), blob, reason: blob);
+    }
+  });
+
+  test('one malformed entry does not take the others with it', () async {
+    FlutterSecureStorage.setMockInitialValues({
+      'wapu.accounts': jsonEncode({
+        'a@x.ar': {'apiKey': 'ka', 'baseUrl': _stage},
+        // An older format, with no URL.
+        'old@x.ar': {'apiKey': 'k-without-url'},
+        'b@x.ar': {'apiKey': 'kb', 'baseUrl': kWapuDefaultBaseUrl},
+      }),
+    });
+    final accounts = WapuAccounts();
+
+    expect((await accounts.load('a@x.ar'))?.apiKey, 'ka');
+    expect(await accounts.load('old@x.ar'), isNull);
+    expect((await accounts.load('b@x.ar'))?.apiKey, 'kb');
+
+    // A save rewrites the map without the bad entry, and keeps the good ones.
+    await accounts.save('c@x.ar', const WapuCredentials(apiKey: 'kc'));
+    expect((await accounts.load('a@x.ar'))?.baseUrl, _stage);
+    expect((await accounts.load('b@x.ar'))?.apiKey, 'kb');
+    expect((await accounts.load('c@x.ar'))?.apiKey, 'kc');
   });
 
   test('a key can be saved over malformed storage', () async {
@@ -183,13 +201,6 @@ void main() {
     await accounts.save('a@x.ar', const WapuCredentials(apiKey: 'k'));
 
     expect((await accounts.load('a@x.ar'))?.apiKey, 'k');
-  });
-
-  test('a failing clear-up does not make load throw', () async {
-    final accounts =
-        WapuAccounts(storage: const _BrokenStorage(failDelete: true));
-
-    expect(await accounts.load('a@x.ar'), isNull);
   });
 
   group('normalizeWapuBaseUrl', () {
