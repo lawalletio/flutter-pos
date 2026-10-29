@@ -183,11 +183,16 @@ class WapuApi {
   final String _apiKey;
   final Dio _dio;
 
-  /// Prices an order. Pass the ARS cents to spend or the sats to receive.
+  /// Prices an order. Pass the ARS cents to spend or the sats to receive. A
+  /// reply without `amount_out` or `liquidity_ok` is no quote, so it throws.
   Future<WapuQuote> quote({int? arsCents, int? sats}) async {
     final amount = _amount(arsCents, sats).map((k, v) => MapEntry(k, '$v'));
-    return WapuQuote.fromJson(
-        await _send('GET', '$_direct/quote', query: {..._purchase, ...amount}));
+    final json =
+        await _send('GET', '$_direct/quote', query: {..._purchase, ...amount});
+    if (!json.containsKey('amount_out') || !json.containsKey('liquidity_ok')) {
+      throw _unexpected;
+    }
+    return WapuQuote.fromJson(json);
   }
 
   /// Creates an order that pays [address]. It is not idempotent: after a
@@ -226,9 +231,14 @@ class WapuApi {
         .toList();
   }
 
-  /// Whether the account may buy: the backend's `beta_version` flag.
-  Future<bool> betaEnabled() async =>
-      _flag((await _send('GET', '/users/user-settings'))['beta_version']);
+  /// Whether the account may buy: the backend's `beta_version` flag. A reply
+  /// without it is not the WapuPay settings (a wrong URL that answers 200 with a
+  /// web page, say), so it throws.
+  Future<bool> betaEnabled() async {
+    final settings = await _send('GET', '/users/user-settings');
+    if (!settings.containsKey('beta_version')) throw _unexpected;
+    return _flag(settings['beta_version']);
+  }
 
   Future<void> setBeta(bool enabled) =>
       _send('PATCH', '/users/user-settings', body: {'beta_version': enabled});
@@ -326,14 +336,17 @@ String wapuErrorKey(WapuApiException e, {bool creating = false}) {
   };
 }
 
-/// The order in the reply to a call that answers with one. Every such reply
-/// carries the order's id, so one without it (an empty or non-JSON body, say)
-/// is a failure. The error has no status code on purpose: on a create the
-/// order may exist upstream, and [wapuErrorKey] then sends the operator to the
+/// The failure for a 2xx reply that lacks what the call needs (an empty or
+/// non-JSON body, say). It has no status code on purpose: on a create the order
+/// may exist upstream, and [wapuErrorKey] then sends the operator to the
 /// History.
+const _unexpected = WapuApiException('unexpected response');
+
+/// The order in the reply to a call that answers with one. Every such reply
+/// carries the order's id, so one without it is [_unexpected].
 WapuOrder _singleOrder(Map<String, dynamic> json) {
   final order = WapuOrder.fromJson(json);
-  if (order.id.isEmpty) throw const WapuApiException('unexpected response');
+  if (order.id.isEmpty) throw _unexpected;
   return order;
 }
 

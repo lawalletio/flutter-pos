@@ -281,6 +281,23 @@ void main() {
     expect(net.requests, isEmpty);
   });
 
+  test('quote throws when the reply lacks amount_out or liquidity_ok',
+      () async {
+    for (final body in <Object>[
+      <String, Object?>{},
+      '<html/>',
+      quoteJson()..remove('amount_out'),
+      quoteJson()..remove('liquidity_ok'),
+    ]) {
+      final net = FakeNet({'GET /transactions/direct-fiat/quote': (200, body)});
+
+      final e = await failure(apiWith(net).quote(sats: 100));
+
+      expect(e.message, 'unexpected response', reason: '$body');
+      expect(e.statusCode, isNull, reason: '$body');
+    }
+  });
+
   test('quote derives the fee percent and the effective rate', () {
     final q = WapuQuote.fromJson(quoteJson());
 
@@ -700,6 +717,22 @@ void main() {
     expect(jsonDecode(patch.data as String), {'beta_version': false});
     expect(patch.contentType, contains('application/json'));
     expect(patch.headers['X-API-Key'], 'k');
+  });
+
+  test('betaEnabled throws when the reply has no beta_version', () async {
+    for (final (code, body) in <(int, Object)>[
+      (200, '<html/>'),
+      (200, <String, Object?>{}),
+      (200, {'language': 'es', 'favorite_currency': 'ARS'}),
+      (200, <Object?>[]),
+    ]) {
+      final net = FakeNet({'GET /users/user-settings': (code, body)});
+
+      final e = await failure(apiWith(net).betaEnabled());
+
+      expect(e.message, 'unexpected response', reason: '$body');
+      expect(e.statusCode, isNull, reason: '$body');
+    }
   });
 
   test('setBeta accepts a 2xx reply with no body to read', () async {
