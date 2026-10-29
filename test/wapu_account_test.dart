@@ -84,11 +84,35 @@ void main() {
     final accounts = WapuAccounts();
     await accounts.save('a@x.ar', const WapuCredentials(apiKey: 'ka'));
     await accounts.save('b@x.ar', const WapuCredentials(apiKey: 'kb'));
+    // Both are there first, or "A is gone" below would prove nothing.
+    expect((await accounts.load('a@x.ar'))?.apiKey, 'ka');
+    expect((await accounts.load('b@x.ar'))?.apiKey, 'kb');
 
     await accounts.forget(' A@x.ar');
 
     expect(await accounts.load('a@x.ar'), isNull);
     expect((await accounts.load('b@x.ar'))?.apiKey, 'kb');
+  });
+
+  test('saving a merchant again keeps the last key and the others', () async {
+    final accounts = WapuAccounts();
+    await accounts.save('a@x.ar', const WapuCredentials(apiKey: 'a1'));
+    await accounts.save(
+      'b@x.ar',
+      const WapuCredentials(apiKey: 'kb', baseUrl: _stage),
+    );
+
+    await accounts.save(
+      'A@x.ar ',
+      const WapuCredentials(apiKey: 'a2', baseUrl: 'http://localhost:5000'),
+    );
+
+    final a = await accounts.load('a@x.ar');
+    expect(a?.apiKey, 'a2');
+    expect(a?.baseUrl, 'http://localhost:5000');
+    final b = await accounts.load('b@x.ar');
+    expect(b?.apiKey, 'kb');
+    expect(b?.baseUrl, _stage);
   });
 
   test('forgetting a merchant that was never saved changes nothing', () async {
@@ -191,12 +215,18 @@ void main() {
       '   ': null,
       '/': null,
       'https://': null,
+      // Not a bare base URL: user info would become a Basic header beside the
+      // key, and WapuApi appends its paths to the base.
+      'https://user:pw@be.wapu.app': null,
+      'https://be.wapu.app?x=1': null,
+      'https://be.wapu.app/#f': null,
+      'https://be prod.wapu.app': null,
+      // Only the three hosts above may use plain http, not the IPv6 loopback.
+      'http://[::1]:5000': null,
     };
 
-    test('keeps, completes or refuses what was typed', () {
-      cases.forEach((raw, want) {
-        expect(normalizeWapuBaseUrl(raw), want, reason: "'$raw'");
-      });
+    cases.forEach((raw, want) {
+      test("'$raw' -> $want", () => expect(normalizeWapuBaseUrl(raw), want));
     });
   });
 }

@@ -26,15 +26,19 @@ class WapuCredentials {
 }
 
 /// Turns what a merchant typed into a backend URL: trimmed, `https://` assumed
-/// when there is no scheme, no trailing slash. Null when there is no host, or
-/// when the key must not be sent there: any scheme but `https`, with `http`
-/// allowed only for [_localHosts].
+/// when there is no scheme, no trailing slash. Null when it is not a bare base
+/// URL (whitespace, user info, a query or a fragment: `WapuApi` appends its
+/// paths to it, and user info would become a Basic `Authorization` header next
+/// to the key), when there is no host, or when the key must not be sent there:
+/// any scheme but `https`, with `http` allowed only for [_localHosts].
 String? normalizeWapuBaseUrl(String raw) {
   var text = raw.trim();
+  if (text.contains(RegExp(r'\s'))) return null;
   if (!text.contains('://')) text = 'https://$text';
   text = text.replaceFirst(RegExp(r'/+$'), '');
   final uri = Uri.tryParse(text);
   if (uri == null || uri.host.isEmpty) return null;
+  if (uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment) return null;
   final secure = uri.scheme == 'https';
   final local = uri.scheme == 'http' && _localHosts.contains(uri.host);
   return secure || local ? text : null;
