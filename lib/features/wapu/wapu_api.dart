@@ -191,10 +191,11 @@ class WapuApi {
   }
 
   /// Creates an order that pays [address]. It is not idempotent: after a
-  /// timeout, look in [orders] instead of calling this again.
+  /// timeout, or a reply with no order id, look in [orders] instead of calling
+  /// this again.
   Future<WapuOrder> createOrder(
       {required String address, int? arsCents, int? sats}) async {
-    return WapuOrder.fromJson(
+    return _singleOrder(
         await _send('POST', '$_direct/tentatives', slow: true, body: {
       ..._purchase,
       'payout_address': address,
@@ -205,20 +206,24 @@ class WapuApi {
   /// Asks for the bank details of [orderId]. Repeating it returns the same
   /// order.
   Future<WapuOrder> fund(String orderId) async =>
-      WapuOrder.fromJson(await _send('POST', '${_tentative(orderId)}/funding',
+      _singleOrder(await _send('POST', '${_tentative(orderId)}/funding',
           slow: true, body: const {}));
 
   /// Reads one order. A 404 means it is not this account's.
   Future<WapuOrder> order(String orderId) async =>
-      WapuOrder.fromJson(await _send('GET', _tentative(orderId)));
+      _singleOrder(await _send('GET', _tentative(orderId)));
 
   /// The account's ARS to Lightning orders, in the order the API lists them.
+  /// An entry with no id cannot be followed, so it is left out.
   Future<List<WapuOrder>> orders() async {
     final all = (await _send('GET', '$_direct/tentatives'))['tentatives'];
     return [
       for (final o in all is List ? all : const [])
         if (o is Map<String, dynamic>) WapuOrder.fromJson(o),
-    ].where((o) => o.type == null || o.type == 'crypto_purchase').toList();
+    ]
+        .where((o) =>
+            o.id.isNotEmpty && (o.type == null || o.type == 'crypto_purchase'))
+        .toList();
   }
 
   /// Whether the account may buy: the backend's `beta_version` flag.
@@ -232,7 +237,8 @@ class WapuApi {
       '$_direct/tentatives/${Uri.encodeComponent(id)}';
 
   /// Sends one request and returns the JSON object it answers, or throws a
-  /// [WapuApiException]. Only 2xx is success.
+  /// [WapuApiException]. Only 2xx is success. The object is empty when the body
+  /// is empty or not a JSON object, so a caller that needs a body checks it.
   Future<Map<String, dynamic>> _send(
     String method,
     String path, {
@@ -318,6 +324,17 @@ String wapuErrorKey(WapuApiException e, {bool creating = false}) {
     503 => 'El servicio no está disponible. Probá más tarde.',
     _ => 'No se pudo completar la operación',
   };
+}
+
+/// The order in the reply to a call that answers with one. Every such reply
+/// carries the order's id, so one without it (an empty or non-JSON body, say)
+/// is a failure. The error has no status code on purpose: on a create the
+/// order may exist upstream, and [wapuErrorKey] then sends the operator to the
+/// History.
+WapuOrder _singleOrder(Map<String, dynamic> json) {
+  final order = WapuOrder.fromJson(json);
+  if (order.id.isEmpty) throw const WapuApiException('unexpected response');
+  return order;
 }
 
 /// The one amount a request carries: ARS cents to spend, or sats to receive.

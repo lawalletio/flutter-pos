@@ -360,6 +360,31 @@ void main() {
     expect(net.requests, isEmpty);
   });
 
+  test('createOrder with no usable order in the reply is an unknown outcome',
+      () async {
+    // A 2xx, yet no order id to follow: the order may exist upstream.
+    for (final (code, body) in <(int, Object)>[
+      (201, <String, Object?>{}),
+      (200, '<html/>'),
+      (201, <Object?>[]),
+      (201, {'tentative_id': ' '}),
+    ]) {
+      final net =
+          FakeNet({'POST /transactions/direct-fiat/tentatives': (code, body)});
+
+      final e = await failure(apiWith(net)
+          .createOrder(address: 'alice@example.com', arsCents: 1500000));
+
+      expect(e.message, 'unexpected response', reason: '$code $body');
+      expect(e.statusCode, isNull, reason: '$code $body');
+      expect(wapuErrorKey(e, creating: true),
+          'No sabemos si la orden se creó. Revisá el Historial antes de reintentar.',
+          reason: '$code $body');
+      // And the create is not repeated on its own.
+      expect(net.requests, hasLength(1), reason: '$code $body');
+    }
+  });
+
   test('fund posts {} and parses bank details', () async {
     final net = FakeNet({
       'POST /transactions/direct-fiat/tentatives/t1/funding': (
@@ -423,6 +448,26 @@ void main() {
     expect((await api.order('a/b')).id, 'a/b');
     expect(net.requests.map((r) => r.receiveTimeout),
         everyElement(const Duration(seconds: 15)));
+  });
+
+  test('fund and order throw when the reply has no order id', () async {
+    final net = FakeNet({
+      'POST /transactions/direct-fiat/tentatives/t1/funding': (
+        201,
+        <String, Object?>{}
+      ),
+      'GET /transactions/direct-fiat/tentatives/t1': (200, '<html/>'),
+    });
+    final api = apiWith(net);
+
+    for (final call in [() => api.fund('t1'), () => api.order('t1')]) {
+      final e = await failure(call());
+
+      expect(e.message, 'unexpected response');
+      expect(e.statusCode, isNull);
+      // Neither is a create, so the operator may just try again.
+      expect(wapuErrorKey(e), 'No se pudo completar la operación');
+    }
   });
 
   test('an order parses every field it carries', () {
@@ -500,6 +545,27 @@ void main() {
     final list = await apiWith(net).orders();
 
     expect(list.map((o) => o.id), ['a', 'b', 'd']);
+  });
+
+  test('orders drops an entry without an id', () async {
+    final net = FakeNet({
+      'GET /transactions/direct-fiat/tentatives': (
+        200,
+        {
+          'tentatives': [
+            orderJson({'tentative_id': 'a'}),
+            orderJson({'tentative_id': 'b'})..remove('tentative_id'),
+            orderJson({'tentative_id': null}),
+            orderJson({'tentative_id': ' '}),
+            orderJson({'tentative_id': 'e'}),
+          ],
+        }
+      ),
+    });
+
+    final list = await apiWith(net).orders();
+
+    expect(list.map((o) => o.id), ['a', 'e']);
   });
 
   test('orders is empty when the list is missing', () async {
@@ -634,6 +700,20 @@ void main() {
     expect(jsonDecode(patch.data as String), {'beta_version': false});
     expect(patch.contentType, contains('application/json'));
     expect(patch.headers['X-API-Key'], 'k');
+  });
+
+  test('setBeta accepts a 2xx reply with no body to read', () async {
+    for (final (code, body) in <(int, Object)>[
+      (204, ''),
+      (200, '<ok/>'),
+      (200, <String, Object?>{}),
+    ]) {
+      final net = FakeNet({'PATCH /users/user-settings': (code, body)});
+
+      await apiWith(net).setBeta(true);
+
+      expect(net.requests, hasLength(1), reason: '$code');
+    }
   });
 
   test('beta is on for true or 1 and off for anything else', () async {
