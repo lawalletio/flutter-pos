@@ -868,6 +868,40 @@ void main() {
         'No se pudo completar la operación');
   });
 
+  group('wapuCall', () {
+    test('returns what the call returns', () async {
+      expect(await wapuCall(() async => 7), 7);
+    });
+
+    test('passes a WapuApiException through as it is', () async {
+      const error =
+          WapuApiException('too many open purchase orders', statusCode: 429);
+
+      final got = await failure(wapuCall(() => Future<int>.error(error)));
+
+      expect(got, same(error));
+    });
+
+    test('maps any other failure to the error with no status', () async {
+      final calls = <Future<int> Function()>[
+        () => Future<int>.error(StateError('boom')),
+        () => throw ArgumentError('thrown before a future exists'),
+      ];
+      for (final call in calls) {
+        final got = await failure(wapuCall(call));
+
+        expect(got.message, 'unexpected response');
+        expect(got.statusCode, isNull);
+        expect(got.timeout, isFalse);
+        // So on a create the operator is still sent to the History.
+        expect(
+            wapuErrorKey(got, creating: true),
+            'No sabemos si la orden se creó. '
+            'Revisá el Historial antes de reintentar.');
+      }
+    });
+  });
+
   test('every error key has an English entry', () {
     final en = AppLocalizations(AppLanguage.en);
 

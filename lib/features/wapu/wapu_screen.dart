@@ -50,15 +50,13 @@ String _satsText(int sats) => '${formatToPreference(Currency.sat, sats)} sats';
 /// What a call answered, or why it did not: exactly one of the two is set.
 typedef _Answer<T> = ({T? reply, WapuApiException? error});
 
-/// Runs [call] and says how it went. A failure that is not the API's own (a
-/// bug, say) has no detail to show, so it is the generic one.
+/// [wapuCall] as a value: the caller checks that the sale is still the one the
+/// call was for before it looks at either.
 Future<_Answer<T>> _answer<T>(Future<T> Function() call) async {
   try {
-    return (reply: await call(), error: null);
+    return (reply: await wapuCall(call), error: null);
   } on WapuApiException catch (e) {
     return (reply: null, error: e);
-  } catch (_) {
-    return (reply: null, error: const WapuApiException(''));
   }
 }
 
@@ -371,20 +369,13 @@ class _WapuScreenState extends State<WapuScreen> {
   /// Asks the backend what the amount on screen costs.
   Future<void> _fetchQuote(WapuCredentials credentials) async {
     final gen = _quoteGen;
-    WapuQuote? quote;
-    WapuApiException? error;
-    try {
-      quote = await wapuApiFor(credentials.baseUrl, credentials.apiKey)
-          .quote(arsCents: _arsCents, sats: _sats);
-    } on WapuApiException catch (e) {
-      error = e;
-    } catch (_) {
-      error = const WapuApiException(''); // the generic copy, with no detail
-    }
+    final answer = await _answer(() =>
+        wapuApiFor(credentials.baseUrl, credentials.apiKey)
+            .quote(arsCents: _arsCents, sats: _sats));
     if (!mounted || gen != _quoteGen) return;
     setState(() {
-      _quote = quote;
-      _quoteError = error;
+      _quote = answer.reply;
+      _quoteError = answer.error;
     });
   }
 

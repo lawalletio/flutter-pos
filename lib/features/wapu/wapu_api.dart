@@ -342,10 +342,25 @@ String wapuErrorKey(WapuApiException e, {bool creating = false}) {
 }
 
 /// The failure for a 2xx reply that lacks what the call needs (an empty or
-/// non-JSON body, say). It has no status code on purpose: on a create the order
+/// non-JSON body, say), and for any failure of ours that is not the API's own
+/// (see [wapuCall]). It has no status code on purpose: on a create the order
 /// may exist upstream, and [wapuErrorKey] then sends the operator to the
 /// History.
 const _unexpected = WapuApiException('unexpected response');
+
+/// Runs [call] for a screen, so that the only failure it throws is a
+/// [WapuApiException]. The API's own goes through as it is. Any other (a bug,
+/// say) has no backend message to show, so it becomes the no-status failure of
+/// a reply that makes no sense.
+Future<T> wapuCall<T>(Future<T> Function() call) async {
+  try {
+    return await call();
+  } on WapuApiException {
+    rethrow;
+  } catch (_) {
+    throw _unexpected;
+  }
+}
 
 /// The order in the reply to a call that answers with one. Every such reply
 /// carries the order's id, so one without it is [_unexpected].

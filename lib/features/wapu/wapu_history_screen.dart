@@ -55,14 +55,12 @@ class _WapuHistoryScreenState extends State<WapuHistoryScreen> {
       if (credentials == null) {
         error = 'Configurá tu API key de Wapu';
       } else {
-        final all = await wapuApiFor(credentials.baseUrl, credentials.apiKey)
-            .orders();
+        final all = await wapuCall(
+            () => wapuApiFor(credentials.baseUrl, credentials.apiKey).orders());
         orders = _inProgressFirst(all);
       }
     } on WapuApiException catch (e) {
       error = e;
-    } catch (_) {
-      error = const WapuApiException(''); // the generic copy, with no detail
     }
     if (!mounted) return;
     setState(() {

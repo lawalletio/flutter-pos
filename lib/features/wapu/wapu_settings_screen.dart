@@ -75,7 +75,8 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
         _url.text = saved.baseUrl;
       });
       try {
-        beta = await wapuApiFor(saved.baseUrl, saved.apiKey).betaEnabled();
+        beta = await wapuCall(
+            () => wapuApiFor(saved.baseUrl, saved.apiKey).betaEnabled());
       } on WapuApiException catch (e) {
         error = e;
       }
@@ -103,7 +104,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
     });
     WapuApiException? error;
     try {
-      await wapuApiFor(saved.baseUrl, saved.apiKey).setBeta(on);
+      await wapuCall(() => wapuApiFor(saved.baseUrl, saved.apiKey).setBeta(on));
     } on WapuApiException catch (e) {
       error = e;
     }
@@ -149,12 +150,12 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
     final api = wapuApiFor(url, apiKey);
     Object? error;
     try {
-      final beta = await api.betaEnabled();
+      final beta = await wapuCall(api.betaEnabled);
       final credentials = WapuCredentials(apiKey: apiKey, baseUrl: url);
       await wapuAccounts.save(_merchant, credentials);
       // From here the key is saved, even if setting beta fails below.
       _saved = credentials;
-      if (_beta != beta) await api.setBeta(_beta);
+      if (_beta != beta) await wapuCall(() => api.setBeta(_beta));
     } on WapuApiException catch (e) {
       error = e;
     } catch (_) {
