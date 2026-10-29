@@ -722,7 +722,12 @@ class _WapuScreenState extends State<WapuScreen> {
         if (error != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: WapuErrorText(error),
+            // A watched order is read again on every tick, so a read that got
+            // no answer (no status code) says it is reconnecting. A funding
+            // that failed waits for its button instead, and says why.
+            child: error.statusCode == null && _order!.watchPending
+                ? WapuReconnecting(error)
+                : WapuErrorText(error),
           ),
         Expanded(
           child: WapuStatusView(

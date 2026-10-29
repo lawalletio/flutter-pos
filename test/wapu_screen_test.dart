@@ -37,6 +37,7 @@ const _invoiceHint =
 const _lnurlHint = 'Eso es un LNURL. Pedile al cliente su lightning address';
 const _notAnAddress = 'La lightning address no es válida';
 const _unverified = 'No se pudo verificar la lightning address';
+const _reconnecting = 'Problema en la conexión. Intentando reconectar.';
 
 const _invoice = 'lnbc10u1p3xyz';
 const _lnurl =
@@ -294,6 +295,8 @@ void main() {
   final newSale = find.byKey(const Key('wapu-new-sale'));
   final history = find.byKey(const Key('wapu-history'));
   final fundButton = find.byKey(const Key('wapu-fund'));
+  final reconnecting = find.byKey(const Key('wapu-reconnecting'));
+  final errorDetail = find.byKey(const Key('wapu-error-detail'));
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
@@ -1815,6 +1818,8 @@ void main() {
 
       expect(find.text('El servidor no respondió. Probá de nuevo.'),
           findsOneWidget);
+      expect(reconnecting, findsNothing,
+          reason: 'nothing tries a funding again by itself');
       expect(fundButton, findsOneWidget);
 
       net.failures.clear();
@@ -2108,6 +2113,48 @@ void main() {
       await tester.pump(const Duration(seconds: 10));
       expect(calls(_detailRoute), 2);
       expect(find.text('La API key no es válida'), findsNothing);
+      expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a poll that gets no answer says it is reconnecting',
+        (tester) async {
+      await toWaiting(tester);
+      net.failures[_detailRoute] = DioException(
+          requestOptions: RequestOptions(),
+          type: DioExceptionType.connectionError,
+          message:
+              'The connection errored: Failed host lookup: be-prod.wapu.app');
+      await tester.pump(const Duration(seconds: 10));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(_reconnecting), findsOneWidget);
+      expect(find.text('No se pudo completar la operación'), findsNothing,
+          reason: 'it is not shown as an error');
+      expect(errorDetail, findsNothing, reason: 'the details are closed');
+      expect(find.text(_alias), findsOneWidget);
+      expect(find.text(r'$ 15.000,37'), findsOneWidget);
+      expect(tester.getTopLeft(find.text(_reconnecting)).dy,
+          lessThan(tester.getTopLeft(find.text(_alias)).dy),
+          reason: 'the line is above the order');
+
+      // A tap opens the reason, and the repaint of the countdown leaves it so.
+      await tester.tap(reconnecting);
+      await tester.pump();
+      expect(find.text('No se pudo completar la operación'), findsOneWidget);
+      expect(
+          find.text(
+              'The connection errored: Failed host lookup: be-prod.wapu.app'),
+          findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      expect(errorDetail, findsOneWidget);
+
+      // The next tick asks again, and the line goes once it is answered.
+      net.failures.clear();
+      await tester.pump(const Duration(seconds: 9));
+      expect(calls(_detailRoute), 2);
+      expect(reconnecting, findsNothing);
+      expect(find.text(_reconnecting), findsNothing);
       expect(find.text(_alias), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });

@@ -394,6 +394,8 @@ const Map<String, String> _en = {
   'El servicio no está disponible. Probá más tarde.':
       'The service is unavailable. Try again later.',
   'No se pudo completar la operación': 'The operation could not be completed',
+  'Problema en la conexión. Intentando reconectar.':
+      'Connection problem. Trying to reconnect.',
   'Configuración de Wapu': 'Wapu settings',
   'Avanzado': 'Advanced',
   'URL del backend': 'Backend URL',
