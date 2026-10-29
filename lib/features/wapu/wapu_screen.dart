@@ -253,6 +253,7 @@ class _WapuScreenState extends State<WapuScreen> {
   /// can close without saying what it did (a partial save, the system back), so
   /// the key is read again whatever it returns. Until it is, Confirmar waits.
   Future<void> _openConfig() async {
+    if (_busy) return;
     if (!await confirmMiniappPin(context, action: 'Entrar')) return;
     if (!mounted) return;
     await context.push('/wapu/config');
@@ -514,9 +515,11 @@ class _WapuScreenState extends State<WapuScreen> {
 
   /// Nueva venta, from the app bar or from the button of a finished order. The
   /// order on screen is let go: it expires on its own, and the History has it.
-  /// One that waits for the customer's transfer asks first.
+  /// One that waits for the customer's transfer asks first. Not while an order
+  /// is being created or funded: the reply would be dropped, and the order left
+  /// open and never funded.
   Future<void> _newSale() async {
-    if (_asking) return;
+    if (_asking || _busy) return;
     if (_order?.status == 'FUNDING_ISSUED') {
       final gen = _gen;
       var confirmed = false;
@@ -564,8 +567,10 @@ class _WapuScreenState extends State<WapuScreen> {
       );
 
   /// The History, and the order it hands back, if one was chosen. The sale
-  /// stays as it was when it is left with none.
+  /// stays as it was when it is left with none. Not while an order is being
+  /// created or funded, as Nueva venta.
   Future<void> _openHistory() async {
+    if (_busy) return;
     final id = await context.push<String>('/wapu/historial');
     if (id != null && mounted) _resume(id);
   }
@@ -608,6 +613,9 @@ class _WapuScreenState extends State<WapuScreen> {
         showSync: false,
         showInvoiceDebug: false,
         actions: [
+          // The three wait while an order is created or funded: leaving the
+          // sale then would drop the reply of the call that is out.
+          //
           // The orders of this key, to follow one that was left or whose create
           // got no answer. Within reach while the till is locked too.
           if (_inSale)
@@ -615,7 +623,7 @@ class _WapuScreenState extends State<WapuScreen> {
               key: const Key('wapu-history'),
               tooltip: context.tr('Historial').toUpperCase(),
               icon: const Icon(Icons.history, size: 26),
-              onPressed: _openHistory,
+              onPressed: _busy ? null : _openHistory,
             ),
           // Within reach on every step, and while the till is locked too: it is
           // how the next customer is served.
@@ -624,7 +632,7 @@ class _WapuScreenState extends State<WapuScreen> {
               key: const Key('wapu-new-sale'),
               tooltip: context.tr('Nueva venta').toUpperCase(),
               icon: const Icon(Icons.add_circle_outline, size: 26),
-              onPressed: _newSale,
+              onPressed: _busy ? null : _newSale,
             ),
           // Nobody to keep a key for, and out of reach while the till is locked.
           if (_signedIn)
@@ -637,7 +645,7 @@ class _WapuScreenState extends State<WapuScreen> {
                       tooltip:
                           context.tr('Configuración de Wapu').toUpperCase(),
                       icon: const Icon(Icons.settings_outlined, size: 26),
-                      onPressed: _openConfig,
+                      onPressed: _busy ? null : _openConfig,
                     ),
             ),
         ],

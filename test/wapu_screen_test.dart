@@ -289,6 +289,7 @@ void main() {
   final inSats = find.byKey(const Key('wapu-mode-sats'));
   final inArs = find.byKey(const Key('wapu-mode-ars'));
   final newSale = find.byKey(const Key('wapu-new-sale'));
+  final history = find.byKey(const Key('wapu-history'));
   final fundButton = find.byKey(const Key('wapu-fund'));
 
   setUp(() {
@@ -1491,6 +1492,74 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    /// What the three app bar buttons would run if they were pressed now.
+    List<VoidCallback> pressesOfAppBar(WidgetTester tester) => [
+          for (final button in [newSale, history, gear])
+            tester.widget<IconButton>(button).onPressed!,
+        ];
+
+    /// Taps Nueva venta, Historial and the gear, and runs [stale], the presses
+    /// that were on their way before the buttons went off. None may do a thing.
+    Future<void> expectAppBarWaits(
+        WidgetTester tester, List<VoidCallback> stale) async {
+      for (final button in [newSale, history, gear]) {
+        expect(tester.widget<IconButton>(button).onPressed, isNull);
+        await tester.tap(button, warnIfMissed: false);
+      }
+      for (final press in stale) {
+        press();
+      }
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(WapuSettingsScreen), findsNothing);
+    }
+
+    testWidgets('the app bar waits while an order is created', (tester) async {
+      final held = holdOn('POST', _tentatives);
+      await toAmount(tester);
+      await price(tester);
+      final stale = pressesOfAppBar(tester);
+
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(calls(_createRoute), 1, reason: 'the create is out');
+      await expectAppBarWaits(tester, stale);
+      expect(amount, findsOneWidget, reason: 'the sale is where it was');
+      expect(find.text(r'$ 15.000'), findsOneWidget);
+
+      held.complete();
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget, reason: 'the order shows');
+      expect(calls(_createRoute), 1);
+      expect(calls(_fundRoute), 1);
+      for (final button in [newSale, history, gear]) {
+        expect(tester.widget<IconButton>(button).onPressed, isNotNull);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the app bar waits while the funding is asked for',
+        (tester) async {
+      final held = holdOn('POST', '$_tentatives/t1/funding');
+      await toAmount(tester);
+      await price(tester);
+      final stale = pressesOfAppBar(tester);
+
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(find.text('Orden creada'), findsOneWidget);
+      await expectAppBarWaits(tester, stale);
+      expect(find.text('Orden creada'), findsOneWidget);
+
+      held.complete();
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget);
+      for (final button in [newSale, history, gear]) {
+        expect(tester.widget<IconButton>(button).onPressed, isNotNull);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('the amount cannot be retyped under a pending create',
         (tester) async {
       net.failures[_createRoute] = DioException(
@@ -1776,8 +1845,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a create that lands after Nueva venta is dropped',
+    testWidgets('a create that lands after the till changed hands is dropped',
         (tester) async {
+      seed({_me: 'key-1', _other: 'key-2'});
       final held = holdOn('POST', _tentatives);
       await toAmount(tester);
       await price(tester);
@@ -1785,9 +1855,8 @@ void main() {
       await settle(tester);
       expect(calls(_createRoute), 1);
 
-      await tester.tap(newSale); // an order still being created: no dialog
+      merchantAddress.value = _other; // the sale of the old user is let go
       await settle(tester);
-      expect(find.byType(AlertDialog), findsNothing);
       expect(destination, findsOneWidget);
 
       held.complete();
@@ -1804,16 +1873,16 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('a funding that lands after Nueva venta is dropped',
+    testWidgets('a funding that lands after the till changed hands is dropped',
         (tester) async {
+      seed({_me: 'key-1', _other: 'key-2'});
       final held = holdOn('POST', '$_tentatives/t1/funding');
       await toAmount(tester);
       await priceAndConfirm(tester);
       expect(find.text('Orden creada'), findsOneWidget);
 
-      await tester.tap(newSale); // not waiting for a transfer yet: no dialog
+      merchantAddress.value = _other; // the sale of the old user is let go
       await settle(tester);
-      expect(find.byType(AlertDialog), findsNothing);
       expect(destination, findsOneWidget);
 
       held.complete();
