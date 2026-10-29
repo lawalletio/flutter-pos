@@ -356,7 +356,7 @@ class CardsApi {
           : const [],
       cards: (o['cards'] as num?)?.toInt() ?? 0,
       remoteWallets: (o['remoteWallets'] as num?)?.toInt() ?? 0,
-      cardRecoveryEnabled: o['cardRecoveryEnabled'] != false,
+      cardRecoveryEnabled: o['cardRecoveryEnabled'] == true,
       cardDisabled: o['cardDisabled'] == true,
       balanceSats: balance is num ? balance.toInt() : null,
     );

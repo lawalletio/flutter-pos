@@ -854,7 +854,7 @@ void main() {
         reason: 'RECOVER shown in row when recoverable');
   });
 
-  testWidgets('RECOVER treats missing cardRecoveryEnabled as true (server default)',
+  testWidgets('RECOVER is hidden when cardRecoveryEnabled is missing (fail-closed)',
       (tester) async {
     final app = await pumpCards(
         tester,
@@ -872,8 +872,31 @@ void main() {
         }));
     app.tap(cardUrl);
     await app.settle();
+    expect(find.byKey(const Key('cards-recover')), findsNothing,
+        reason: 'RECOVER hidden when cardRecoveryEnabled is missing (fail-closed)');
+  });
+
+  testWidgets('RECOVER shown when cardRecoveryEnabled is explicitly true',
+      (tester) async {
+    final app = await pumpCards(
+        tester,
+        FakeNet({
+          'GET /api/cards/abc-1': (200, {'id': 'abc-1', 'username': 'a'}),
+          'GET /api/cards/abc-1/owner': (
+            200,
+            {
+              'owned': true,
+              'primaryAddress': 'a@x.io',
+              'lightningAddresses': ['a@x.io'],
+              'cardRecoveryEnabled': true,
+              'balanceSats': 21,
+            }
+          ),
+        }));
+    app.tap(cardUrl);
+    await app.settle();
     expect(find.byKey(const Key('cards-recover')), findsOneWidget,
-        reason: 'RECOVER shown when cardRecoveryEnabled is missing (default true)');
+        reason: 'RECOVER shown when cardRecoveryEnabled is explicitly true');
   });
 
   testWidgets('an unknown card fails and goes back', (tester) async {
