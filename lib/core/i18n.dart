@@ -444,4 +444,6 @@ const Map<String, String> _en = {
   'El monto quedó en tu saldo de Wapu.':
       'The amount went to your Wapu balance.',
   'Nueva venta': 'New sale',
+  'La orden queda abierta hasta que venza. La podés retomar desde el Historial.':
+      'The order stays open until it expires. You can resume it from the History.',
 };

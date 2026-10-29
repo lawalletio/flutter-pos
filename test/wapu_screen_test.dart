@@ -10,10 +10,12 @@ import 'package:go_router/go_router.dart';
 import 'package:lawallet_pos/core/flow_lock.dart';
 import 'package:lawallet_pos/core/i18n.dart';
 import 'package:lawallet_pos/core/router.dart';
+import 'package:lawallet_pos/core/sounds.dart';
 import 'package:lawallet_pos/core/theme.dart';
 import 'package:lawallet_pos/data/lnurl/lnurl_service.dart';
 import 'package:lawallet_pos/domain/config/miniapp_pin.dart';
 import 'package:lawallet_pos/domain/config/session.dart';
+import 'package:lawallet_pos/domain/config/settings_state.dart';
 import 'package:lawallet_pos/features/cards/cards_widgets.dart'
     show TokenScanPage;
 import 'package:lawallet_pos/features/miniapps/miniapps.dart';
@@ -48,6 +50,12 @@ class FakeNet implements HttpClientAdapter {
   /// The query of each of [calls].
   final queries = <Map<String, String>>[];
 
+  /// The JSON body of each of [calls], or null when it sent none.
+  final bodies = <Object?>[];
+
+  /// Routes that fail as a transport error instead of answering.
+  final failures = <String, DioException>{};
+
   /// Holds each request until the future it returns completes, when set. The
   /// answer is the one routed when the request came in, not when it is let go.
   Future<void> Function(RequestOptions o)? hold;
@@ -58,8 +66,11 @@ class FakeNet implements HttpClientAdapter {
     final key = '${o.method} ${o.uri.path}';
     calls.add(key);
     queries.add(o.uri.queryParameters);
+    bodies.add(o.data is String ? jsonDecode(o.data as String) : null);
+    final failure = failures[key];
     final (code, body) = routes[key] ?? (404, {'error': 'nope'});
     await hold?.call(o);
+    if (failure != null) throw failure;
     return ResponseBody.fromString(jsonEncode(body), code, headers: {
       'content-type': ['application/json']
     });
@@ -164,6 +175,82 @@ class BrokenApi extends WapuApi {
       Future.error(StateError('boom'));
 }
 
+/// An API that quotes as usual and whose create fails in a way the client never
+/// reports.
+class BrokenCreateApi extends WapuApi {
+  BrokenCreateApi(Dio dio)
+      : super(baseUrl: kWapuDefaultBaseUrl, apiKey: 'key-1', dio: dio);
+
+  @override
+  Future<WapuOrder> createOrder(
+          {required String address, int? arsCents, int? sats}) =>
+      Future.error(StateError('boom'));
+}
+
+const _tentatives = '/transactions/direct-fiat/tentatives';
+const _createRoute = 'POST $_tentatives';
+const _fundRoute = 'POST $_tentatives/t1/funding';
+const _detailRoute = 'GET $_tentatives/t1';
+
+const _alias = 'mi.alias.cobro';
+const _cvu = '0000003100012345678901';
+const _hash =
+    '3f9a1c0be2d84a76b5c3d1e0f9a8b7c6d5e4f30211223344556677889900aabb';
+
+/// The backend's answer for the order [id]: by default one that waits for the
+/// transfer, funded at $ 15.000,37. Only the orders that have bank details send
+/// them: pass [bank] false for the others.
+(int, Object) orderReply({
+  String id = 't1',
+  String status = 'FUNDING_ISSUED',
+  String payout = 'waiting_ars',
+  bool watch = true,
+  bool bank = true,
+  String alias = _alias,
+  int ars = 1500037,
+  int code = 200,
+  String? hash,
+}) =>
+    (
+      code,
+      {
+        'tentative_id': id,
+        'type': 'crypto_purchase',
+        'status': status,
+        'payout_status': payout,
+        'payout_address': 'alice@example.com',
+        'amount_ars_cents': ars,
+        'amount_out': 12500,
+        'network_fee_out': 21,
+        'expires_at': DateTime.now()
+            .toUtc()
+            .add(const Duration(minutes: 15))
+            .toIso8601String(),
+        'late_watch_until': null,
+        'watch_pending': watch,
+        if (bank) 'alias': alias,
+        if (bank) 'cvu': _cvu,
+        'payment_hash': hash,
+      }
+    );
+
+/// An order just created: the quoted amount, and no bank details yet.
+(int, Object) createdReply({String id = 't1'}) => orderReply(
+    id: id,
+    status: 'CREATED',
+    watch: false,
+    bank: false,
+    ars: 1500000,
+    code: 201);
+
+/// What the backend says once the transfer was seen and the sats went out.
+(int, Object) completedReply() => orderReply(
+    status: 'COMPLETED',
+    payout: 'completed',
+    watch: false,
+    bank: false,
+    hash: _hash);
+
 /// The [value] on the quote line named [label].
 Finder line(String label, String value) => find.descendant(
     of: find.widgetWithText(Wrap, label), matching: find.text(value));
@@ -193,6 +280,8 @@ void main() {
   final confirm = find.byKey(const Key('wapu-confirm'));
   final inSats = find.byKey(const Key('wapu-mode-sats'));
   final inArs = find.byKey(const Key('wapu-mode-ars'));
+  final newSale = find.byKey(const Key('wapu-new-sale'));
+  final fundButton = find.byKey(const Key('wapu-fund'));
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
@@ -1118,6 +1207,771 @@ void main() {
       await typeDigits(tester, '5');
       await tester.pump(const Duration(milliseconds: 600));
       expect(line('The customer pays', '\$ 224,00'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('status', () {
+    /// What the till asked the speaker to play, by name.
+    final played = <String>[];
+
+    setUp(() async {
+      seed({_me: 'key-1'});
+      net.routes[_quoteRoute] = quoteReply();
+      net.routes[_createRoute] = createdReply();
+      net.routes[_fundRoute] = orderReply(code: 201);
+      net.routes[_detailRoute] = orderReply();
+      played.clear();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('pos/sounds'),
+              (call) async {
+        if (call.method == 'play') {
+          played.add((call.arguments as Map)['name'] as String);
+        }
+        return null;
+      });
+      appSettings.value = const SettingsState();
+      await AppSounds.prepare();
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('pos/sounds'), null);
+    });
+
+    /// How many times the till called [route].
+    int calls(String route) => net.calls.where((c) => c == route).length;
+
+    /// How many times the paid cue played, not counting the buttons' clicks.
+    int paid() => played.where((n) => n == 'arpeggio').length;
+
+    VoidCallback? confirmAction(WidgetTester tester) =>
+        tester.widget<FilledButton>(confirm).onPressed;
+
+    /// Holds the requests to [path] until the returned completer completes.
+    Completer<void> holdOn(String method, String path) {
+      final held = Completer<void>();
+      net.hold = (o) => o.method == method && o.uri.path == path
+          ? held.future
+          : Future.value();
+      return held;
+    }
+
+    /// Opens the sale and gets past the first step.
+    Future<void> toAmount(WidgetTester tester, {bool english = false}) async {
+      await open(tester, english: english);
+      await submit(tester, 'alice@example.com');
+      expect(amount, findsOneWidget, reason: 'the address was taken');
+    }
+
+    /// Types $ 15.000 and waits for its price.
+    Future<void> price(WidgetTester tester) async {
+      await typeDigits(tester, '15000');
+      await tester.pump(const Duration(milliseconds: 600));
+    }
+
+    /// Types $ 15.000, waits for its price and taps Confirmar.
+    Future<void> priceAndConfirm(WidgetTester tester) async {
+      await price(tester);
+      await tester.tap(confirm);
+      await settle(tester);
+    }
+
+    /// The sale, up to an order that waits for the transfer.
+    Future<void> toWaiting(WidgetTester tester, {bool english = false}) async {
+      await toAmount(tester, english: english);
+      await priceAndConfirm(tester);
+      expect(find.text(_alias), findsOneWidget, reason: 'the order is funded');
+    }
+
+    /// Taps the Nueva venta of the dialog that asks first.
+    Future<void> confirmDialog(WidgetTester tester) async {
+      await tester.tap(find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Nueva venta')));
+      await settle(tester);
+    }
+
+    const unknownOutcome = 'No sabemos si la orden se creó. '
+        'Revisá el Historial antes de reintentar.';
+
+    testWidgets('confirm creates, funds and shows the funded amount',
+        (tester) async {
+      await toAmount(tester);
+      await price(tester);
+      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+
+      await tester.tap(confirm);
+      await settle(tester);
+
+      expect(net.calls, [_quoteRoute, _createRoute, _fundRoute]);
+      expect(net.bodies[1], {
+        'type': 'crypto_purchase',
+        'payout_currency': 'SAT',
+        'payout_network': 'LIGHTNING',
+        'payout_address': 'alice@example.com',
+        'amount_ars_cents': 1500000,
+      });
+      expect(amount, findsNothing);
+      expect(find.text('Esperando la transferencia'), findsOneWidget);
+      expect(find.text(_alias), findsOneWidget);
+      expect(find.text(_cvu), findsOneWidget);
+      expect(find.text(r'$ 15.000,37'), findsOneWidget,
+          reason: 'what funding says the customer pays');
+      expect(find.text(r'$ 15.000,00'), findsNothing,
+          reason: "not the quote's amount");
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('sats mode creates the order for the sats typed',
+        (tester) async {
+      net.routes[_quoteRoute] = quoteReply(ars: 1000000, out: 50000);
+      await toAmount(tester);
+      await tester.tap(inSats);
+      await tester.pump();
+      await typeDigits(tester, '50000');
+      await tester.pump(const Duration(milliseconds: 600));
+
+      await tester.tap(confirm);
+      await settle(tester);
+
+      expect(net.bodies[1], containsPair('amount_out', 50000));
+      expect(net.bodies[1], isNot(contains('amount_ars_cents')));
+      expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a create timeout says to check the history and does not retry',
+        (tester) async {
+      net.failures[_createRoute] = DioException(
+          requestOptions: RequestOptions(),
+          type: DioExceptionType.receiveTimeout);
+      await toAmount(tester);
+      await priceAndConfirm(tester);
+
+      expect(find.text(unknownOutcome), findsOneWidget);
+      expect(find.byKey(const Key('wapu-error-detail')), findsNothing,
+          reason: "'timeout' is the API's word, and the copy says it");
+      expect(amount, findsOneWidget, reason: 'the sale stays on the amount');
+      expect(confirmAction(tester), isNotNull,
+          reason: 'the operator decides when to try again');
+
+      await tester.pump(const Duration(seconds: 60));
+      expect(calls(_createRoute), 1, reason: 'never retried on its own');
+      expect(calls(_fundRoute), 0);
+
+      await typeDigits(tester, '0'); // the error was the old amount's
+      expect(find.text(unknownOutcome), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('no connection on create leaves the outcome unknown too',
+        (tester) async {
+      net.failures[_createRoute] = DioException(
+          requestOptions: RequestOptions(),
+          type: DioExceptionType.connectionError);
+      await toAmount(tester);
+      await priceAndConfirm(tester);
+
+      expect(find.text(unknownOutcome), findsOneWidget);
+      expect(amount, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a failure of our own on create leaves the outcome unknown',
+        (tester) async {
+      wapuApiFor = (_, __) => BrokenCreateApi(Dio()..httpClientAdapter = net);
+      await toAmount(tester);
+      await priceAndConfirm(tester);
+
+      expect(find.text(unknownOutcome), findsOneWidget);
+      expect(find.textContaining('boom'), findsNothing);
+      expect(amount, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('only a create that surely made no order may be tried again',
+        (tester) async {
+      await toAmount(tester);
+      await price(tester);
+
+      for (final (code, said, copy, unknown) in [
+        (500, 'internal error', unknownOutcome, true),
+        (
+          503,
+          'payout provider unavailable',
+          'El servicio no está disponible. Probá más tarde.',
+          false,
+        ),
+        (
+          429,
+          'too many open purchase orders',
+          'Hay demasiadas órdenes abiertas. Esperá a que venzan.',
+          false,
+        ),
+      ]) {
+        net.routes[_createRoute] = (code, {'error': said});
+        await tester.tap(confirm);
+        await settle(tester);
+
+        expect(find.text(copy), findsOneWidget, reason: '$code');
+        expect(find.text(said), findsOneWidget,
+            reason: "the backend's own words, under the copy");
+        expect(
+            find.text(unknownOutcome), unknown ? findsOneWidget : findsNothing,
+            reason: '$code');
+        expect(amount, findsOneWidget);
+        expect(confirmAction(tester), isNotNull);
+      }
+      expect(calls(_createRoute), 3);
+
+      net.routes[_createRoute] = createdReply();
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget);
+      expect(find.textContaining('Hay demasiadas'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('going back to the address drops the error of the create',
+        (tester) async {
+      net.routes[_createRoute] =
+          (429, {'error': 'too many open purchase orders'});
+      await toAmount(tester);
+      await priceAndConfirm(tester);
+      expect(find.textContaining('Hay demasiadas'), findsOneWidget);
+
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pump();
+      await submit(tester, 'bob@example.com');
+
+      expect(amount, findsOneWidget);
+      expect(find.textContaining('Hay demasiadas'), findsNothing,
+          reason: 'it was about the old address');
+      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a second tap while the order is created sends no second one',
+        (tester) async {
+      final held = holdOn('POST', _tentatives);
+      await toAmount(tester);
+      await price(tester);
+
+      await tester.tap(confirm);
+      await tester.tap(confirm); // before a rebuild: the screen guards itself
+      await tester.pump();
+      expect(confirmAction(tester), isNull, reason: 'it waits for the order');
+      expect(
+          find.descendant(
+              of: confirm, matching: find.byType(CircularProgressIndicator)),
+          findsOneWidget);
+      expect(find.byType(AlertDialog), findsNothing);
+
+      await tester.tap(confirm, warnIfMissed: false);
+      await settle(tester);
+      expect(calls(_createRoute), 1);
+
+      held.complete();
+      await settle(tester);
+      expect(calls(_createRoute), 1);
+      expect(calls(_fundRoute), 1);
+      expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Confirmar waits while the key is read again after the config',
+        (tester) async {
+      final slow = SlowAccounts();
+      wapuAccounts = slow;
+      await toAmount(tester);
+      await price(tester);
+      expect(confirmAction(tester), isNotNull);
+
+      await tester.tap(gear); // no PIN is set: straight in
+      await settle(tester);
+      slow.holds[_me] = Completer(); // the read after the config closes
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await settle(tester);
+
+      expect(find.byType(WapuSettingsScreen), findsNothing);
+      expect(confirmAction(tester), isNull,
+          reason: 'the key on screen may not be the one the config left');
+      await tester.tap(confirm, warnIfMissed: false);
+      await settle(tester);
+      expect(calls(_createRoute), 0, reason: 'nothing was created');
+
+      slow.holds[_me]!.complete(const WapuCredentials(apiKey: 'key-1'));
+      await settle(tester);
+      expect(confirmAction(tester), isNotNull,
+          reason: 'the same account: its price stays');
+      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('funding failure offers a retry', (tester) async {
+      net.routes[_fundRoute] = (503, {'error': 'payout provider unavailable'});
+      await toAmount(tester);
+      await priceAndConfirm(tester);
+
+      expect(find.text('Orden creada'), findsOneWidget);
+      expect(fundButton, findsOneWidget);
+      expect(find.text('El servicio no está disponible. Probá más tarde.'),
+          findsOneWidget);
+      expect(find.text(_alias), findsNothing);
+      expect(calls(_createRoute), 1);
+
+      final held = holdOn('POST', '$_tentatives/t1/funding');
+      net.routes[_fundRoute] = orderReply(code: 201);
+      await tester.tap(fundButton);
+      await tester.pump();
+      expect(tester.widget<FilledButton>(fundButton).onPressed, isNull,
+          reason: 'it waits for the details');
+      expect(find.text('El servicio no está disponible. Probá más tarde.'),
+          findsNothing,
+          reason: 'it is being tried again');
+      held.complete();
+      await settle(tester);
+
+      expect(calls(_fundRoute), 2);
+      expect(calls(_createRoute), 1, reason: 'the order is not created again');
+      expect(fundButton, findsNothing);
+      expect(find.text(_alias), findsOneWidget);
+      expect(find.text(r'$ 15.000,37'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a funding that gets no answer can be asked for again',
+        (tester) async {
+      net.failures[_fundRoute] = DioException(
+          requestOptions: RequestOptions(),
+          type: DioExceptionType.receiveTimeout);
+      await toAmount(tester);
+      await priceAndConfirm(tester);
+
+      expect(find.text('El servidor no respondió. Probá de nuevo.'),
+          findsOneWidget);
+      expect(fundButton, findsOneWidget);
+
+      net.failures.clear();
+      await tester.tap(fundButton);
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('polling advances to done and plays once', (tester) async {
+      await toWaiting(tester);
+      expect(calls(_detailRoute), 0, reason: 'the order was just funded');
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 1);
+      expect(find.text('Esperando la transferencia'), findsOneWidget);
+
+      net.routes[_detailRoute] =
+          orderReply(status: 'EXECUTED', payout: 'sending', bank: false);
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 2);
+      expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget);
+      expect(find.text(_alias), findsNothing,
+          reason: 'a paid order has no bank details to show');
+      expect(paid(), 0);
+
+      net.routes[_detailRoute] = completedReply();
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      expect(calls(_detailRoute), 3);
+      expect(find.text('¡Listo! El cliente recibió 12.500 sats'),
+          findsOneWidget);
+      expect(find.text(_hash), findsOneWidget);
+      expect(paid(), 1);
+
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_detailRoute), 3, reason: 'polling stopped');
+      expect(paid(), 1, reason: 'the cue plays once');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a completed order that is still watched plays the cue once',
+        (tester) async {
+      await toWaiting(tester);
+      net.routes[_detailRoute] = orderReply(
+          status: 'COMPLETED', payout: 'completed', bank: false, hash: _hash);
+
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+
+      expect(calls(_detailRoute), 2, reason: 'still watched, so still read');
+      expect(find.textContaining('¡Listo!'), findsOneWidget);
+      expect(paid(), 1, reason: 'only the transition into COMPLETED plays');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an order that went to the balance stops the polling quietly',
+        (tester) async {
+      await toWaiting(tester);
+      net.routes[_detailRoute] = orderReply(
+          status: 'SETTLED_TO_BALANCE',
+          payout: 'settled_to_balance',
+          watch: false,
+          bank: false);
+      await tester.pump(const Duration(seconds: 10));
+
+      expect(find.text('No se pudieron enviar los sats'), findsOneWidget);
+      expect(paid(), 0, reason: 'the customer did not get the sats');
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_detailRoute), 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a poll that is still out is not overlapped by the next tick',
+        (tester) async {
+      await toWaiting(tester);
+      final held = holdOn('GET', '$_tentatives/t1');
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 1);
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 1,
+          reason: 'the read of the last tick is still out');
+
+      held.complete();
+      await settle(tester);
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 2);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the countdown moves while it waits for the transfer',
+        (tester) async {
+      await toWaiting(tester);
+      String countdown() =>
+          tester.widget<Text>(find.textContaining('Vence en')).data!;
+      final before = countdown();
+
+      // The countdown reads the device's clock, which a test cannot move: let a
+      // real second go by, then the tick that repaints it.
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 1100)));
+      expect(countdown(), before, reason: 'nothing repaints it by itself');
+      await tester.pump(const Duration(seconds: 1));
+      expect(countdown(), isNot(before));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a stale poll does not resurrect the old order',
+        (tester) async {
+      await toWaiting(tester);
+      final held = holdOn('GET', '$_tentatives/t1');
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 1, reason: 'a read is on its way');
+
+      await tester.tap(newSale);
+      await settle(tester);
+      await confirmDialog(tester);
+      expect(destination, findsOneWidget);
+
+      held.complete(); // the old order's answer lands in the new sale
+      await settle(tester);
+
+      expect(destination, findsOneWidget, reason: 'the new sale did not move');
+      expect(find.text(_alias), findsNothing);
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_detailRoute), 1, reason: 'nothing follows the old order');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets("a stale poll does not overwrite the next sale's order",
+        (tester) async {
+      await toWaiting(tester);
+      final held = holdOn('GET', '$_tentatives/t1');
+      await tester.pump(const Duration(seconds: 10));
+
+      await tester.tap(newSale);
+      await settle(tester);
+      await confirmDialog(tester);
+
+      net.routes[_createRoute] = createdReply(id: 't2');
+      net.routes['POST $_tentatives/t2/funding'] =
+          orderReply(id: 't2', alias: 'otro.alias', code: 201);
+      net.routes['GET $_tentatives/t2'] =
+          orderReply(id: 't2', alias: 'otro.alias');
+      await submit(tester, 'bob@example.com');
+      await priceAndConfirm(tester);
+      expect(find.text('otro.alias'), findsOneWidget);
+
+      held.complete(); // t1's answer, with t1's bank details
+      await settle(tester);
+
+      expect(find.text('otro.alias'), findsOneWidget);
+      expect(find.text(_alias), findsNothing);
+
+      // And the new order is followed: the old read did not leave it waiting.
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls('GET $_tentatives/t2'), 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Nueva venta stops the clocks of the old order',
+        (tester) async {
+      net.routes['POST $_tentatives/t2/funding'] =
+          orderReply(id: 't2', alias: 'otro.alias', code: 201);
+      await toWaiting(tester); // t1's clock reads it every 10 s
+      await tester.pump(const Duration(seconds: 3));
+      await tester.tap(newSale);
+      await settle(tester);
+      await confirmDialog(tester);
+
+      net.routes[_createRoute] = createdReply(id: 't2');
+      await submit(tester, 'bob@example.com');
+      await priceAndConfirm(tester);
+      expect(find.text('otro.alias'), findsOneWidget);
+
+      // t1's clock would tick inside these 8 s; t2's own is a full 10 s away.
+      await tester.pump(const Duration(seconds: 8));
+      expect(calls('GET $_tentatives/t2'), 0);
+      expect(calls(_detailRoute), 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a create that lands after Nueva venta is dropped',
+        (tester) async {
+      final held = holdOn('POST', _tentatives);
+      await toAmount(tester);
+      await price(tester);
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(calls(_createRoute), 1);
+
+      await tester.tap(newSale); // an order still being created: no dialog
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(destination, findsOneWidget);
+
+      held.complete();
+      await settle(tester);
+
+      expect(destination, findsOneWidget);
+      expect(find.text('Orden creada'), findsNothing);
+      expect(calls(_fundRoute), 0, reason: 'the abandoned order is not funded');
+
+      // The next sale is not left waiting for the create that was let go.
+      await submit(tester, 'bob@example.com');
+      await priceAndConfirm(tester);
+      expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a funding that lands after Nueva venta is dropped',
+        (tester) async {
+      final held = holdOn('POST', '$_tentatives/t1/funding');
+      await toAmount(tester);
+      await priceAndConfirm(tester);
+      expect(find.text('Orden creada'), findsOneWidget);
+
+      await tester.tap(newSale); // not waiting for a transfer yet: no dialog
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(destination, findsOneWidget);
+
+      held.complete();
+      await settle(tester);
+
+      expect(destination, findsOneWidget);
+      expect(find.text(_alias), findsNothing);
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_detailRoute), 0, reason: 'nothing follows the old order');
+
+      // The next sale is not left waiting for the funding that was let go.
+      await submit(tester, 'bob@example.com');
+      await priceAndConfirm(tester);
+      expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('401 while polling keeps the bank details', (tester) async {
+      await toWaiting(tester);
+      net.routes[_detailRoute] = (401, {'error': 'invalid api key'});
+      await tester.pump(const Duration(seconds: 10));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('La API key no es válida'), findsOneWidget);
+      expect(find.text('invalid api key'), findsOneWidget);
+      expect(find.text(_alias), findsOneWidget);
+      expect(find.text(_cvu), findsOneWidget);
+      expect(find.text(r'$ 15.000,37'), findsOneWidget);
+      expect(
+          tester.getTopLeft(find.text('La API key no es válida')).dy,
+          lessThan(tester.getTopLeft(find.text(_alias)).dy),
+          reason: 'the reason is above the order');
+
+      // The next tick asks again, and the reason goes once it is answered.
+      net.routes[_detailRoute] = orderReply();
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 2);
+      expect(find.text('La API key no es válida'), findsNothing);
+      expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('forgetting the key mid-sale stops the polling and the sale',
+        (tester) async {
+      await toWaiting(tester);
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 1);
+
+      await tester.tap(gear);
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('wapu-forget')));
+      await settle(tester);
+      expect(find.text(_configure), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 40));
+      expect(calls(_detailRoute), 1, reason: 'nobody to read the order for');
+
+      await tester.tap(setup); // a key again: a new sale, not the old order
+      await settle(tester);
+      await tester.enterText(find.byKey(const Key('wapu-key')), 'new-key');
+      await tester.tap(find.byKey(const Key('wapu-save')));
+      await settle(tester);
+      expect(destination, findsOneWidget);
+      expect(find.text(_alias), findsNothing);
+      await tester.pump(const Duration(seconds: 40));
+      expect(calls(_detailRoute), 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('new sale asks before abandoning a waiting order',
+        (tester) async {
+      await toWaiting(tester);
+
+      await tester.tap(newSale);
+      await settle(tester);
+      final dialog = find.byType(AlertDialog);
+      expect(dialog, findsOneWidget);
+      expect(find.descendant(of: dialog, matching: find.text('Nueva venta')),
+          findsNWidgets(2),
+          reason: 'its title and its button');
+      expect(
+          find.text('La orden queda abierta hasta que venza. '
+              'La podés retomar desde el Historial.'),
+          findsOneWidget);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
+      await settle(tester);
+      expect(dialog, findsNothing);
+      expect(find.text(_alias), findsOneWidget, reason: 'it is still the sale');
+      expect(destination, findsNothing);
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls(_detailRoute), 1, reason: 'and it is still followed');
+
+      await tester.tap(newSale);
+      await settle(tester);
+      await confirmDialog(tester);
+      expect(dialog, findsNothing);
+      expect(destination, findsOneWidget);
+      expect(fieldText(tester), isEmpty);
+      expect(find.text(_alias), findsNothing);
+
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_detailRoute), 1, reason: 'the old order is not followed');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('new sale starts over from the amount without asking',
+        (tester) async {
+      await toAmount(tester);
+      await price(tester);
+      expect(confirmAction(tester), isNotNull);
+
+      await tester.tap(newSale);
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(destination, findsOneWidget);
+      expect(fieldText(tester), isEmpty, reason: 'the address went with it');
+
+      await submit(tester, 'bob@example.com');
+      expect(find.text(r'$ 0'), findsOneWidget, reason: 'a new sale, in pesos');
+      expect(find.text('El cliente recibe'), findsNothing,
+          reason: 'the old price is gone');
+      expect(confirmAction(tester), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('new sale on the first step clears what was typed',
+        (tester) async {
+      await open(tester);
+      await tester.enterText(destination, 'alice@example.com');
+
+      await tester.tap(newSale);
+      await settle(tester);
+
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(fieldText(tester), isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final (what, key) in [
+      ('the app bar button', 'wapu-new-sale'),
+      ('the big button', 'wapu-new-sale-big'),
+    ]) {
+      testWidgets('$what starts the next sale once the order is done',
+          (tester) async {
+        await toWaiting(tester);
+        net.routes[_detailRoute] = completedReply();
+        await tester.pump(const Duration(seconds: 10));
+        expect(find.textContaining('¡Listo!'), findsOneWidget);
+
+        await tester.ensureVisible(find.byKey(Key(key)));
+        await tester.tap(find.byKey(Key(key)));
+        await settle(tester);
+
+        expect(find.byType(AlertDialog), findsNothing,
+            reason: 'nothing waits for the customer any more');
+        expect(destination, findsOneWidget);
+        expect(find.textContaining('¡Listo!'), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    testWidgets('Nueva venta stays within reach while the till is locked',
+        (tester) async {
+      lockedFlow.value = '/wapu';
+      await open(tester);
+
+      expect(gear, findsNothing);
+      expect(newSale, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Nueva venta is not offered without a key to sell with',
+        (tester) async {
+      seed({});
+      await open(tester);
+
+      expect(find.text(_configure), findsOneWidget);
+      expect(newSale, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the new sale dialog and button are translated',
+        (tester) async {
+      await toWaiting(tester, english: true);
+      expect(find.byTooltip('NEW SALE'), findsOneWidget);
+
+      await tester.tap(newSale);
+      await settle(tester);
+      final dialog = find.byType(AlertDialog);
+      expect(find.descendant(of: dialog, matching: find.text('New sale')),
+          findsNWidgets(2));
+      expect(
+          find.text('The order stays open until it expires. '
+              'You can resume it from the History.'),
+          findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Cancel'), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await settle(tester);
       await tester.pumpWidget(const SizedBox());
     });
   });

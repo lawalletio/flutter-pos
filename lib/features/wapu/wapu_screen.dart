@@ -8,6 +8,7 @@ import '../../core/flow_lock.dart';
 import '../../core/i18n.dart';
 import '../../core/numpad.dart';
 import '../../core/pin_dialog.dart';
+import '../../core/sounds.dart';
 import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../core/widgets.dart';
@@ -20,6 +21,7 @@ import 'wapu_account.dart';
 import 'wapu_api.dart';
 import 'wapu_destination.dart';
 import 'wapu_error_text.dart';
+import 'wapu_status_view.dart';
 
 /// Where the sale is: the customer's address, then the amount, then the order.
 enum _Step { destination, amount, status }
@@ -33,16 +35,32 @@ const _quoteDelay = Duration(milliseconds: 500);
 /// The most digits the pad takes, as on the cash register's.
 const _maxDigits = 12;
 
+/// How often an order that the backend still watches is read again.
+const _pollEvery = Duration(seconds: 10);
+
+/// How often the countdown of an order that waits for the transfer repaints.
+const _tickEvery = Duration(seconds: 1);
+
 /// Pesos and the rate, grouped with dots like every other amount of the till.
 final _pesos = NumberFormat.decimalPattern('es_AR');
 final _percent = NumberFormat('0.00', 'es_AR');
 
-/// What the customer pays when it is not what was typed: to the centavo.
-final _pesosAndCents = NumberFormat.decimalPattern('es_AR')
-  ..minimumFractionDigits = 2
-  ..maximumFractionDigits = 2;
-
 String _satsText(int sats) => '${formatToPreference(Currency.sat, sats)} sats';
+
+/// What a call answered, or why it did not: exactly one of the two is set.
+typedef _Answer<T> = ({T? reply, WapuApiException? error});
+
+/// Runs [call] and says how it went. A failure that is not the API's own (a
+/// bug, say) has no detail to show, so it is the generic one.
+Future<_Answer<T>> _answer<T>(Future<T> Function() call) async {
+  try {
+    return (reply: await call(), error: null);
+  } on WapuApiException catch (e) {
+    return (reply: null, error: e);
+  } catch (_) {
+    return (reply: null, error: const WapuApiException(''));
+  }
+}
 
 /// Whether [a] and [b] are the same key on the same backend. A reload hands
 /// back a new object each time, so the fields are what is compared.
@@ -82,15 +100,46 @@ class _WapuScreenState extends State<WapuScreen> {
   /// sats to. Set from the amount step on.
   String? _address;
 
-  /// A lookup of the typed address is under way, so the first step waits.
+  /// A lookup of the typed address, or of an order to resume, is under way, so
+  /// the first step waits.
   bool _checking = false;
 
-  /// Why the address cannot be used, as Spanish source text.
+  /// Why the address cannot be used, or the order of the History could not be
+  /// opened, as Spanish source text.
   String? _error;
 
   /// Counts sales. Whatever is still on its way for an earlier one compares it
   /// when it lands, and is dropped.
   int _gen = 0;
+
+  /// The order of the status step, as the backend last said it. The amounts
+  /// there are read from it and never from [_quote]: funding can raise the
+  /// pesos by up to a peso's worth of cents, and that is what the customer
+  /// pays.
+  WapuOrder? _order;
+
+  /// A create or a funding is under way, so no second one may start.
+  bool _busy = false;
+
+  /// The key is being read again after the config closed, and the one on
+  /// screen may not be the one the config left.
+  bool _reloading = false;
+
+  /// An order is being read again, so the next tick leaves it be.
+  bool _reading = false;
+
+  /// Why the order could not be created. The sale stays on the amount step.
+  WapuApiException? _createError;
+
+  /// Why the order on the status step could not be funded or read again. The
+  /// order stays on screen with what it showed, bank details included.
+  WapuApiException? _orderError;
+
+  /// Reads the order again while the backend still watches it.
+  Timer? _poller;
+
+  /// Repaints the countdown while the order waits for the transfer.
+  Timer? _ticker;
 
   /// What the amount is typed in. A sale starts in pesos.
   _Mode _mode = _Mode.ars;
@@ -121,6 +170,9 @@ class _WapuScreenState extends State<WapuScreen> {
 
   bool get _signedIn => merchantAddress.value.trim().isNotEmpty;
 
+  /// There is a key to sell with, so there is a sale to start over.
+  bool get _inSale => _signedIn && _loaded && _credentials != null;
+
   @override
   void initState() {
     super.initState();
@@ -132,6 +184,7 @@ class _WapuScreenState extends State<WapuScreen> {
   void dispose() {
     merchantAddress.removeListener(_onMerchant);
     _debounce?.cancel();
+    _stopClocks();
     _destination.dispose();
     super.dispose();
   }
@@ -146,10 +199,17 @@ class _WapuScreenState extends State<WapuScreen> {
     _load();
   }
 
-  /// Drops the sale in progress, back to the first step with nothing typed.
-  /// Call it inside [setState].
+  /// Drops the sale in progress, back to the first step with nothing typed: the
+  /// amount, its price and the order are gone, the clocks of the order stop,
+  /// and whatever is still on its way for it is dropped when it lands. Call it
+  /// inside [setState].
   void _resetSale() {
     _gen++;
+    _stopClocks();
+    _order = null;
+    _orderError = null;
+    _busy = false;
+    _reading = false;
     _destination.clear();
     _address = null;
     _error = null;
@@ -164,22 +224,32 @@ class _WapuScreenState extends State<WapuScreen> {
     final credentials = await wapuAccounts.load(merchantAddress.value);
     if (!mounted || load != _loads) return;
     setState(() {
-      // Another key or backend (the config changed them): a price from the old
-      // one is not this one's, so none stays on screen to be confirmed.
-      if (!_sameAccount(_credentials, credentials)) _clearAmount();
+      if (credentials == null && _credentials != null) {
+        // The key is gone (forgotten in the config): the order on screen can no
+        // longer be followed, and would be stale if a key came back. The
+        // History has it.
+        _resetSale();
+      } else if (!_sameAccount(_credentials, credentials)) {
+        // Another key or backend (the config changed them): a price from the
+        // old one is not this one's, so none stays on screen to be confirmed.
+        _clearAmount();
+      }
       _credentials = credentials;
       _loaded = true;
+      _reloading = false;
     });
   }
 
   /// The gear and Configurar: the config, behind the PIN when one is set. It
   /// can close without saying what it did (a partial save, the system back), so
-  /// the key is read again whatever it returns.
+  /// the key is read again whatever it returns. Until it is, Confirmar waits.
   Future<void> _openConfig() async {
     if (!await confirmMiniappPin(context, action: 'Entrar')) return;
     if (!mounted) return;
     await context.push('/wapu/config');
-    if (mounted) _load();
+    if (!mounted) return;
+    setState(() => _reloading = true);
+    _load();
   }
 
   Future<void> _scan() async {
@@ -235,7 +305,8 @@ class _WapuScreenState extends State<WapuScreen> {
   }
 
   /// Forgets the amount and all that was asked for it: the clock that was
-  /// running and any reply still on its way. Call it inside [setState].
+  /// running, any reply still on its way, and why an order for it could not be
+  /// created. Call it inside [setState].
   void _clearAmount() {
     _debounce?.cancel();
     _quoteGen++;
@@ -244,6 +315,7 @@ class _WapuScreenState extends State<WapuScreen> {
     _sats = null;
     _quote = null;
     _quoteError = null;
+    _createError = null;
   }
 
   /// Digits typed as pesos are not sats, so the other unit starts from nothing.
@@ -312,15 +384,193 @@ class _WapuScreenState extends State<WapuScreen> {
 
   bool _belowMinimum(WapuQuote q) => q.amountArsCents < q.minAmountArsCents;
 
-  /// The quote is the fresh one, the backend can fill the order, and the amount
-  /// clears the minimum.
+  /// The quote is the fresh one, the backend can fill the order, the amount
+  /// clears the minimum, and nothing else is being created or settled: not an
+  /// order of this sale, and not the key the order would be made with.
   bool get _canConfirm {
     final q = _quote;
-    return q != null && q.liquidityOk && !_belowMinimum(q);
+    return !_busy &&
+        !_reloading &&
+        q != null &&
+        q.liquidityOk &&
+        !_belowMinimum(q);
   }
 
-  /// Creates the order. The button only gates until then.
-  void _confirm() {}
+  /// Creates the order for the amount on screen, then asks for its bank
+  /// details: one tap does both. A create is not idempotent, so it is made
+  /// once. When it fails the sale stays on the amount, and trying again is for
+  /// the operator to decide.
+  Future<void> _confirm() async {
+    final credentials = _credentials;
+    final address = _address;
+    // The button is off then, but a second tap can get here before it is
+    // rebuilt.
+    if (!_canConfirm || credentials == null || address == null) return;
+    final ars = _arsCents;
+    final sats = _sats;
+    final gen = ++_gen;
+    setState(() {
+      _busy = true;
+      _createError = null;
+    });
+    final api = wapuApiFor(credentials.baseUrl, credentials.apiKey);
+    final created = await _answer(
+        () => api.createOrder(address: address, arsCents: ars, sats: sats));
+    if (!mounted || gen != _gen) return;
+    final order = created.reply;
+    if (order == null) {
+      setState(() {
+        _busy = false;
+        _createError = created.error;
+      });
+      return;
+    }
+    setState(() {
+      // From here the amounts are the order's, not the price that was quoted.
+      _clearAmount();
+      _order = order;
+      _step = _Step.status;
+    });
+    await _fund(api, order.id, gen);
+  }
+
+  /// Asks [api] for the bank details of the order [id] of the sale [gen], then
+  /// follows the order. Repeating it is safe: the backend answers with the same
+  /// order.
+  Future<void> _fund(WapuApi api, String id, int gen) async {
+    final funded = await _answer(() => api.fund(id));
+    if (!mounted || gen != _gen) return;
+    setState(() {
+      _busy = false;
+      _order = funded.reply ?? _order;
+      _orderError = funded.error;
+    });
+    _follow();
+  }
+
+  /// The button of an order that was created and has no bank details yet.
+  void _requestFunding() {
+    final credentials = _credentials;
+    final order = _order;
+    if (_busy || credentials == null || order == null) return;
+    setState(() {
+      _busy = true;
+      _orderError = null;
+    });
+    _fund(wapuApiFor(credentials.baseUrl, credentials.apiKey), order.id, _gen);
+  }
+
+  /// Starts or stops what the order on screen needs, after it changed: a read
+  /// every [_pollEvery] while the backend still watches it, and a repaint every
+  /// [_tickEvery] while it waits for the transfer, so the countdown moves.
+  void _follow() {
+    final order = _order;
+    if (order != null && order.watchPending) {
+      _poller ??= Timer.periodic(_pollEvery, (_) => _readOrder());
+    } else {
+      _poller?.cancel();
+      _poller = null;
+    }
+    if (order?.status == 'FUNDING_ISSUED') {
+      _ticker ??= Timer.periodic(_tickEvery, (_) => setState(() {}));
+    } else {
+      _ticker?.cancel();
+      _ticker = null;
+    }
+  }
+
+  void _stopClocks() {
+    _poller?.cancel();
+    _ticker?.cancel();
+    _poller = _ticker = null;
+  }
+
+  /// Reads the order on screen again. An answer for a sale that was left
+  /// meanwhile is dropped. A failure keeps the order as it was, with the reason
+  /// above it, and the next tick tries again: it never takes the bank details
+  /// off the screen while the customer may be using them.
+  Future<void> _readOrder() async {
+    final order = _order;
+    final credentials = _credentials;
+    // A read that is still out is not overlapped: its answer could land after
+    // a newer one and put an older state on screen.
+    if (order == null || credentials == null || _reading) return;
+    final gen = _gen;
+    _reading = true;
+    final read = await _answer(() =>
+        wapuApiFor(credentials.baseUrl, credentials.apiKey).order(order.id));
+    if (!mounted || gen != _gen) return;
+    final done =
+        read.reply?.status == 'COMPLETED' && _order?.status != 'COMPLETED';
+    setState(() {
+      _reading = false;
+      _order = read.reply ?? _order;
+      _orderError = read.error;
+    });
+    _follow();
+    if (done) AppSounds.play(AppSound.paid);
+  }
+
+  /// Nueva venta, from the app bar or from the button of a finished order. The
+  /// order on screen is let go: it expires on its own, and the History has it.
+  /// One that waits for the customer's transfer asks first.
+  Future<void> _newSale() async {
+    if (_order?.status == 'FUNDING_ISSUED') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text(ctx.tr('Nueva venta')),
+          content: m.Text(
+            ctx.tr('La orden queda abierta hasta que venza. '
+                'La podés retomar desde el Historial.'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(ctx.tr('Cancelar')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(ctx.tr('Nueva venta')),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    setState(_resetSale);
+  }
+
+  /// Opens [orderId], an order of the History, on the status step and follows
+  /// it as it does an order just created, without the paid cue: nothing was
+  /// paid just now. The sale on screen is let go as by Nueva venta, with no
+  /// question asked, and the first step waits while the order is read. If it
+  /// cannot be read, the first step says why. Nothing happens without a key.
+  // ignore: unused_element -- the History (Task 9) is its only caller.
+  Future<void> _resume(String orderId) async {
+    final credentials = _credentials;
+    if (credentials == null) return;
+    setState(() {
+      _resetSale();
+      _checking = true;
+    });
+    final gen = _gen;
+    final read = await _answer(() =>
+        wapuApiFor(credentials.baseUrl, credentials.apiKey).order(orderId));
+    if (!mounted || gen != _gen) return;
+    final order = read.reply;
+    setState(() {
+      _checking = false;
+      if (order == null) {
+        _error = wapuErrorKey(read.error!);
+      } else {
+        _order = order;
+        _step = _Step.status;
+      }
+    });
+    _follow();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -332,6 +582,15 @@ class _WapuScreenState extends State<WapuScreen> {
         showSync: false,
         showInvoiceDebug: false,
         actions: [
+          // Within reach on every step, and while the till is locked too: it is
+          // how the next customer is served.
+          if (_inSale)
+            IconButton(
+              key: const Key('wapu-new-sale'),
+              tooltip: context.tr('Nueva venta').toUpperCase(),
+              icon: const Icon(Icons.add_circle_outline, size: 26),
+              onPressed: _newSale,
+            ),
           // Nobody to keep a key for, and out of reach while the till is locked.
           if (_signedIn)
             ValueListenableBuilder<String?>(
@@ -372,8 +631,32 @@ class _WapuScreenState extends State<WapuScreen> {
     return switch (_step) {
       _Step.destination => _destinationStep(context),
       _Step.amount => _amountStep(context),
-      _Step.status => const SizedBox(),
+      _Step.status => _statusStep(context),
     };
+  }
+
+  /// The order, with why it could not be funded or read again above it. The
+  /// view scrolls, so it takes the room the reason leaves.
+  Widget _statusStep(BuildContext context) {
+    final error = _orderError;
+    return Column(
+      children: [
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: WapuErrorText(error),
+          ),
+        Expanded(
+          child: WapuStatusView(
+            order: _order!, // set with the step, cleared with it
+            now: DateTime.now(),
+            busy: _busy,
+            onRequestFunding: _requestFunding,
+            onNewSale: _newSale,
+          ),
+        ),
+      ],
+    );
   }
 
   /// A line of the till's own copy, centered, with the button that answers it.
@@ -457,6 +740,7 @@ class _WapuScreenState extends State<WapuScreen> {
   Widget _amountStep(BuildContext context) {
     final quote = _quote;
     final error = _quoteError;
+    final createError = _createError;
     final typed = int.parse(_raw);
     return Column(
       key: const Key('wapu-amount'),
@@ -474,7 +758,14 @@ class _WapuScreenState extends State<WapuScreen> {
               tooltip: context.tr('Cambiar dirección').toUpperCase(),
               icon: const Icon(Icons.edit_outlined),
               // One step back, not a new sale: the field keeps what was typed.
-              onPressed: () => setState(() => _step = _Step.destination),
+              // The order that is being created is for this address, so it
+              // waits for that.
+              onPressed: _busy
+                  ? null
+                  : () => setState(() {
+                        _step = _Step.destination;
+                        _createError = null; // it was about the old address
+                      }),
             ),
           ],
         ),
@@ -515,6 +806,12 @@ class _WapuScreenState extends State<WapuScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                // Before the price: the lines scroll, and this must be read.
+                if (createError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: WapuErrorText(createError, creating: true),
+                  ),
                 if (quote != null)
                   ..._quoteLines(context, quote)
                 else if (error != null)
@@ -536,7 +833,13 @@ class _WapuScreenState extends State<WapuScreen> {
         FilledButton(
           key: const Key('wapu-confirm'),
           onPressed: _canConfirm ? _confirm : null,
-          child: Text(context.tr('Confirmar')),
+          child: _busy
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 3),
+                )
+              : Text(context.tr('Confirmar')),
         ),
         const SizedBox(height: 8),
       ],
@@ -568,8 +871,7 @@ class _WapuScreenState extends State<WapuScreen> {
           child: WapuErrorText(WapuApiException('', statusCode: 409)),
         ),
       if (_mode == _Mode.sats)
-        _line(context, 'El cliente paga',
-            '\$ ${_pesosAndCents.format(q.amountArsCents / 100)}'),
+        _line(context, 'El cliente paga', formatArsCents(q.amountArsCents)),
       _line(context, 'El cliente recibe', _satsText(q.amountOut)),
       _line(context, 'Tipo de cambio', '$rate${context.tr(' por BTC')}'),
       _line(context, 'Comisión incluida', '${_percent.format(q.feePercent)}%'),
