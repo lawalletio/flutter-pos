@@ -117,8 +117,9 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
     });
   }
 
-  /// Checks the key against the account, saves it, and turns beta on if the
-  /// switch asks for it. Nothing is saved for a key the backend refuses.
+  /// Checks the key against the account, saves it, and sets the account's beta
+  /// flag to the switch, whichever way it differs. Nothing is saved for a key
+  /// the backend refuses.
   Future<void> _save() async {
     // Nobody is signed in, so there is nowhere to keep a key: WapuAccounts
     // would drop it without a word and the screen would close as if saved.
@@ -151,9 +152,9 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
       final beta = await api.betaEnabled();
       final credentials = WapuCredentials(apiKey: apiKey, baseUrl: url);
       await wapuAccounts.save(_merchant, credentials);
-      // From here the key is saved, even if turning beta on fails below.
+      // From here the key is saved, even if setting beta fails below.
       _saved = credentials;
-      if (_beta && !beta) await api.setBeta(true);
+      if (_beta != beta) await api.setBeta(_beta);
     } on WapuApiException catch (e) {
       error = e;
     } catch (_) {

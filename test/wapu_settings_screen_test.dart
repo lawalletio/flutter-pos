@@ -357,6 +357,24 @@ void main() {
     expect(popped, [true]);
   });
 
+  testWidgets('saving with the switch off turns beta off', (tester) async {
+    net.routes[_read] = (200, {'beta_version': true});
+    await open(tester);
+    expect(switchOn(tester), isTrue); // no saved key: it starts on
+    await tester.tap(beta);
+    await tester.pump();
+    expect(switchOn(tester), isFalse);
+    expect(net.requests, isEmpty, reason: 'with no saved key it only waits');
+
+    await saveKey(tester, 'key-1234');
+
+    expect(net.calls, [_read, _write]);
+    expect(
+        jsonDecode(net.requests.last.data as String), {'beta_version': false});
+    expect((await stored(tester))?.apiKey, 'key-1234');
+    expect(popped, [true]);
+  });
+
   testWidgets('a storage failure on save says so and stays', (tester) async {
     wapuAccounts = WapuAccounts(storage: const _ReadOnlyStorage());
     await open(tester);
