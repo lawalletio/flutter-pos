@@ -9,7 +9,9 @@ const lockableFlows = {
   '/zape': {'/zape'},
   '/rueda': {'/rueda'},
   '/cards': {'/cards'},
-  '/wapu': {'/wapu', '/wapu/historial', '/wapu/config'},
+  // The History, but not the config: while locked, nobody at the counter may
+  // swap the key the customers' transfers are made out to.
+  '/wapu': {'/wapu', '/wapu/historial'},
 };
 
 /// The flow the till is locked to, by its starting route, or null when

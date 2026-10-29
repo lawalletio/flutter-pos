@@ -460,6 +460,57 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  group('without a key, while locked', () {
+    const unlockCopy = 'Desbloqueá el POS para configurar Wapu';
+
+    testWidgets('Configurar gives way to the unlock copy', (tester) async {
+      lockedFlow.value = '/wapu';
+      await open(tester); // this user has no key
+
+      expect(find.text(_configure), findsOneWidget);
+      expect(find.text(unlockCopy), findsOneWidget);
+      expect(setup, findsNothing, reason: 'no way into the config');
+      expect(find.text('Configurar'), findsNothing);
+      expect(gear, findsNothing);
+
+      lockedFlow.value = null; // unlocked at the navbar: the way is back
+      await tester.pump();
+      expect(setup, findsOneWidget);
+      expect(find.text(unlockCopy), findsNothing);
+
+      lockedFlow.value = '/wapu'; // and locked again
+      await tester.pump();
+      expect(setup, findsNothing);
+      expect(find.text(unlockCopy), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the unlock copy is translated', (tester) async {
+      lockedFlow.value = '/wapu';
+      await open(tester, english: true);
+
+      expect(find.text('Unlock the POS to set up Wapu'), findsOneWidget);
+      expect(find.text('Set up your Wapu API key'), findsOneWidget);
+      expect(setup, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the config route bounces to the sale', (tester) async {
+      seed({_me: 'key-1'});
+      lockedFlow.value = '/wapu';
+      await open(tester);
+      expect(lockRedirect('/wapu/config'), '/wapu');
+
+      final router = GoRouter.of(tester.element(find.byType(WapuScreen)));
+      unawaited(router.push('/wapu/config'));
+      await settle(tester);
+
+      expect(find.byType(WapuSettingsScreen), findsNothing);
+      expect(destination, findsOneWidget, reason: 'still on the sale');
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   testWidgets('rejects invoices and lnurls with a hint', (tester) async {
     seed({_me: 'key-1'});
     await open(tester);
@@ -2295,9 +2346,8 @@ void main() {
         'Bitcoin without KYC');
   });
 
-  test('lock map covers the subroutes', () {
-    expect(lockableFlows['/wapu'],
-        containsAll(['/wapu', '/wapu/historial', '/wapu/config']));
+  test('lock map covers the sale and its history, not the config', () {
+    expect(lockableFlows['/wapu'], {'/wapu', '/wapu/historial'});
   });
 
   test('the router serves /wapu with its config and history', () {

@@ -674,13 +674,25 @@ class _WapuScreenState extends State<WapuScreen> {
     }
     if (!_loaded) return const SizedBox.shrink();
     if (_credentials == null) {
-      return _notice(
-        context,
-        'Configurá tu API key de Wapu',
-        action: FilledButton(
-          key: const Key('wapu-setup'),
-          onPressed: _openConfig,
-          child: Text(context.tr('Configurar')),
+      // Out of reach while the till is locked, as the gear is: whoever is at
+      // the counter must not set the key the customers' transfers go to.
+      return ValueListenableBuilder<String?>(
+        valueListenable: lockedFlow,
+        builder: (context, locked, _) => _notice(
+          context,
+          'Configurá tu API key de Wapu',
+          action: locked != null
+              ? m.Text(
+                  context.tr('Desbloqueá el POS para configurar Wapu'),
+                  textAlign: TextAlign.center,
+                  softWrap: true,
+                  style: const TextStyle(color: AppColors.muted),
+                )
+              : FilledButton(
+                  key: const Key('wapu-setup'),
+                  onPressed: _openConfig,
+                  child: Text(context.tr('Configurar')),
+                ),
         ),
       );
     }

@@ -404,6 +404,7 @@ const Map<String, String> _en = {
   'Ingresá con la dirección del comercio para usar Wapu':
       'Sign in with the merchant address to use Wapu',
   'Configurá tu API key de Wapu': 'Set up your Wapu API key',
+  'Desbloqueá el POS para configurar Wapu': 'Unlock the POS to set up Wapu',
   'Lightning address del cliente': "Customer's Lightning address",
   'nombre@dominio.com': 'name@domain.com',
   'Escanear QR': 'Scan QR',
