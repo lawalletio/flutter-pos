@@ -85,6 +85,7 @@ void main() {
   late List<bool?> popped;
 
   final keyField = find.byKey(const Key('wapu-key'));
+  final keyEye = find.byKey(const Key('wapu-key-visibility'));
   final urlField = find.byKey(const Key('wapu-url'));
   final beta = find.byKey(const Key('wapu-beta'));
   final save = find.byKey(const Key('wapu-save'));
@@ -183,6 +184,9 @@ void main() {
 
   bool switchOn(WidgetTester tester) =>
       tester.widget<SwitchListTile>(beta).value;
+
+  bool keyHidden(WidgetTester tester) =>
+      tester.widget<TextField>(keyField).obscureText;
 
   String urlText(WidgetTester tester) =>
       tester.widget<TextField>(urlField).controller!.text;
@@ -595,6 +599,25 @@ void main() {
     expect(forget, findsOneWidget);
   });
 
+  testWidgets('the key is hidden until the eye is tapped, and hides again',
+      (tester) async {
+    await open(tester);
+    expect(keyHidden(tester), isTrue, reason: 'hidden by default');
+    expect(find.byIcon(Icons.visibility), findsOneWidget);
+    expect(find.byTooltip('Mostrar la API key'), findsOneWidget);
+
+    await tester.tap(keyEye);
+    await tester.pump();
+    expect(keyHidden(tester), isFalse);
+    expect(find.byIcon(Icons.visibility_off), findsOneWidget);
+    expect(find.byTooltip('Ocultar la API key'), findsOneWidget);
+
+    await tester.tap(keyEye);
+    await tester.pump();
+    expect(keyHidden(tester), isTrue);
+    expect(find.byIcon(Icons.visibility), findsOneWidget);
+  });
+
   testWidgets('the screen is translated', (tester) async {
     seed();
     await open(tester, english: true);
@@ -603,6 +626,10 @@ void main() {
     expect(find.text('Saved: ••••9999'), findsOneWidget);
     expect(find.text('Forget key'), findsOneWidget);
     expect(find.text('Save'), findsOneWidget);
+    expect(find.byTooltip('Show the API key'), findsOneWidget);
+    await tester.tap(keyEye);
+    await tester.pump();
+    expect(find.byTooltip('Hide the API key'), findsOneWidget);
     await openAdvanced(tester, title: 'Advanced');
     expect(find.text('Backend URL'), findsOneWidget);
 

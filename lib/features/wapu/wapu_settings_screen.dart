@@ -44,6 +44,9 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
   /// the saved credentials and the account's beta flag load.
   bool _busy = true;
 
+  /// Whether the key being typed shows as text. It starts hidden.
+  bool _showKey = false;
+
   /// What went wrong, one thing at a time: the [WapuApiException] of a failed
   /// call, which [WapuErrorText] draws with the backend's own message, or the
   /// Spanish copy (a String, translated when drawn) of a problem of our own.
@@ -217,7 +220,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
             TextField(
               key: const Key('wapu-key'),
               controller: _key,
-              obscureText: true,
+              obscureText: !_showKey,
               autocorrect: false,
               enableSuggestions: false,
               decoration: _decoration(
@@ -225,6 +228,15 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
                 hint: saved == null
                     ? null
                     : '${context.tr('Guardada: ')}••••${_last4(saved.apiKey)}',
+                suffix: IconButton(
+                  key: const Key('wapu-key-visibility'),
+                  icon:
+                      Icon(_showKey ? Icons.visibility_off : Icons.visibility),
+                  tooltip: _showKey
+                      ? context.tr('Ocultar la API key')
+                      : context.tr('Mostrar la API key'),
+                  onPressed: () => setState(() => _showKey = !_showKey),
+                ),
               ),
             ),
             SwitchListTile(
@@ -280,9 +292,12 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
 }
 
 /// A filled field with the label always up, so a hint can sit beside it.
-InputDecoration _decoration(String label, {String? hint}) => InputDecoration(
+/// [suffix] is a button at its end.
+InputDecoration _decoration(String label, {String? hint, Widget? suffix}) =>
+    InputDecoration(
       labelText: label,
       hintText: hint,
+      suffixIcon: suffix,
       floatingLabelBehavior: FloatingLabelBehavior.always,
       filled: true,
       fillColor: AppColors.surface,

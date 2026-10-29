@@ -398,6 +398,8 @@ const Map<String, String> _en = {
   'Avanzado': 'Advanced',
   'URL del backend': 'Backend URL',
   'Guardada: ': 'Saved: ',
+  'Mostrar la API key': 'Show the API key',
+  'Ocultar la API key': 'Hide the API key',
   'La URL tiene que empezar con https://': 'The URL must start with https://',
   'Olvidar key': 'Forget key',
   'Bitcoin sin KYC': 'Bitcoin without KYC',
