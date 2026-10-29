@@ -618,52 +618,62 @@ class _WapuScreenState extends State<WapuScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: PosAppBar(
-        title: 'Wapu',
-        lockFlow: '/wapu',
-        showSettings: false, // its gear has no PIN gate
-        showSync: false,
-        showInvoiceDebug: false,
-        actions: [
-          // The three wait while an order is created or funded: leaving the
-          // sale then would drop the reply of the call that is out.
-          //
-          // The orders of this key, to follow one that was left or whose create
-          // got no answer. Within reach while the till is locked too.
-          if (_inSale)
-            IconButton(
-              key: const Key('wapu-history'),
-              tooltip: context.tr('Historial').toUpperCase(),
-              icon: const Icon(Icons.history, size: 26),
-              onPressed: _busy ? null : _openHistory,
-            ),
-          // Within reach on every step, and while the till is locked too: it is
-          // how the next customer is served.
-          if (_inSale)
-            IconButton(
-              key: const Key('wapu-new-sale'),
-              tooltip: context.tr('Nueva venta').toUpperCase(),
-              icon: const Icon(Icons.add_circle_outline, size: 26),
-              onPressed: _busy ? null : _newSale,
-            ),
-          // Nobody to keep a key for, and out of reach while the till is locked.
-          if (_signedIn)
-            ValueListenableBuilder<String?>(
-              valueListenable: lockedFlow,
-              builder: (context, locked, _) => locked != null
-                  ? const SizedBox.shrink()
-                  : IconButton(
-                      key: const Key('wapu-config'),
-                      tooltip:
-                          context.tr('Configuración de Wapu').toUpperCase(),
-                      icon: const Icon(Icons.settings_outlined, size: 26),
-                      onPressed: _busy ? null : _openConfig,
-                    ),
-            ),
-        ],
+    // While an order is created or funded the sale is not left, by the system
+    // back or by the app bar's: its screen would be gone when the reply lands,
+    // and an order made upstream would be lost, to be made again by a retry.
+    // The app bar's back pops without asking the PopScope, so it is a no-op
+    // then, rather than hidden: that would also hold the till's unlock.
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
+        appBar: PosAppBar(
+          title: 'Wapu',
+          lockFlow: '/wapu',
+          onBack: _busy ? () {} : null,
+          showSettings: false, // its gear has no PIN gate
+          showSync: false,
+          showInvoiceDebug: false,
+          actions: [
+            // The three wait while an order is created or funded: leaving the
+            // sale then would drop the reply of the call that is out.
+            //
+            // The orders of this key, to follow one that was left or whose
+            // create got no answer. Within reach while the till is locked too.
+            if (_inSale)
+              IconButton(
+                key: const Key('wapu-history'),
+                tooltip: context.tr('Historial').toUpperCase(),
+                icon: const Icon(Icons.history, size: 26),
+                onPressed: _busy ? null : _openHistory,
+              ),
+            // Within reach on every step, and while the till is locked too:
+            // it is how the next customer is served.
+            if (_inSale)
+              IconButton(
+                key: const Key('wapu-new-sale'),
+                tooltip: context.tr('Nueva venta').toUpperCase(),
+                icon: const Icon(Icons.add_circle_outline, size: 26),
+                onPressed: _busy ? null : _newSale,
+              ),
+            // Nobody to keep a key for, and out of reach while the till is
+            // locked.
+            if (_signedIn)
+              ValueListenableBuilder<String?>(
+                valueListenable: lockedFlow,
+                builder: (context, locked, _) => locked != null
+                    ? const SizedBox.shrink()
+                    : IconButton(
+                        key: const Key('wapu-config'),
+                        tooltip:
+                            context.tr('Configuración de Wapu').toUpperCase(),
+                        icon: const Icon(Icons.settings_outlined, size: 26),
+                        onPressed: _busy ? null : _openConfig,
+                      ),
+              ),
+          ],
+        ),
+        body: PosBody(child: _body(context)),
       ),
-      body: PosBody(child: _body(context)),
     );
   }
 

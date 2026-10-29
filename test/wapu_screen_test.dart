@@ -328,16 +328,19 @@ void main() {
   }
 
   /// Pumps /wapu behind the till's lock redirect, on the Z92's portrait screen,
-  /// signed in as [merchant] (nobody, when empty).
+  /// signed in as [merchant] (nobody, when empty). With [overHub] the sale is
+  /// pushed on top of the hub, so that a back has somewhere to go.
   Future<void> open(WidgetTester tester,
-      {String merchant = _me, bool english = false}) async {
+      {String merchant = _me,
+      bool english = false,
+      bool overHub = false}) async {
     tester.view
       ..physicalSize = const Size(720, 1440)
       ..devicePixelRatio = 2;
     addTearDown(tester.view.reset);
     merchantAddress.value = merchant;
     final router = GoRouter(
-      initialLocation: '/wapu',
+      initialLocation: overHub ? '/hub' : '/wapu',
       redirect: (c, s) => lockRedirect(s.uri.path),
       routes: [
         GoRoute(path: '/hub', builder: (_, __) => const Text('hub')),
@@ -364,6 +367,7 @@ void main() {
       ),
       routerConfig: router,
     ));
+    if (overHub) unawaited(router.push('/wapu'));
     await settle(tester);
   }
 
@@ -1318,8 +1322,9 @@ void main() {
     }
 
     /// Opens the sale and gets past the first step.
-    Future<void> toAmount(WidgetTester tester, {bool english = false}) async {
-      await open(tester, english: english);
+    Future<void> toAmount(WidgetTester tester,
+        {bool english = false, bool overHub = false}) async {
+      await open(tester, english: english, overHub: overHub);
       await submit(tester, 'alice@example.com');
       expect(amount, findsOneWidget, reason: 'the address was taken');
     }
@@ -1611,6 +1616,102 @@ void main() {
       for (final button in [newSale, history, gear]) {
         expect(tester.widget<IconButton>(button).onPressed, isNotNull);
       }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    final back = find.byIcon(Icons.arrow_back);
+
+    /// Taps the app bar's back, then sends the system back as the Android
+    /// button does. Neither may leave the sale for the hub under it.
+    Future<void> expectBackIsShut(WidgetTester tester) async {
+      await tester.tap(back);
+      await settle(tester);
+      expect(find.text('hub'), findsNothing,
+          reason: "the app bar's back left the sale");
+
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.text('hub'), findsNothing,
+          reason: 'the system back left the sale');
+      expect(find.byType(WapuScreen), findsOneWidget);
+    }
+
+    testWidgets('the way back is shut while an order is created',
+        (tester) async {
+      final held = holdOn('POST', _tentatives);
+      await toAmount(tester, overHub: true);
+      await price(tester);
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(calls(_createRoute), 1, reason: 'the create is out');
+
+      await expectBackIsShut(tester);
+      expect(amount, findsOneWidget, reason: 'the sale is where it was');
+
+      held.complete(); // the reply lands in the screen that is still there
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget, reason: 'the order shows');
+      expect(calls(_createRoute), 1);
+      expect(calls(_fundRoute), 1);
+
+      // Once the order is made the way back is open again.
+      await tester.tap(back);
+      await settle(tester);
+      expect(find.text('hub'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the way back is shut while the funding is asked for',
+        (tester) async {
+      final held = holdOn('POST', '$_tentatives/t1/funding');
+      await toAmount(tester, overHub: true);
+      await price(tester);
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(find.text('Orden creada'), findsOneWidget);
+
+      await expectBackIsShut(tester);
+      expect(find.text('Orden creada'), findsOneWidget);
+
+      held.complete();
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget);
+
+      await tester.binding.handlePopRoute(); // free again
+      await settle(tester);
+      expect(find.text('hub'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('locked, the back stays shut and the unlock is not held',
+        (tester) async {
+      final lock = find.byKey(const Key('flow-lock'));
+      final unlock = find.byKey(const Key('flow-unlock'));
+      final held = holdOn('POST', _tentatives);
+      await toAmount(tester, overHub: true);
+      await price(tester);
+      await tester.tap(lock);
+      await tester.pump();
+      expect(lockedFlow.value, '/wapu');
+      expect(back, findsNothing, reason: 'locked, the sale has no back');
+
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.text('hub'), findsNothing, reason: 'locked, idle');
+
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(calls(_createRoute), 1, reason: 'the create is out');
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.text('hub'), findsNothing, reason: 'locked, busy');
+      expect(back, findsNothing);
+      expect(tester.widget<IconButton>(unlock).onPressed, isNotNull,
+          reason: 'an order that is being made does not hold the unlock');
+
+      held.complete();
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
