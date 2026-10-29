@@ -90,6 +90,9 @@ void main() {
   final save = find.byKey(const Key('wapu-save'));
   final forget = find.byKey(const Key('wapu-forget'));
 
+  /// The backend's own message, drawn under the copy of a failed call.
+  final detail = find.byKey(const Key('wapu-error-detail'));
+
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
     merchantAddress.value = _me;
@@ -184,6 +187,8 @@ void main() {
   String urlText(WidgetTester tester) =>
       tester.widget<TextField>(urlField).controller!.text;
 
+  String? detailText(WidgetTester tester) => tester.widget<Text>(detail).data;
+
   /// What the device holds for [_me]. The storage mock answers on real async.
   Future<WapuCredentials?> stored(WidgetTester tester) =>
       tester.runAsync<WapuCredentials?>(() => wapuAccounts.load(_me));
@@ -217,6 +222,42 @@ void main() {
     expect(find.byType(WapuSettingsScreen), findsOneWidget);
   });
 
+  testWidgets('a rejected key shows the backend message as a detail',
+      (tester) async {
+    net.routes[_read] = (401, {'error': 'invalid api key'});
+    await open(tester);
+
+    await saveKey(tester, 'bad-key');
+
+    expect(find.text('La API key no es válida'), findsOneWidget);
+    expect(detailText(tester), 'invalid api key');
+  });
+
+  testWidgets('one error shows at a time', (tester) async {
+    net.routes[_read] = (401, {'error': 'invalid api key'});
+    await open(tester);
+    await saveKey(tester, 'bad-key');
+    expect(find.text('La API key no es válida'), findsOneWidget);
+    expect(detail, findsOneWidget);
+
+    // A message of our own takes its place, detail and all.
+    await openAdvanced(tester);
+    await tester.enterText(urlField, 'http://example.com');
+    await tester.tap(save);
+    await settle(tester);
+    expect(find.text('La URL tiene que empezar con https://'), findsOneWidget);
+    expect(find.text('La API key no es válida'), findsNothing);
+    expect(detail, findsNothing);
+
+    // And a failed call takes it back.
+    await tester.enterText(urlField, kWapuDefaultBaseUrl);
+    await tester.tap(save);
+    await settle(tester);
+    expect(find.text('La URL tiene que empezar con https://'), findsNothing);
+    expect(find.text('La API key no es válida'), findsOneWidget);
+    expect(detailText(tester), 'invalid api key');
+  });
+
   testWidgets('plain http is rejected', (tester) async {
     await open(tester);
     await openAdvanced(tester);
@@ -225,6 +266,7 @@ void main() {
     await saveKey(tester, 'key-1234');
 
     expect(find.text('La URL tiene que empezar con https://'), findsOneWidget);
+    expect(detail, findsNothing); // our own message has no backend text
     expect(net.requests, isEmpty);
     expect(await stored(tester), isNull);
     expect(popped, isEmpty);
@@ -247,6 +289,7 @@ void main() {
 
       expect(
           find.text('La URL tiene que empezar con https://'), findsOneWidget);
+      expect(detail, findsNothing);
       expect(net.requests, isEmpty);
       expect(await stored(tester), isNull);
     });
@@ -275,6 +318,7 @@ void main() {
     await tester.tap(save); // nothing typed
     await settle(tester);
     expect(find.text('La API key no es válida'), findsOneWidget);
+    expect(detail, findsNothing); // refused here, so no backend text
 
     await saveKey(tester, '   '); // only spaces
     expect(net.requests, isEmpty);
@@ -320,6 +364,7 @@ void main() {
     await saveKey(tester, 'key-1234');
 
     expect(find.text(_generic), findsOneWidget);
+    expect(detail, findsNothing); // the storage is ours, not the backend's
     expect(popped, isEmpty);
     expect(await stored(tester), isNull);
     expect(net.calls, [_read]); // beta is not touched for a key not saved
@@ -334,6 +379,7 @@ void main() {
 
     expect(find.text('El servicio no está disponible. Probá más tarde.'),
         findsOneWidget);
+    expect(detailText(tester), 'down');
     expect((await stored(tester))?.apiKey, 'key-1234');
     expect(popped, isEmpty);
     // The screen shows what is saved, so the key can be forgotten from here.
@@ -349,6 +395,7 @@ void main() {
     await saveKey(tester, 'key-1234');
 
     expect(find.text(_generic), findsOneWidget);
+    expect(detail, findsNothing);
     expect(net.requests, isEmpty);
     expect(popped, isEmpty);
   });
@@ -430,6 +477,7 @@ void main() {
     await settle(tester);
 
     expect(find.text('La API key no es válida'), findsOneWidget);
+    expect(detailText(tester), 'invalid key');
     expect(switchOn(tester), isTrue);
     expect(net.calls, [_read, _write]);
   });
@@ -489,6 +537,7 @@ void main() {
     await open(tester);
 
     expect(find.text('La API key no es válida'), findsOneWidget);
+    expect(detailText(tester), 'invalid key');
     expect(switchOn(tester), isTrue);
     expect(find.text('Guardada: ••••9999'), findsOneWidget);
     expect(forget, findsOneWidget);
@@ -522,6 +571,7 @@ void main() {
     await settle(tester);
 
     expect(find.text(_generic), findsOneWidget);
+    expect(detail, findsNothing);
     expect(popped, isEmpty);
     expect((await stored(tester))?.apiKey, 'saved-key-9999');
     expect(forget, findsOneWidget);

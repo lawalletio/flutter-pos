@@ -7,6 +7,7 @@ import '../../core/widgets.dart';
 import '../../domain/config/session.dart';
 import 'wapu_account.dart';
 import 'wapu_api.dart';
+import 'wapu_error_text.dart';
 
 /// The fallback copy of [wapuErrorKey]: also what a failed storage write says.
 const _generic = 'No se pudo completar la operación';
@@ -14,8 +15,9 @@ const _generic = 'No se pudo completar la operación';
 /// The WapuPay key, backend URL and Beta features switch of the signed-in POS
 /// user. Saving or forgetting pops with `true`, so the caller reloads.
 ///
-/// Errors use Material [m.Text], not the app's [Text], which would uppercase
-/// them and squeeze a long one into a single line.
+/// A failed call shows through [WapuErrorText], with the backend's own message.
+/// A message of our own is Material [m.Text], not the app's [Text], which would
+/// uppercase it and squeeze a long one into a single line.
 class WapuSettingsScreen extends StatefulWidget {
   const WapuSettingsScreen({super.key});
 
@@ -41,8 +43,10 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
   /// the saved credentials and the account's beta flag load.
   bool _busy = true;
 
-  /// A Spanish copy key, translated when it is drawn.
-  String? _error;
+  /// What went wrong, one thing at a time: the [WapuApiException] of a failed
+  /// call, which [WapuErrorText] draws with the backend's own message, or the
+  /// Spanish copy (a String, translated when drawn) of a problem of our own.
+  Object? _error;
 
   @override
   void initState() {
@@ -64,7 +68,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
     final saved = await wapuAccounts.load(_merchant);
     if (!mounted) return;
     var beta = true;
-    String? error;
+    WapuApiException? error;
     if (saved != null) {
       setState(() {
         _saved = saved;
@@ -73,7 +77,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
       try {
         beta = await wapuApiFor(saved.baseUrl, saved.apiKey).betaEnabled();
       } on WapuApiException catch (e) {
-        error = wapuErrorKey(e);
+        error = e;
       }
       if (!mounted) return;
     }
@@ -97,11 +101,11 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
       _busy = true;
       _error = null;
     });
-    String? error;
+    WapuApiException? error;
     try {
       await wapuApiFor(saved.baseUrl, saved.apiKey).setBeta(on);
     } on WapuApiException catch (e) {
-      error = wapuErrorKey(e);
+      error = e;
     }
     if (!mounted) return;
     setState(() {
@@ -142,7 +146,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
       _error = null;
     });
     final api = wapuApiFor(url, apiKey);
-    String? error;
+    Object? error;
     try {
       final beta = await api.betaEnabled();
       final credentials = WapuCredentials(apiKey: apiKey, baseUrl: url);
@@ -151,7 +155,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
       _saved = credentials;
       if (_beta && !beta) await api.setBeta(true);
     } on WapuApiException catch (e) {
-      error = wapuErrorKey(e);
+      error = e;
     } catch (_) {
       error = _generic; // the storage write failed
     }
@@ -175,7 +179,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
   /// Closes the screen when [error] is null, so the caller reloads. Otherwise
   /// stays and shows it. A closing screen stays busy, so a second tap during the
   /// pop animation does nothing.
-  void _finish(String? error) {
+  void _finish(Object? error) {
     if (!mounted) return;
     if (error == null) {
       Navigator.of(context).maybePop(true);
@@ -190,6 +194,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final saved = _saved;
+    final error = _error;
     return Scaffold(
       appBar: PosAppBar(
         title: context.tr('Configuración de Wapu'),
@@ -241,14 +246,16 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
                 ),
               ],
             ),
-            if (_error != null)
+            if (error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: m.Text(
-                  context.tr(_error!),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.error),
-                ),
+                child: error is WapuApiException
+                    ? WapuErrorText(error)
+                    : m.Text(
+                        context.tr(error.toString()),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.error),
+                      ),
               ),
             FilledButton(
               key: const Key('wapu-save'),
