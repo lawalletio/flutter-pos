@@ -409,7 +409,7 @@
 | CREATED, not expired | `'Orden creada'`, plus a `'Pedir datos de transferencia'` button (`Key('wapu-fund')`) that calls `onRequestFunding`. |
 | EXPIRED with `watchPending` | `'Venció el plazo'`, plus `'Si el cliente ya transfirió, lo seguimos buscando hasta las '` + `HH:mm`, the local time of `lateWatchUntil`. |
 | EXPIRED, or CREATED past `expiresAt` | `'Orden vencida'` |
-| EXECUTED + `sending` | `'Pago recibido. Enviando los sats…'` |
+| EXECUTED + `sending` | The Wapu logo (`Key('wapu-logo')`, `assets/images/wapu_logo.png`) on a white plate, then `'Pago recibido'`, a small spinner beside `'Enviando los sats…'`, and the sats and the payout address. |
 | EXECUTED + `review` | `'En revisión'`, plus `'Guardá el ID de la orden: '` + id |
 | COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, with `paymentHash` in a `SelectableText` |
 | SETTLED_TO_BALANCE | `'No se pudieron enviar los sats'`, plus `'El monto quedó en tu saldo de Wapu.'` |

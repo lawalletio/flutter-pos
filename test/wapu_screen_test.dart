@@ -1841,7 +1841,7 @@ void main() {
           orderReply(status: 'EXECUTED', payout: 'sending', bank: false);
       await tester.pump(const Duration(seconds: 10));
       expect(calls(_detailRoute), 2);
-      expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget);
+      expect(find.text('Pago recibido'), findsOneWidget);
       expect(find.text(_alias), findsNothing,
           reason: 'a paid order has no bank details to show');
       expect(paid(), 0);
@@ -2313,13 +2313,13 @@ void main() {
       net.routes[_detailRoute] =
           orderReply(status: 'EXECUTED', payout: 'sending', bank: false);
       await tester.pump(const Duration(seconds: 10));
-      expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget);
+      expect(find.text('Pago recibido'), findsOneWidget);
 
       await confirmDialog(tester);
 
       expect(find.byType(AlertDialog), findsNothing);
       expect(destination, findsNothing, reason: 'the paid sale is not reset');
-      expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget);
+      expect(find.text('Pago recibido'), findsOneWidget);
 
       // It is still followed to the end.
       net.routes[_detailRoute] = completedReply();

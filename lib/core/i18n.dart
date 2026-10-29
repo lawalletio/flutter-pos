@@ -442,7 +442,8 @@ const Map<String, String> _en = {
   'Si el cliente ya transfirió, lo seguimos buscando hasta las ':
       'If the customer already transferred, we keep looking until ',
   'Orden vencida': 'Order expired',
-  'Pago recibido. Enviando los sats…': 'Payment received. Sending the sats…',
+  'Pago recibido': 'Payment received',
+  'Enviando los sats…': 'Sending the sats…',
   'En revisión': 'Under review',
   'Guardá el ID de la orden: ': 'Save the order ID: ',
   '¡Listo! El cliente recibió ': 'Done! The customer received ',

@@ -27,6 +27,8 @@ final _lateWatchClock = DateFormat.Hm().format(_lateWatchUntil.toLocal());
 WapuOrder _order({
   String status = 'FUNDING_ISSUED',
   String payoutStatus = 'waiting_ars',
+  String payoutAddress = 'cliente@wallet.com',
+  int amountOut = 12500,
   bool watchPending = true,
   DateTime? expiresAt,
   DateTime? lateWatchUntil,
@@ -38,9 +40,9 @@ WapuOrder _order({
       id: _id,
       status: status,
       payoutStatus: payoutStatus,
-      payoutAddress: 'cliente@wallet.com',
+      payoutAddress: payoutAddress,
       amountArsCents: 1500037,
-      amountOut: 12500,
+      amountOut: amountOut,
       networkFeeOut: 21,
       watchPending: watchPending,
       expiresAt: expiresAt,
@@ -126,6 +128,7 @@ void main() {
 
   final newSaleBig = find.byKey(const Key('wapu-new-sale-big'));
   final fund = find.byKey(const Key('wapu-fund'));
+  final logo = find.byKey(const Key('wapu-logo'));
 
   Future<void> show(
     WidgetTester tester,
@@ -347,12 +350,52 @@ void main() {
   });
 
   group('EXECUTED', () {
-    testWidgets('while sending, says the sats are on their way',
+    testWidgets('while sending, says the sats are on their way and to whom',
         (tester) async {
       await show(tester, _sending);
 
-      expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget);
+      expect(find.text('Pago recibido'), findsOneWidget);
+      expect(find.text('Enviando los sats…'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('12.500 sats → cliente@wallet.com'), findsOneWidget);
       expect(newSaleBig, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('shows the Wapu logo while sending, and not in review',
+        (tester) async {
+      await show(tester, _sending);
+      expect(logo, findsOneWidget);
+      expect(find.text('Pago recibido'), findsOneWidget);
+
+      await show(tester, _review);
+      expect(logo, findsNothing);
+      expect(find.text('Pago recibido'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('puts the logo on a white plate, so its outline shows',
+        (tester) async {
+      await show(tester, _sending);
+
+      final plate = tester.widget<Container>(
+          find.ancestor(of: logo, matching: find.byType(Container)).first);
+      expect((plate.decoration as BoxDecoration).color, AppColors.onDark);
+      expect(tester.getSize(logo), const Size(140, 140));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('leaves out the amount line when the order carries none',
+        (tester) async {
+      for (final order in [
+        _order(status: 'EXECUTED', payoutStatus: 'sending', amountOut: 0),
+        _order(status: 'EXECUTED', payoutStatus: 'sending', payoutAddress: ''),
+      ]) {
+        await show(tester, order);
+
+        expect(find.text('Pago recibido'), findsOneWidget);
+        expect(find.textContaining('sats →'), findsNothing);
+      }
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -381,8 +424,8 @@ void main() {
       for (final payout in ['pending', 'failed', '']) {
         await show(tester, _order(status: 'EXECUTED', payoutStatus: payout));
 
-        expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget,
-            reason: payout);
+        expect(find.text('Pago recibido'), findsOneWidget, reason: payout);
+        expect(find.text('Enviando los sats…'), findsOneWidget, reason: payout);
         expect(find.text('EXECUTED'), findsNothing, reason: payout);
         expect(find.text('En revisión'), findsNothing, reason: payout);
         expect(newSaleBig, findsNothing, reason: payout);
@@ -525,7 +568,7 @@ void main() {
         ]
       ),
       ('a closed EXPIRED order', _expired, ['Order expired', 'New sale']),
-      ('EXECUTED sending', _sending, ['Payment received. Sending the sats…']),
+      ('EXECUTED sending', _sending, ['Payment received', 'Sending the sats…']),
       ('EXECUTED review', _review, ['Under review', 'Save the order ID: $_id']),
       (
         'COMPLETED',

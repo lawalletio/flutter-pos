@@ -65,9 +65,7 @@ class WapuStatusView extends StatelessWidget {
       ('EXECUTED', 'review') => _review(context),
       // The ARS was received, so any other payout status (sending, or one that
       // is not known here) is the sats on their way, never the raw status.
-      ('EXECUTED', _) => [
-          _title(context.tr('Pago recibido. Enviando los sats…')),
-        ],
+      ('EXECUTED', _) => _sending(context),
       ('COMPLETED', _) => _completed(context),
       ('SETTLED_TO_BALANCE', _) => _settled(context),
       _ => [_title(o.status)],
@@ -143,6 +141,52 @@ class WapuStatusView extends StatelessWidget {
 
   List<Widget> _closed(BuildContext context) =>
       [_title(context.tr('Orden vencida')), _newSale(context)];
+
+  /// The ARS is in and the sats are on their way. The logo sits on a white
+  /// plate, or its dark outline would vanish on the dark theme.
+  List<Widget> _sending(BuildContext context) {
+    final sats = formatToPreference(Currency.sat, order.amountOut);
+    return [
+      Center(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.onDark,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Image.asset(
+            'assets/images/wapu_logo.png',
+            key: const Key('wapu-logo'),
+            width: 140,
+            height: 140,
+          ),
+        ),
+      ),
+      const SizedBox(height: 24),
+      _title(context.tr('Pago recibido')),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: m.Text(
+              context.tr('Enviando los sats…'),
+              softWrap: true,
+              style: const TextStyle(fontSize: 18),
+            ),
+          ),
+        ],
+      ),
+      // A reply without them reads as 0 and empty: nothing to say.
+      if (order.amountOut > 0 && order.payoutAddress.isNotEmpty)
+        _note('$sats sats → ${order.payoutAddress}'),
+    ];
+  }
 
   List<Widget> _review(BuildContext context) => [
         _title(context.tr('En revisión')),
