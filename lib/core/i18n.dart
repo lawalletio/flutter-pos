@@ -369,4 +369,89 @@ const Map<String, String> _en = {
   'Aplicar': 'Apply',
   'Los cupones de los productos dejan la orden en 0. No se puede cobrar.':
       "The products' coupons bring the order to 0. It can't be charged.",
+
+  // Wapu
+  'No sabemos si la orden se creó. Revisá el Historial antes de reintentar.':
+      "We don't know if the order was created. Check the History before retrying.",
+  'El servidor no respondió. Probá de nuevo.':
+      'The server did not respond. Try again.',
+  'La lightning address o el monto no son válidos':
+      'The lightning address or the amount is not valid',
+  'La API key no es válida': 'The API key is not valid',
+  'Tu cuenta Wapu no tiene Beta features activado':
+      'Your Wapu account does not have Beta features on',
+  'Las compras están deshabilitadas en Wapu': 'Purchases are disabled in Wapu',
+  'Tu cuenta Wapu no puede comprar': 'Your Wapu account cannot buy',
+  'La orden no existe': 'The order does not exist',
+  'No hay liquidez disponible ahora. Probá en unos minutos.':
+      'No liquidity available right now. Try again in a few minutes.',
+  'El monto está fuera de los límites': 'The amount is out of range',
+  'Hay demasiadas órdenes abiertas. Esperá a que venzan.':
+      'There are too many open orders. Wait for them to expire.',
+  'Se alcanzó el límite mensual de compras':
+      'The monthly purchase limit was reached',
+  'Demasiados intentos. Esperá un momento.': 'Too many attempts. Wait a moment.',
+  'El servicio no está disponible. Probá más tarde.':
+      'The service is unavailable. Try again later.',
+  'No se pudo completar la operación': 'The operation could not be completed',
+  'Configuración de Wapu': 'Wapu settings',
+  'Avanzado': 'Advanced',
+  'URL del backend': 'Backend URL',
+  'Guardada: ': 'Saved: ',
+  'La URL tiene que empezar con https://': 'The URL must start with https://',
+  'Olvidar key': 'Forget key',
+  'Bitcoin sin KYC': 'Bitcoin without KYC',
+  'Ingresá con la dirección del comercio para usar Wapu':
+      'Sign in with the merchant address to use Wapu',
+  'Configurá tu API key de Wapu': 'Set up your Wapu API key',
+  'Desbloqueá el POS para configurar Wapu': 'Unlock the POS to set up Wapu',
+  'Lightning address del cliente': "Customer's Lightning address",
+  'nombre@dominio.com': 'name@domain.com',
+  'Escanear QR': 'Scan QR',
+  'Escaneá la lightning address del cliente':
+      "Scan the customer's Lightning address",
+  'Eso es un invoice. Pedile al cliente su lightning address':
+      'That is an invoice. Ask the customer for their Lightning address',
+  'Eso es un LNURL. Pedile al cliente su lightning address':
+      'That is an LNURL. Ask the customer for their Lightning address',
+  'La lightning address no es válida': 'The Lightning address is not valid',
+  'No se pudo verificar la lightning address':
+      'The Lightning address could not be verified',
+  'El cliente recibe': 'The customer receives',
+  'El cliente paga': 'The customer pays',
+  'Tipo de cambio': 'Exchange rate',
+  ' por BTC': ' per BTC',
+  'Comisión incluida': 'Fee included',
+  'Fee de red estimado': 'Estimated network fee',
+  'El mínimo es ': 'The minimum is ',
+  'Confirmar': 'Confirm',
+  'Esperando la transferencia': 'Waiting for the transfer',
+  'Alias': 'Alias',
+  'Monto exacto': 'Exact amount',
+  'Transferí exactamente este monto, con centavos':
+      'Transfer exactly this amount, including the cents',
+  'Vence en ': 'Expires in ',
+  'Copiado': 'Copied',
+  'Orden creada': 'Order created',
+  'Pedir datos de transferencia': 'Request transfer details',
+  'Venció el plazo': 'The time limit has passed',
+  'Si el cliente ya transfirió, lo seguimos buscando hasta las ':
+      'If the customer already transferred, we keep looking until ',
+  'Orden vencida': 'Order expired',
+  'Pago recibido. Enviando los sats…': 'Payment received. Sending the sats…',
+  'En revisión': 'Under review',
+  'Guardá el ID de la orden: ': 'Save the order ID: ',
+  '¡Listo! El cliente recibió ': 'Done! The customer received ',
+  'No se pudieron enviar los sats': 'The sats could not be sent',
+  'El monto quedó en tu saldo de Wapu.':
+      'The amount went to your Wapu balance.',
+  'Nueva venta': 'New sale',
+  'La orden queda abierta hasta que venza. La podés retomar desde el Historial.':
+      'The order stays open until it expires. You can resume it from the History.',
+  'Historial': 'History',
+  'Todavía no hay órdenes': 'There are no orders yet',
+  'En curso': 'In progress',
+  'Completada': 'Completed',
+  'Vencida': 'Expired',
+  'En tu saldo': 'In your balance',
 };
