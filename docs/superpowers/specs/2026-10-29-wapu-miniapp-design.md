@@ -171,7 +171,7 @@ All copy is Spanish source text with English translations (`context.tr`).
 7. **Config.**
    - The key field is obscured. Once a key is saved, it shows only the key's last 4 characters.
    - Saving validates the key with `GET /users/user-settings`. A 401 shows "invalid key"; nothing is saved.
-   - After saving, if the switch is on and `beta_version` is false, the POS sends a PATCH to turn it on.
+   - After saving, if the switch differs from the account's `beta_version`, the POS sends a PATCH to match the switch.
    - Toggling the switch sends a PATCH immediately.
    - "Olvidar key" (forget key) removes this POS user's credentials.
    - The backend URL must be `https`. Plain `http` is allowed only for localhost and emulator hosts, for development.
@@ -194,7 +194,7 @@ The mini-app hooks into the existing app through:
 
 - a `MiniappManifest` entry in `lib/features/miniapps/miniapps.dart` (name, subtitle, route, icon), with no new `MiniappRequirement`;
 - the routes `/wapu`, `/wapu/historial` and `/wapu/config` in `lib/core/router.dart`;
-- registration in `lib/core/flow_lock.dart` as `'/wapu': {'/wapu', '/wapu/historial', '/wapu/config'}`, so the till can be locked into the mini-app;
+- registration in `lib/core/flow_lock.dart` as `'/wapu': {'/wapu', '/wapu/historial'}`, so the till can be locked into the mini-app. The config stays out of reach while locked, like Rueda's;
 - English entries in `lib/core/i18n.dart`.
 
 It reuses existing pieces:

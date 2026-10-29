@@ -40,7 +40,7 @@
 
 **Mini-app manifest:** `name: 'Wapu'`, `sublabel: 'Bitcoin sin KYC'` (English: `'Bitcoin without KYC'`), `route: '/wapu'`, `icon: Icons.currency_bitcoin`.
 
-**Flow lock:** `'/wapu': {'/wapu', '/wapu/historial', '/wapu/config'}`.
+**Flow lock:** `'/wapu': {'/wapu', '/wapu/historial'}`. The PR #38 review (F8) removed `/wapu/config`, so the config is unreachable while locked.
 
 **Tests:**
 - Tests live flat in `test/`, each file with its own fakes; copy `FakeNet` and `FakeLnurl` from `test/cards_test.dart`.
