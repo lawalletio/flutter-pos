@@ -23,6 +23,8 @@ import 'package:lawallet_pos/features/wapu/wapu_account.dart';
 import 'package:lawallet_pos/features/wapu/wapu_api.dart';
 import 'package:lawallet_pos/features/wapu/wapu_screen.dart';
 import 'package:lawallet_pos/features/wapu/wapu_settings_screen.dart';
+import 'package:lawallet_pos/features/wapu/wapu_status_view.dart'
+    show WapuStatusView;
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 const _me = 'shop@lacrypta.ar';
@@ -218,6 +220,7 @@ const _hash =
   int ars = 1500037,
   int code = 200,
   String? hash,
+  Duration expiresIn = const Duration(minutes: 15),
 }) =>
     (
       code,
@@ -230,10 +233,7 @@ const _hash =
         'amount_ars_cents': ars,
         'amount_out': 12500,
         'network_fee_out': 21,
-        'expires_at': DateTime.now()
-            .toUtc()
-            .add(const Duration(minutes: 15))
-            .toIso8601String(),
+        'expires_at': DateTime.now().toUtc().add(expiresIn).toIso8601String(),
         'late_watch_until': null,
         'watch_pending': watch,
         if (bank) 'alias': alias,
@@ -243,13 +243,16 @@ const _hash =
     );
 
 /// An order just created: the quoted amount, and no bank details yet.
-(int, Object) createdReply({String id = 't1'}) => orderReply(
-    id: id,
-    status: 'CREATED',
-    watch: false,
-    bank: false,
-    ars: 1500000,
-    code: 201);
+(int, Object) createdReply(
+        {String id = 't1', Duration expiresIn = const Duration(minutes: 15)}) =>
+    orderReply(
+        id: id,
+        status: 'CREATED',
+        watch: false,
+        bank: false,
+        ars: 1500000,
+        code: 201,
+        expiresIn: expiresIn);
 
 /// What the backend says once the transfer was seen and the sats went out.
 (int, Object) completedReply() => orderReply(
@@ -1767,6 +1770,40 @@ void main() {
       expect(countdown(), before, reason: 'nothing repaints it by itself');
       await tester.pump(const Duration(seconds: 1));
       expect(countdown(), isNot(before));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a created order that was not funded expires on screen',
+        (tester) async {
+      net.routes[_fundRoute] = (503, {'error': 'payout provider unavailable'});
+      await toAmount(tester);
+      await price(tester);
+      // The window is set when the create is answered, 2 s from now.
+      net.routes[_createRoute] =
+          createdReply(expiresIn: const Duration(seconds: 2));
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(find.text('Orden creada'), findsOneWidget);
+      expect(fundButton, findsOneWidget, reason: 'its window is still open');
+      expect(find.text('Orden vencida'), findsNothing);
+
+      // The window reads the device's clock, which a test cannot move: let it
+      // really close, then the tick that repaints the order.
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 2100)));
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(fundButton, findsNothing, reason: 'it cannot be funded any more');
+      expect(find.byKey(const Key('wapu-new-sale-big')), findsOneWidget);
+      // The clock stopped with the window: a repaint would hand the view a
+      // later `now`, and there is none.
+      final view = find.byType(WapuStatusView);
+      final last = tester.widget<WapuStatusView>(view).now;
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(seconds: 5));
+      expect(tester.widget<WapuStatusView>(view).now, last);
       await tester.pumpWidget(const SizedBox());
     });
 

@@ -38,7 +38,7 @@ const _maxDigits = 12;
 /// How often an order that the backend still watches is read again.
 const _pollEvery = Duration(seconds: 10);
 
-/// How often the countdown of an order that waits for the transfer repaints.
+/// How often an order whose view moves with the clock repaints.
 const _tickEvery = Duration(seconds: 1);
 
 /// Pesos and the rate, grouped with dots like every other amount of the till.
@@ -59,6 +59,13 @@ Future<_Answer<T>> _answer<T>(Future<T> Function() call) async {
     return (reply: null, error: e);
   }
 }
+
+/// Whether the view of [o] changes with the clock at [now]: the countdown of an
+/// order that waits for the transfer, and the window of a created one, which
+/// closes into "Orden vencida" with no news from the backend.
+bool _ticks(WapuOrder o, DateTime now) =>
+    o.status == 'FUNDING_ISSUED' ||
+    (o.status == 'CREATED' && (o.expiresAt?.isAfter(now) ?? false));
 
 /// Whether [a] and [b] are the same key on the same backend. A reload hands
 /// back a new object each time, so the fields are what is compared.
@@ -145,7 +152,8 @@ class _WapuScreenState extends State<WapuScreen> {
   /// Reads the order again while the backend still watches it.
   Timer? _poller;
 
-  /// Repaints the countdown while the order waits for the transfer.
+  /// Repaints what moves with the clock: the countdown of the order that waits
+  /// for the transfer, and the window of one that was only created.
   Timer? _ticker;
 
   /// What the amount is typed in. A sale starts in pesos.
@@ -465,7 +473,7 @@ class _WapuScreenState extends State<WapuScreen> {
 
   /// Starts or stops what the order on screen needs, after it changed: a read
   /// every [_pollEvery] while the backend still watches it, and a repaint every
-  /// [_tickEvery] while it waits for the transfer, so the countdown moves.
+  /// [_tickEvery] while its view moves with the clock (see [_ticks]).
   void _follow() {
     final order = _order;
     if (order != null && order.watchPending) {
@@ -474,8 +482,13 @@ class _WapuScreenState extends State<WapuScreen> {
       _poller?.cancel();
       _poller = null;
     }
-    if (order?.status == 'FUNDING_ISSUED') {
-      _ticker ??= Timer.periodic(_tickEvery, (_) => setState(() {}));
+    if (order != null && _ticks(order, DateTime.now())) {
+      _ticker ??= Timer.periodic(_tickEvery, (_) {
+        // First: it stops the clock once the window closed, and the repaint
+        // after it is of the order as it stands then.
+        _follow();
+        setState(() {});
+      });
     } else {
       _ticker?.cancel();
       _ticker = null;
