@@ -398,4 +398,20 @@ const Map<String, String> _en = {
   'Guardada: ': 'Saved: ',
   'La URL tiene que empezar con https://': 'The URL must start with https://',
   'Olvidar key': 'Forget key',
+  'Bitcoin sin KYC': 'Bitcoin without KYC',
+  'Ingresá con la dirección del comercio para usar Wapu':
+      'Sign in with the merchant address to use Wapu',
+  'Configurá tu API key de Wapu': 'Set up your Wapu API key',
+  'Lightning address del cliente': "Customer's Lightning address",
+  'nombre@dominio.com': 'name@domain.com',
+  'Escanear QR': 'Scan QR',
+  'Escaneá la lightning address del cliente':
+      "Scan the customer's Lightning address",
+  'Eso es un invoice. Pedile al cliente su lightning address':
+      'That is an invoice. Ask the customer for their Lightning address',
+  'Eso es un LNURL. Pedile al cliente su lightning address':
+      'That is an LNURL. Ask the customer for their Lightning address',
+  'La lightning address no es válida': 'The Lightning address is not valid',
+  'No se pudo verificar la lightning address':
+      'The Lightning address could not be verified',
 };

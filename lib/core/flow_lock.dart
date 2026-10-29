@@ -9,6 +9,7 @@ const lockableFlows = {
   '/zape': {'/zape'},
   '/rueda': {'/rueda'},
   '/cards': {'/cards'},
+  '/wapu': {'/wapu', '/wapu/historial', '/wapu/config'},
 };
 
 /// The flow the till is locked to, by its starting route, or null when
