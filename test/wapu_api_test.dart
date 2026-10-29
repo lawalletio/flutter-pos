@@ -853,6 +853,63 @@ void main() {
     }
   });
 
+  test('username reads the account profile with the API key', () async {
+    final net = FakeNet({
+      'GET /users/profile': (
+        200,
+        {
+          'username': ' shopuser ',
+          'phone': '+5491100000000',
+          'telegram': null,
+          'email': 'shop@example.com',
+          'npub': 'npub1x',
+          'beta_version': true,
+        }
+      ),
+    });
+
+    expect(await apiWith(net).username(), 'shopuser');
+
+    final r = net.requests.single;
+    expect(r.method, 'GET');
+    expect(r.uri.origin, 'https://wapu.test');
+    expect(r.uri.path, endsWith('/users/profile'));
+    expect(r.headers['X-API-Key'], 'k');
+    expect(r.headers['Authorization'], isNull);
+    expect(r.receiveTimeout, const Duration(seconds: 15));
+  });
+
+  test('username throws when the reply carries none', () async {
+    for (final body in <Object>[
+      <String, Object?>{},
+      {'phone': '+5491100000000', 'npub': 'npub1x'},
+      {'username': null},
+      {'username': ''},
+      {'username': '  '},
+      '<html/>',
+      <Object?>[],
+    ]) {
+      final net = FakeNet({'GET /users/profile': (200, body)});
+
+      final e = await failure(apiWith(net).username());
+
+      expect(e.message, 'unexpected response', reason: '$body');
+      expect(e.statusCode, isNull, reason: '$body');
+    }
+  });
+
+  test('username fails as any call does when the backend refuses', () async {
+    final net = FakeNet({
+      'GET /users/profile': (401, {'error': 'invalid api key'}),
+    });
+
+    final e = await failure(apiWith(net).username());
+
+    expect(e.statusCode, 401);
+    expect(e.message, 'invalid api key');
+    expect(wapuErrorKey(e), 'La API key no es válida');
+  });
+
   test('isInProgress', () {
     final now = DateTime.utc(2026, 10, 29, 14);
     bool inProgress(Map<String, Object?> over) =>

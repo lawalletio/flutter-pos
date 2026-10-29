@@ -36,6 +36,14 @@ const _timedOut = 'El servidor no respondió. Probá de nuevo.';
 const _tentatives = '/transactions/direct-fiat/tentatives';
 const _listRoute = 'GET $_tentatives';
 
+const _profileRoute = 'GET /users/profile';
+
+/// The message of an order credited to the balance after its invoice expired,
+/// up to the account: its username follows, or `tu cuenta de Wapu.` when the
+/// username is not known.
+const _expiredInvoice = 'La orden expiró pero se detectó el depósito en ARS, '
+    'el saldo fue acreditado en';
+
 /// The route that reads the order [id] on its own.
 String _read(String id) => 'GET $_tentatives/$id';
 
@@ -120,6 +128,7 @@ Map<String, Object?> orderJson(
   Duration expiresIn = const Duration(minutes: 15),
   String? hash,
   String? created,
+  String? error,
 }) {
   final bank = status == 'FUNDING_ISSUED' || (status == 'EXPIRED' && watch);
   return {
@@ -138,6 +147,7 @@ Map<String, Object?> orderJson(
     if (bank) 'alias': 'alias.$id',
     if (bank) 'cvu': _cvu,
     'payment_hash': hash,
+    'error_code': error,
   };
 }
 
@@ -152,6 +162,14 @@ Map<String, Object?> doneJson(String id, {int out = 17000, String? created}) =>
         ars: 2000000,
         address: 'carol@example.com',
         created: created);
+
+/// An order whose customer's invoice expired before the sats went out: the ARS
+/// were credited to the merchant's Wapu balance.
+Map<String, Object?> creditedJson(String id) => orderJson(id,
+    status: 'SETTLED_TO_BALANCE',
+    payout: 'settled_to_balance',
+    watch: false,
+    error: 'invoice_expired');
 
 /// What the backend answers to the list of orders, in [orders]' order.
 (int, Object) listReply(List<Map<String, Object?>> orders) =>
@@ -719,6 +737,53 @@ void main() {
       ]) {
         expect(find.text(text), findsOneWidget, reason: text);
       }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an order credited after its invoice expired names the account',
+        (tester) async {
+      net.routes[_listRoute] =
+          listReply([creditedJson('f'), creditedJson('g')]);
+      net.routes[_read('f')] = (200, creditedJson('f'));
+      net.routes[_read('g')] = (200, creditedJson('g'));
+      net.routes[_profileRoute] = (200, {'username': 'ShopUser'});
+      await open(tester);
+
+      await pick(tester, 'f');
+
+      const message = '$_expiredInvoice la cuenta de Wapu ShopUser';
+      expect(find.text(message), findsOneWidget);
+      expect(find.text('No se pudieron enviar los sats'), findsNothing);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('Acreditada en saldo Wapu'), findsOneWidget);
+      expect(find.text('f'), findsOneWidget, reason: 'its id, in the receipt');
+      expect(calls(_profileRoute), 1);
+      expect(find.byKey(const Key('wapu-new-sale-big')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_read('f')), 1, reason: 'nothing is left to wait for');
+
+      // Another credited order of the same account: its name is known.
+      await pick(tester, 'g');
+
+      expect(find.text(message), findsOneWidget);
+      expect(find.text('g'), findsOneWidget);
+      expect(calls(_profileRoute), 1, reason: 'asked once for the key');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a credited order says "tu cuenta" when the profile fails',
+        (tester) async {
+      net.routes[_listRoute] = listReply([creditedJson('f')]);
+      net.routes[_read('f')] = (200, creditedJson('f'));
+      net.routes[_profileRoute] = (500, {'error': 'boom'});
+      await open(tester);
+
+      await pick(tester, 'f');
+
+      expect(find.text('$_expiredInvoice tu cuenta de Wapu.'), findsOneWidget);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('No se pudo completar la operación'), findsNothing);
+      expect(calls(_profileRoute), 1);
       await tester.pumpWidget(const SizedBox());
     });
 

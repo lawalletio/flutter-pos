@@ -36,6 +36,7 @@ class WapuStatusView extends StatelessWidget {
     this.onRequestFunding,
     this.onNewSale,
     this.busy = false,
+    this.wapuUser,
   });
 
   final WapuOrder order;
@@ -49,6 +50,10 @@ class WapuStatusView extends StatelessWidget {
 
   /// The bank details are being asked for: the button waits.
   final bool busy;
+
+  /// The username of the merchant's Wapu account, when it is known: the
+  /// message of an order credited to that account names it.
+  final String? wapuUser;
 
   @override
   Widget build(BuildContext context) {
@@ -211,12 +216,30 @@ class WapuStatusView extends StatelessWidget {
     ];
   }
 
+  /// The payout failed and the ARS went to the merchant's Wapu balance.
   List<Widget> _settled(BuildContext context) => [
-        _title(context.tr('No se pudieron enviar los sats'),
-            color: AppColors.error),
-        _note(context.tr('El monto quedó en tu saldo de Wapu.')),
+        if (order.errorCode == 'invoice_expired')
+          _title(_invoiceExpired(context), color: AppColors.error)
+        else ...[
+          _title(context.tr('No se pudieron enviar los sats'),
+              color: AppColors.error),
+          _note(context.tr('El monto quedó en tu saldo de Wapu.')),
+        ],
+        WapuReceipt(order: order),
         _newSale(context),
       ];
+
+  /// The customer's invoice expired before the payout, so the deposit went to
+  /// the merchant's Wapu account, which the message names when its username is
+  /// known.
+  String _invoiceExpired(BuildContext context) {
+    final user = wapuUser;
+    return user == null
+        ? context.tr('La orden expiró pero se detectó el depósito en ARS, '
+            'el saldo fue acreditado en tu cuenta de Wapu.')
+        : '${context.tr('La orden expiró pero se detectó el depósito en ARS, '
+            'el saldo fue acreditado en la cuenta de Wapu ')}$user';
+  }
 
   /// Where the order stands, in a line big enough to read across the counter.
   Widget _title(String text, {Color? color}) => Padding(

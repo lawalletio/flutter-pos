@@ -221,6 +221,7 @@ const _hash =
   int ars = 1500037,
   int code = 200,
   String? hash,
+  String? errorCode,
   Duration expiresIn = const Duration(minutes: 15),
 }) =>
     (
@@ -240,6 +241,7 @@ const _hash =
         if (bank) 'alias': alias,
         if (bank) 'cvu': _cvu,
         'payment_hash': hash,
+        'error_code': errorCode,
       }
     );
 
@@ -262,6 +264,36 @@ const _hash =
     watch: false,
     bank: false,
     hash: _hash);
+
+/// What the backend says when the customer's invoice expired before the sats
+/// went out: the ARS were credited to the merchant's Wapu balance.
+(int, Object) expiredInvoiceReply() => orderReply(
+    status: 'SETTLED_TO_BALANCE',
+    payout: 'settled_to_balance',
+    watch: false,
+    bank: false,
+    errorCode: 'invoice_expired');
+
+const _profileRoute = 'GET /users/profile';
+
+/// The profile of the Wapu account whose username is [name].
+(int, Object) profileReply(String name) => (
+      200,
+      {
+        'username': name,
+        'phone': '+5491100000000',
+        'telegram': null,
+        'email': 'shop@example.com',
+        'npub': 'npub1x',
+        'beta_version': true,
+      }
+    );
+
+/// The message of an order credited to the balance after its invoice expired,
+/// up to the account: its username follows, or `tu cuenta de Wapu.` when the
+/// username is not known.
+const _expiredInvoice = 'La orden expiró pero se detectó el depósito en ARS, '
+    'el saldo fue acreditado en';
 
 /// The [value] on the quote line named [label].
 Finder line(String label, String value) => find.descendant(
@@ -1901,6 +1933,184 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    /// Polls the funded order, which the backend now says was credited to the
+    /// balance because the customer's invoice expired.
+    Future<void> pollExpiredInvoice(WidgetTester tester) async {
+      net.routes[_detailRoute] = expiredInvoiceReply();
+      await tester.pump(const Duration(seconds: 10));
+      await settle(tester);
+    }
+
+    testWidgets('an order credited after its invoice expired names the account',
+        (tester) async {
+      net.routes[_profileRoute] = profileReply('ShopUser');
+      await toWaiting(tester);
+
+      await pollExpiredInvoice(tester);
+
+      expect(find.text('$_expiredInvoice la cuenta de Wapu ShopUser'),
+          findsOneWidget);
+      expect(find.textContaining('tu cuenta de Wapu'), findsNothing);
+      expect(find.text('No se pudieron enviar los sats'), findsNothing);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('Acreditada en saldo Wapu'), findsOneWidget);
+      expect(calls(_profileRoute), 1);
+      expect(net.keys.last, 'key-1', reason: 'asked with the key of the till');
+      expect(paid(), 0, reason: 'the customer did not get the sats');
+
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_profileRoute), 1, reason: 'once');
+      expect(calls(_detailRoute), 1, reason: 'polling stopped');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final (what, setUpFailure) in <(String, void Function())>[
+      ('a refusal', () => net.routes[_profileRoute] = (500, {'error': 'boom'})),
+      (
+        'no answer',
+        () => net.failures[_profileRoute] = DioException(
+            requestOptions: RequestOptions(),
+            type: DioExceptionType.connectionError)
+      ),
+      (
+        'a reply that is not the profile',
+        () => net.routes[_profileRoute] = (200, {'phone': '+5491100000000'})
+      ),
+    ]) {
+      testWidgets('$what for the profile leaves the generic message, quietly',
+          (tester) async {
+        setUpFailure();
+        await toWaiting(tester);
+
+        await pollExpiredInvoice(tester);
+
+        expect(
+            find.text('$_expiredInvoice tu cuenta de Wapu.'), findsOneWidget);
+        expect(find.textContaining('la cuenta de Wapu'), findsNothing);
+        expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+        expect(find.text('No se pudo completar la operación'), findsNothing,
+            reason: 'it only decorates: there is no error to show');
+        expect(find.text('El servidor no respondió. Probá de nuevo.'),
+            findsNothing);
+        expect(errorDetail, findsNothing);
+        expect(reconnecting, findsNothing);
+        expect(calls(_profileRoute), 1);
+
+        await tester.pump(const Duration(seconds: 30));
+        expect(calls(_profileRoute), 1, reason: 'not asked again on its own');
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    testWidgets('the username is read once for a key, not once per sale',
+        (tester) async {
+      net.routes[_profileRoute] = profileReply('ShopUser');
+      await toWaiting(tester);
+      await pollExpiredInvoice(tester);
+      expect(find.text('$_expiredInvoice la cuenta de Wapu ShopUser'),
+          findsOneWidget);
+      expect(calls(_profileRoute), 1);
+
+      // The next sale with the same key.
+      await tester.ensureVisible(find.byKey(const Key('wapu-new-sale-big')));
+      await tester.tap(find.byKey(const Key('wapu-new-sale-big')));
+      await settle(tester);
+      expect(destination, findsOneWidget);
+      await submit(tester, 'bob@example.com');
+      await priceAndConfirm(tester);
+      expect(find.text(_alias), findsOneWidget);
+      await pollExpiredInvoice(tester);
+
+      expect(find.text('$_expiredInvoice la cuenta de Wapu ShopUser'),
+          findsOneWidget);
+      expect(calls(_profileRoute), 1, reason: 'it is known for this key');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'an order that went to the balance for another reason is not '
+        'followed by a profile read', (tester) async {
+      net.routes[_profileRoute] = profileReply('ShopUser');
+      await toWaiting(tester);
+      net.routes[_detailRoute] = orderReply(
+          status: 'SETTLED_TO_BALANCE',
+          payout: 'settled_to_balance',
+          watch: false,
+          bank: false,
+          errorCode: 'payout_failed');
+      await tester.pump(const Duration(seconds: 10));
+      await settle(tester);
+
+      expect(find.text('No se pudieron enviar los sats'), findsOneWidget);
+      expect(find.text('El monto quedó en tu saldo de Wapu.'), findsOneWidget);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(calls(_profileRoute), 0, reason: 'its message names no account');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('another key does not inherit the username', (tester) async {
+      net.routes[_profileRoute] = profileReply('ShopUser');
+      await toWaiting(tester);
+      await pollExpiredInvoice(tester);
+      expect(find.text('$_expiredInvoice la cuenta de Wapu ShopUser'),
+          findsOneWidget);
+
+      // Another account takes the till: its sale starts over, and what was
+      // known of the account goes with it.
+      await tester.tap(gear); // no PIN is set: straight in
+      await settle(tester);
+      await tester.enterText(find.byKey(const Key('wapu-key')), 'other-key');
+      await tester.tap(find.byKey(const Key('wapu-save')));
+      await settle(tester);
+      expect(destination, findsOneWidget, reason: 'a new sale');
+      expect(find.textContaining('ShopUser'), findsNothing);
+
+      net.routes[_profileRoute] = profileReply('OtherUser');
+      await submit(tester, 'bob@example.com');
+      await priceAndConfirm(tester);
+      expect(find.text(_alias), findsOneWidget);
+      await pollExpiredInvoice(tester);
+
+      expect(find.text('$_expiredInvoice la cuenta de Wapu OtherUser'),
+          findsOneWidget);
+      expect(find.textContaining('ShopUser'), findsNothing);
+      expect(calls(_profileRoute), 2, reason: 'asked again for the new key');
+      expect(net.keys.last, 'other-key');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets(
+        'a username that lands after another key took the till is '
+        'dropped', (tester) async {
+      net.routes[_profileRoute] = profileReply('ShopUser');
+      await toWaiting(tester);
+      final held = holdOn('GET', '/users/profile');
+      await pollExpiredInvoice(tester);
+      expect(calls(_profileRoute), 1, reason: 'the read is on its way');
+      expect(find.text('$_expiredInvoice tu cuenta de Wapu.'), findsOneWidget);
+
+      await tester.tap(gear);
+      await settle(tester);
+      await tester.enterText(find.byKey(const Key('wapu-key')), 'other-key');
+      await tester.tap(find.byKey(const Key('wapu-save')));
+      await settle(tester);
+      net.routes[_profileRoute] = profileReply('OtherUser');
+      held.complete(); // the old key's name lands under the new key
+      await settle(tester);
+      expect(destination, findsOneWidget);
+
+      net.hold = null;
+      await submit(tester, 'bob@example.com');
+      await priceAndConfirm(tester);
+      await pollExpiredInvoice(tester);
+
+      expect(find.text('$_expiredInvoice la cuenta de Wapu OtherUser'),
+          findsOneWidget);
+      expect(find.textContaining('ShopUser'), findsNothing);
+      expect(calls(_profileRoute), 2);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('a poll that is still out is not overlapped by the next tick',
         (tester) async {
       await toWaiting(tester);
@@ -2017,8 +2227,8 @@ void main() {
       await tester.pump(const Duration(seconds: 10));
       await tester.pump();
       expect(calls(_detailRoute), 1);
-      expect(find.text('¡Listo! El cliente recibió 12.500 sats'),
-          findsOneWidget);
+      expect(
+          find.text('¡Listo! El cliente recibió 12.500 sats'), findsOneWidget);
       expect(find.text('Orden vencida'), findsNothing);
       expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
       expect(find.text('Completada'), findsOneWidget);

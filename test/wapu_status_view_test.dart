@@ -38,6 +38,7 @@ WapuOrder _order({
   String? alias,
   String? cvu,
   String? paymentHash,
+  String? errorCode,
 }) =>
     WapuOrder(
       id: _id,
@@ -56,6 +57,7 @@ WapuOrder _order({
       alias: alias,
       cvu: cvu,
       paymentHash: paymentHash,
+      errorCode: errorCode,
     );
 
 /// 14:59 left of the payment window.
@@ -122,6 +124,19 @@ final _settled = _order(
   watchPending: false,
 );
 
+/// Credited to the balance because the customer's invoice expired first.
+final _settledInvoiceExpired = _order(
+  status: 'SETTLED_TO_BALANCE',
+  payoutStatus: 'settled_to_balance',
+  watchPending: false,
+  errorCode: 'invoice_expired',
+);
+
+/// What the view says of an order whose invoice expired, in Spanish: the
+/// message up to the account, which is its username when that is known.
+const _invoiceExpired = 'La orden expiró pero se detectó el depósito en ARS, '
+    'el saldo fue acreditado en';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -156,6 +171,7 @@ void main() {
     VoidCallback? onNewSale,
     bool busy = false,
     bool english = false,
+    String? wapuUser,
   }) async {
     await tester.pumpWidget(MaterialApp(
       theme: buildAppTheme(),
@@ -169,6 +185,7 @@ void main() {
           onRequestFunding: onRequestFunding,
           onNewSale: onNewSale,
           busy: busy,
+          wapuUser: wapuUser,
         ),
       ),
     ));
@@ -604,6 +621,74 @@ void main() {
 
       expect(find.text('No se pudieron enviar los sats'), findsOneWidget);
       expect(find.text('El monto quedó en tu saldo de Wapu.'), findsOneWidget);
+      expect(find.textContaining('La orden expiró'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('shows the receipt of the order, credited to the balance',
+        (tester) async {
+      await show(tester, _settled);
+
+      expect(receipt, findsOneWidget);
+      expect(find.text('Estado'), findsOneWidget);
+      expect(find.text('Acreditada en saldo Wapu'), findsOneWidget);
+      expect(find.text('Monto'), findsOneWidget);
+      expect(find.text('Comprado'), findsNothing);
+      expect(find.text('Depósito del cliente'), findsOneWidget);
+      expect(find.text('15.000,37 ARS'), findsOneWidget);
+      expect(find.text(_id), findsOneWidget);
+      expect(newSaleBig, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('when the invoice expired, names the Wapu account',
+        (tester) async {
+      await show(tester, _settledInvoiceExpired, wapuUser: 'ShopUser');
+
+      const message = '$_invoiceExpired la cuenta de Wapu ShopUser';
+      expect(find.text(message), findsOneWidget);
+      // The username keeps its case: it is read out, not styled.
+      expect(drawn(tester, find.text(message)), message);
+      expect(find.text('No se pudieron enviar los sats'), findsNothing);
+      expect(find.text('El monto quedó en tu saldo de Wapu.'), findsNothing);
+      expect(receipt, findsOneWidget);
+      expect(find.text('Acreditada en saldo Wapu'), findsOneWidget);
+      expect(find.text('Depósito del cliente'), findsOneWidget);
+      expect(newSaleBig, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('when the invoice expired and the account is not known yet',
+        (tester) async {
+      await show(tester, _settledInvoiceExpired);
+
+      expect(find.text('$_invoiceExpired tu cuenta de Wapu.'), findsOneWidget);
+      expect(find.textContaining('la cuenta de Wapu'), findsNothing);
+      expect(find.text('No se pudieron enviar los sats'), findsNothing);
+      expect(receipt, findsOneWidget);
+      expect(newSaleBig, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('with any other error code keeps the usual message',
+        (tester) async {
+      for (final code in ['payout_failed', null]) {
+        await show(
+            tester,
+            _order(
+                status: 'SETTLED_TO_BALANCE',
+                payoutStatus: 'settled_to_balance',
+                watchPending: false,
+                errorCode: code),
+            wapuUser: 'ShopUser');
+
+        expect(find.text('No se pudieron enviar los sats'), findsOneWidget,
+            reason: '$code');
+        expect(find.text('El monto quedó en tu saldo de Wapu.'), findsOneWidget,
+            reason: '$code');
+        expect(find.textContaining('ShopUser'), findsNothing, reason: '$code');
+        expect(receipt, findsOneWidget, reason: '$code');
+      }
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -756,6 +841,17 @@ void main() {
         [
           'The sats could not be sent',
           'The amount went to your Wapu balance.',
+          'Credited to Wapu balance',
+          'New sale',
+        ]
+      ),
+      (
+        'SETTLED_TO_BALANCE with an expired invoice',
+        _settledInvoiceExpired,
+        [
+          'The order expired but the ARS deposit was detected; '
+              'the balance was credited to your Wapu account.',
+          'Credited to Wapu balance',
           'New sale',
         ]
       ),
@@ -769,6 +865,19 @@ void main() {
         await tester.pumpWidget(const SizedBox());
       });
     }
+
+    testWidgets('the message of an expired invoice names the account',
+        (tester) async {
+      await show(tester, _settledInvoiceExpired,
+          english: true, wapuUser: 'ShopUser');
+
+      expect(
+          find.text('The order expired but the ARS deposit was detected; '
+              'the balance was credited to the Wapu account ShopUser'),
+          findsOneWidget);
+      expect(find.text('Credited to Wapu balance'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
 
     testWidgets('the copy buttons and what they say are translated',
         (tester) async {

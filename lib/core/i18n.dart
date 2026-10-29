@@ -451,6 +451,10 @@ const Map<String, String> _en = {
   'No se pudieron enviar los sats': 'The sats could not be sent',
   'El monto quedó en tu saldo de Wapu.':
       'The amount went to your Wapu balance.',
+  'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en la cuenta de Wapu ':
+      'The order expired but the ARS deposit was detected; the balance was credited to the Wapu account ',
+  'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en tu cuenta de Wapu.':
+      'The order expired but the ARS deposit was detected; the balance was credited to your Wapu account.',
   'Comprado': 'Purchased',
   'Monto': 'Amount',
   'Fecha': 'Date',

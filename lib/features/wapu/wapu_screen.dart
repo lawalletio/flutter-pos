@@ -100,6 +100,15 @@ class _WapuScreenState extends State<WapuScreen> {
   /// no key. The old one is not closed: a new one comes only with a new key.
   WapuApi? _api;
 
+  /// The username of the Wapu account behind [_api], once it is read. The
+  /// message of an order that went to the account's balance names it. Null until
+  /// then, and when it could not be read: it only decorates, so a failure shows
+  /// nothing and the message says "tu cuenta" instead.
+  String? _wapuUser;
+
+  /// The username is being read, so it is asked for once.
+  bool _askingUser = false;
+
   /// [_credentials] is the current POS user's, not the previous one's.
   bool _loaded = false;
 
@@ -252,6 +261,9 @@ class _WapuScreenState extends State<WapuScreen> {
         _api = credentials == null
             ? null
             : wapuApiFor(credentials.baseUrl, credentials.apiKey);
+        // The username is the old account's.
+        _wapuUser = null;
+        _askingUser = false;
       }
       _credentials = credentials;
       _loaded = true;
@@ -474,8 +486,9 @@ class _WapuScreenState extends State<WapuScreen> {
   }
 
   /// Starts or stops what the order on screen needs, after it changed: a read
-  /// every [_pollEvery] while the backend still watches it, and a repaint every
-  /// [_tickEvery] while its view moves with the clock (see [_ticks]).
+  /// every [_pollEvery] while the backend still watches it, a repaint every
+  /// [_tickEvery] while its view moves with the clock (see [_ticks]), and the
+  /// username of the Wapu account when its message names it.
   void _follow() {
     final order = _order;
     if (order != null && order.watchPending) {
@@ -495,6 +508,26 @@ class _WapuScreenState extends State<WapuScreen> {
       _ticker?.cancel();
       _ticker = null;
     }
+    // Its message is the only place the account's username is read.
+    if (order?.status == 'SETTLED_TO_BALANCE' &&
+        order?.errorCode == 'invoice_expired') {
+      _loadWapuUser();
+    }
+  }
+
+  /// Reads the username of the Wapu account for the key on screen, once. A
+  /// failure leaves it unknown, and the next order that needs it asks again.
+  Future<void> _loadWapuUser() async {
+    final api = _api;
+    if (api == null || _wapuUser != null || _askingUser) return;
+    _askingUser = true;
+    final answer = await _answer(api.username);
+    // Another key took the screen meanwhile, and cleared the flag: this name is
+    // not its.
+    if (!mounted || api != _api) return;
+    _askingUser = false;
+    final name = answer.reply;
+    if (name != null) setState(() => _wapuUser = name);
   }
 
   void _stopClocks() {
@@ -736,6 +769,7 @@ class _WapuScreenState extends State<WapuScreen> {
             order: _order!, // set with the step, cleared with it
             now: DateTime.now(),
             busy: _busy,
+            wapuUser: _wapuUser,
             onRequestFunding: _requestFunding,
             onNewSale: _newSale,
           ),

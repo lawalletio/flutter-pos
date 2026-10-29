@@ -278,6 +278,15 @@ class WapuApi {
   Future<void> setBeta(bool enabled) =>
       _send('PATCH', '/users/user-settings', body: {'beta_version': enabled});
 
+  /// The username of the Wapu account the key belongs to. A reply without one
+  /// is not the profile (a wrong URL that answers 200 with a web page, say), so
+  /// it throws.
+  Future<String> username() async {
+    final name = _str((await _send('GET', '/users/profile'))['username']);
+    if (name == null) throw _unexpected;
+    return name;
+  }
+
   String _tentative(String id) =>
       '$_direct/tentatives/${Uri.encodeComponent(id)}';
 

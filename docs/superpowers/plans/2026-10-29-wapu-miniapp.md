@@ -136,7 +136,8 @@
     - `Future<WapuOrder> order(String orderId)`;
     - `Future<List<WapuOrder>> orders()`, which keeps only `type == 'crypto_purchase'` when `type` is present;
     - `Future<bool> betaEnabled()`, true when `beta_version` is `true` or `1`;
-    - `Future<void> setBeta(bool enabled)`.
+    - `Future<void> setBeta(bool enabled)`;
+    - `Future<String> username()`, the non-empty `username` of `GET /users/profile`. Any other reply throws the no-status failure.
   - `WapuApi Function(String baseUrl, String apiKey) wapuApiFor = (b, k) => WapuApi(baseUrl: b, apiKey: k);`. This is non-final, so tests can swap it.
   - `String wapuErrorKey(WapuApiException e, {bool creating = false})` returns the Spanish copy key below. It is pure, with no Flutter import.
 
@@ -146,7 +147,8 @@
 - `POST /transactions/direct-fiat/tentatives/{id}/funding`, with body `{}`;
 - `GET /transactions/direct-fiat/tentatives/{id}`;
 - `GET /transactions/direct-fiat/tentatives`, which returns `{"tentatives": [...]}`;
-- `GET /users/user-settings` and `PATCH /users/user-settings` with `{"beta_version": bool}`.
+- `GET /users/user-settings` and `PATCH /users/user-settings` with `{"beta_version": bool}`;
+- `GET /users/profile`, which returns `{username, ...}`.
 
 **Dio setup:**
 - Build absolute URLs from `baseUrl`, and pass headers and timeouts per request through `Options`. Then an injected test `Dio` behaves the same.
@@ -413,7 +415,7 @@
 | EXECUTED + `sending` | The Wapu logo (`Key('wapu-logo')`, `assets/images/wapu_logo.png`) on a white plate, then `'Pago recibido'`, a small spinner beside `'Enviando los sats…'`, and the sats and the payout address. |
 | EXECUTED + `review` | `'En revisión'`, plus `'Guardá el ID de la orden: '` + id |
 | COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, then the `WapuReceipt` (`lib/features/wapu/wapu_receipt.dart`, `Key('wapu-receipt')`): the rows `'Comprado'`, `'Fecha'` (only with `createdAt`), `'Estado'`, `'Para'` (`shortDestination`), the id with its copy (`Key('wapu-copy-id')`) and QR (`Key('wapu-id-qr')`) buttons, `'Comisión de la operación'`, `'Depósito del cliente'` and `'Total'`. |
-| SETTLED_TO_BALANCE | `'No se pudieron enviar los sats'`, plus `'El monto quedó en tu saldo de Wapu.'` |
+| SETTLED_TO_BALANCE | `'No se pudieron enviar los sats'`, plus `'El monto quedó en tu saldo de Wapu.'`, then the `WapuReceipt` (status `'Acreditada en saldo Wapu'`). With `errorCode == 'invoice_expired'` the message is `'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en la cuenta de Wapu '` + the `wapuUser` the screen passes, or `'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en tu cuenta de Wapu.'` when it is null. |
 | any other status | the raw `status` |
 
 - [ ] **Step 1: Write the failing tests:**
@@ -452,6 +454,7 @@
   - Polling stops when `!watchPending`.
   - A transition into COMPLETED calls `AppSounds.play(AppSound.paid)` once.
   - A 1 s `Timer.periodic` repaints the countdown while the status is FUNDING_ISSUED or CREATED and `expiresAt` is after now. It stops at the repaint that crosses `expiresAt`, and the 10 s poll goes on while `watchPending`.
+  - An order that is SETTLED_TO_BALANCE with `error_code == 'invoice_expired'` makes the screen read `GET /users/profile` once per loaded credentials, through `wapuCall`, and pass the `username` to the view as `wapuUser`. The cache goes when `_load` swaps the credentials. A failure shows nothing: the message says `tu cuenta`.
   - Cancel every timer in `dispose` and on a new sale.
 - **Nueva venta (new sale):**
   - Tapping `Key('wapu-new-sale')` while the order is FUNDING_ISSUED shows a dialog titled `'Nueva venta'` with `'La orden queda abierta hasta que venza. La podés retomar desde el Historial.'` and the actions `'Cancelar'` and `'Nueva venta'`.
