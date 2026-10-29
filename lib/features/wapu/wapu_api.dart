@@ -285,13 +285,17 @@ WapuApi Function(String baseUrl, String apiKey) wapuApiFor =
     (b, k) => WapuApi(baseUrl: b, apiKey: k);
 
 /// The Spanish copy (a key of the i18n map) that tells the operator what went
-/// wrong. Set [creating] for an order create. There, a timeout or a server
-/// fault (5xx except 503, which the backend raises before it creates anything)
-/// leaves it unknown whether the order exists, so the copy sends the operator
-/// to the History instead of inviting a retry.
+/// wrong. Set [creating] for an order create. There, any failure that brought
+/// no answer from the backend (a timeout or another transport error, so no
+/// status code) or a server fault (5xx except 503, which the backend raises
+/// before it creates anything) leaves it unknown whether the order exists. The
+/// copy then sends the operator to the History instead of inviting a retry,
+/// even when they are just offline.
 String wapuErrorKey(WapuApiException e, {bool creating = false}) {
-  final code = e.statusCode ?? 0;
-  if (creating && (e.timeout || (code >= 500 && code != 503))) {
+  final code = e.statusCode;
+  final unknownOutcome =
+      e.timeout || code == null || (code >= 500 && code != 503);
+  if (creating && unknownOutcome) {
     return 'No sabemos si la orden se creó. Revisá el Historial antes de reintentar.';
   }
   if (e.timeout) return 'El servidor no respondió. Probá de nuevo.';

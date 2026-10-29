@@ -703,6 +703,24 @@ void main() {
         'No se pudo completar la operación');
   });
 
+  test('on create, a failure with no status is an unknown outcome too', () {
+    const unknown =
+        'No sabemos si la orden se creó. Revisá el Historial antes de reintentar.';
+
+    // Whatever its text: the request may have been sent before the link broke.
+    for (final message in [
+      'network error',
+      'offline',
+      'The connection errored: Connection closed before full header was received',
+    ]) {
+      expect(wapuErrorKey(WapuApiException(message), creating: true), unknown,
+          reason: message);
+    }
+    // Off a create there is nothing to duplicate, so it is just a failure.
+    expect(wapuErrorKey(const WapuApiException('network error')),
+        'No se pudo completar la operación');
+  });
+
   test('every error key has an English entry', () {
     final en = AppLocalizations(AppLanguage.en);
 
