@@ -369,4 +369,27 @@ const Map<String, String> _en = {
   'Aplicar': 'Apply',
   'Los cupones de los productos dejan la orden en 0. No se puede cobrar.':
       "The products' coupons bring the order to 0. It can't be charged.",
+
+  // Wapu
+  'No sabemos si la orden se creó. Revisá el Historial antes de reintentar.':
+      "We don't know if the order was created. Check the History before retrying.",
+  'El servidor no respondió. Probá de nuevo.':
+      'The server did not respond. Try again.',
+  'La API key no es válida': 'The API key is not valid',
+  'Tu cuenta Wapu no tiene Beta features activado':
+      'Your Wapu account does not have Beta features on',
+  'Las compras están deshabilitadas en Wapu': 'Purchases are disabled in Wapu',
+  'Tu cuenta Wapu no puede comprar': 'Your Wapu account cannot buy',
+  'La orden no existe': 'The order does not exist',
+  'No hay liquidez disponible ahora. Probá en unos minutos.':
+      'No liquidity available right now. Try again in a few minutes.',
+  'El monto está fuera de los límites': 'The amount is out of range',
+  'Hay demasiadas órdenes abiertas. Esperá a que venzan.':
+      'There are too many open orders. Wait for them to expire.',
+  'Se alcanzó el límite mensual de compras':
+      'The monthly purchase limit was reached',
+  'Demasiados intentos. Esperá un momento.': 'Too many attempts. Wait a moment.',
+  'El servicio no está disponible. Probá más tarde.':
+      'The service is unavailable. Try again later.',
+  'No se pudo completar la operación': 'The operation could not be completed',
 };
