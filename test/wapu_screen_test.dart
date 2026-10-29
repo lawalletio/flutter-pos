@@ -1887,7 +1887,9 @@ void main() {
       expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
       expect(find.text('t1'), findsOneWidget, reason: 'the id, in the receipt');
       expect(find.text('Comprado'), findsOneWidget);
-      expect(find.text('12.500 SAT'), findsOneWidget);
+      expect(find.text('12.521 SAT'), findsOneWidget, reason: 'purchased');
+      expect(find.text('21 SAT'), findsOneWidget, reason: 'the network fee');
+      expect(find.text('12.500 SAT'), findsOneWidget, reason: 'the total');
       expect(find.text('Depósito del cliente'), findsOneWidget);
       expect(find.text('15.000,37 ARS'), findsOneWidget);
       expect(find.text(_hash), findsNothing,

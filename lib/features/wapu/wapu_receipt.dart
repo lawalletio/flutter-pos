@@ -74,7 +74,7 @@ class WapuReceipt extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _row(context.tr(o.status == 'COMPLETED' ? 'Comprado' : 'Monto'),
-                  _sats(o.amountOut)),
+                  _sats(o.purchasedSats)),
               if (created != null)
                 _row(context.tr('Fecha'), _date.format(created.toLocal())),
               divider,
@@ -83,9 +83,12 @@ class WapuReceipt extends StatelessWidget {
               _row(context.tr('Para'), shortDestination(o.payoutAddress)),
               divider,
               _idRow(context),
-              _row(context.tr('Comisión de la operación'), _sats(o.feeSats)),
+              _row(context.tr('Comisión de la operación'),
+                  _sats(o.networkFeeOut)),
               _row(context.tr(deposit), '${formatPesos(o.amountArsCents)} ARS'),
-              _row(context.tr('Total'), _sats(o.totalSats)),
+              // The sats the customer received, as in the headline: fewer than
+              // the purchased ones, by the fee and Wapu's commission.
+              _row(context.tr('Total'), _sats(o.amountOut)),
             ],
           ),
         ),

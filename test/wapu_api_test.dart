@@ -546,26 +546,27 @@ void main() {
     expect(bare.fundingAmountUsdt, isNull);
   });
 
-  test('totalSats and feeSats put the commission into the sats', () {
-    // Sats, network fee, total and funding in USDT cents, then what the
-    // receipt says: the total in sats, and the fee as that minus the sats.
-    for (final (out, networkFee, total, funding, wantTotal, wantFee)
-        in <(int, Object?, Object?, Object?, int, int)>[
+  test('purchasedSats puts the commission into the sats', () {
+    // Sats, network fee, total and funding in USDT cents, then what the ARS
+    // bought in sats: the receipt's purchased, above the sats and the fee by
+    // the commission.
+    for (final (out, networkFee, total, funding, want)
+        in <(int, Object?, Object?, Object?, int)>[
       // (10,000 + 3) sats * 1000 / 975: 10,259.49, so a 2.5% commission.
-      (10000, 3, 1000, 975, 10259, 259),
+      (10000, 3, 1000, 975, 10259),
       // A half rounds up.
-      (1, 0, 3, 2, 2, 1),
-      // No commission leaves the network fee alone.
-      (10000, 3, 1000, 1000, 10003, 3),
+      (1, 0, 3, 2, 2),
+      // No commission leaves the sats and the network fee alone.
+      (10000, 3, 1000, 1000, 10003),
       // No network fee in the body is no fee.
-      (10000, null, 1000, 975, 10256, 256),
+      (10000, null, 1000, 975, 10256),
       // Without figures that can scale it, the sats and the network fee.
-      (10000, 3, null, null, 10003, 3),
-      (10000, 3, 1000, null, 10003, 3),
-      (10000, 3, null, 975, 10003, 3),
-      (10000, 3, 1000, 0, 10003, 3),
-      (10000, 3, 1000, -5, 10003, 3),
-      (10000, 3, 0, 975, 10003, 3),
+      (10000, 3, null, null, 10003),
+      (10000, 3, 1000, null, 10003),
+      (10000, 3, null, 975, 10003),
+      (10000, 3, 1000, 0, 10003),
+      (10000, 3, 1000, -5, 10003),
+      (10000, 3, 0, 975, 10003),
     ]) {
       final o = WapuOrder.fromJson(orderJson({
         'amount_out': out,
@@ -574,9 +575,8 @@ void main() {
         'funding_amount_usdt': funding,
       }));
 
-      final why = '$out + $networkFee sats, $total over $funding';
-      expect(o.totalSats, wantTotal, reason: why);
-      expect(o.feeSats, wantFee, reason: why);
+      expect(o.purchasedSats, want,
+          reason: '$out + $networkFee sats, $total over $funding');
     }
   });
 
