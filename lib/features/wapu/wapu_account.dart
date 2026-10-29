@@ -55,9 +55,16 @@ class WapuAccounts {
   /// unreadable. An empty address never has one.
   Future<WapuCredentials?> load(String merchantAddress) async {
     final id = _id(merchantAddress);
-    return id.isEmpty ? null : (await _readAll())[id];
+    if (id.isEmpty) return null;
+    try {
+      return (await _readAll())[id];
+    } catch (_) {
+      return null; // no key for now, and the store is left as it is
+    }
   }
 
+  /// Throws when the store cannot be read, so as not to write over entries it
+  /// could not see. So does [forget].
   Future<void> save(String merchantAddress, WapuCredentials c) async {
     final id = _id(merchantAddress);
     if (id.isEmpty) return;
@@ -72,18 +79,15 @@ class WapuAccounts {
   }
 
   /// Every entry that can be read, and nothing else: it never changes the
-  /// store. A read that fails (a locked or busy Keystore) counts as no keys for
-  /// this call, and must not cost any merchant theirs. On Android the plugin
-  /// itself resets its storage after the Keystore key is lost. Each entry is
-  /// parsed on its own, so a malformed one is skipped and the others stay. Text
-  /// that is not our map reads as empty, and a save then starts the map over.
+  /// store. A read that fails (a locked or busy Keystore) throws, which [load]
+  /// counts as no key, and which stops [save] and [forget] from writing over
+  /// entries they could not see: it must not cost any merchant theirs. On
+  /// Android the plugin itself resets its storage after the Keystore key is
+  /// lost. Each entry is parsed on its own, so a malformed one is skipped and
+  /// the others stay. Text that is not our map reads as empty, and a save then
+  /// starts the map over.
   Future<Map<String, WapuCredentials>> _readAll() async {
-    final String? raw;
-    try {
-      raw = await _storage.read(key: _storageKey);
-    } catch (_) {
-      return {};
-    }
+    final raw = await _storage.read(key: _storageKey);
     if (raw == null) return {};
     final Object? decoded;
     try {

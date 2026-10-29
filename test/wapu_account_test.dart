@@ -156,11 +156,29 @@ void main() {
     final accounts = WapuAccounts(storage: const _BrokenStorage());
 
     expect(await accounts.load('a@x.ar'), isNull);
-    await accounts.forget('a@x.ar');
 
     expect(await _raw(), _saved);
     // Once the store reads again, the key is still there.
     expect((await WapuAccounts().load('a@x.ar'))?.apiKey, 'k');
+  });
+
+  test('a save or a forget does not write over what a failed read missed',
+      () async {
+    FlutterSecureStorage.setMockInitialValues({'wapu.accounts': _saved});
+    final accounts = WapuAccounts(storage: const _BrokenStorage());
+
+    // Rewriting the map from nothing would drop the entries it could not see,
+    // and a forget that did nothing must not look like it worked.
+    await expectLater(
+      accounts.save('b@x.ar', const WapuCredentials(apiKey: 'kb')),
+      throwsA(isA<PlatformException>()),
+    );
+    await expectLater(
+      accounts.forget('a@x.ar'),
+      throwsA(isA<PlatformException>()),
+    );
+
+    expect(await _raw(), _saved);
   });
 
   test('storage that is not our map is never deleted', () async {
