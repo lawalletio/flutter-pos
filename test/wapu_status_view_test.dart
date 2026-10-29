@@ -377,13 +377,18 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('with any other payout status shows the raw status',
+    testWidgets('with any other payout status says the sats are on their way',
         (tester) async {
-      await show(tester, _order(status: 'EXECUTED', payoutStatus: 'pending'));
+      // The ARS was received, whatever the payout says: never the raw status.
+      for (final payout in ['pending', 'failed', '']) {
+        await show(tester, _order(status: 'EXECUTED', payoutStatus: payout));
 
-      expect(find.text('EXECUTED'), findsOneWidget);
-      expect(find.text('Pago recibido. Enviando los sats…'), findsNothing);
-      expect(find.text('En revisión'), findsNothing);
+        expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget,
+            reason: payout);
+        expect(find.text('EXECUTED'), findsNothing, reason: payout);
+        expect(find.text('En revisión'), findsNothing, reason: payout);
+        expect(newSaleBig, findsNothing, reason: payout);
+      }
       await tester.pumpWidget(const SizedBox());
     });
   });

@@ -62,10 +62,12 @@ class WapuStatusView extends StatelessWidget {
       ('CREATED', _) when o.isInProgress(now) => _created(context),
       ('EXPIRED', _) when o.watchPending => _lateWatch(context),
       ('CREATED' || 'EXPIRED', _) => _closed(context),
-      ('EXECUTED', 'sending') => [
+      ('EXECUTED', 'review') => _review(context),
+      // The ARS was received, so any other payout status (sending, or one that
+      // is not known here) is the sats on their way, never the raw status.
+      ('EXECUTED', _) => [
           _title(context.tr('Pago recibido. Enviando los sats…')),
         ],
-      ('EXECUTED', 'review') => _review(context),
       ('COMPLETED', _) => _completed(context),
       ('SETTLED_TO_BALANCE', _) => _settled(context),
       _ => [_title(o.status)],
