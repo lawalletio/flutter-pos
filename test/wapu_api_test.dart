@@ -116,6 +116,21 @@ final copy = <(String, WapuApiException, bool, String, String)>[
     'The server did not respond. Try again.',
   ),
   (
+    '400',
+    http(400, 'lightning address rejected: no such user'),
+    false,
+    'La lightning address o el monto no son válidos',
+    'The lightning address or the amount is not valid',
+  ),
+  (
+    // The backend raises it before it creates anything.
+    '400 while creating',
+    http(400, 'payout_address is required'),
+    true,
+    'La lightning address o el monto no son válidos',
+    'The lightning address or the amount is not valid',
+  ),
+  (
     '401',
     http(401, 'invalid key'),
     false,
@@ -806,7 +821,7 @@ void main() {
     expect(inProgress({'status': 'COMPLETED'}), isFalse);
   });
 
-  test('wapuErrorKey maps 401, 403-beta, 409, 503 and unknown', () {
+  test('wapuErrorKey maps 400, 401, 403-beta, 409, 503 and unknown', () {
     for (final (what, error, creating, key, _) in copy) {
       expect(wapuErrorKey(error, creating: creating), key, reason: what);
     }

@@ -320,6 +320,8 @@ String wapuErrorKey(WapuApiException e, {bool creating = false}) {
   if (e.timeout) return 'El servidor no respondió. Probá de nuevo.';
   final message = e.message.toLowerCase();
   return switch (code) {
+    // Raised before anything is created, so it reads the same on a create.
+    400 => 'La lightning address o el monto no son válidos',
     401 => 'La API key no es válida',
     403 when message.contains('beta') =>
       'Tu cuenta Wapu no tiene Beta features activado',

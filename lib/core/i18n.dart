@@ -375,6 +375,8 @@ const Map<String, String> _en = {
       "We don't know if the order was created. Check the History before retrying.",
   'El servidor no respondió. Probá de nuevo.':
       'The server did not respond. Try again.',
+  'La lightning address o el monto no son válidos':
+      'The lightning address or the amount is not valid',
   'La API key no es válida': 'The API key is not valid',
   'Tu cuenta Wapu no tiene Beta features activado':
       'Your Wapu account does not have Beta features on',

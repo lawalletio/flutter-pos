@@ -1398,6 +1398,12 @@ void main() {
       for (final (code, said, copy, unknown) in [
         (500, 'internal error', unknownOutcome, true),
         (
+          400,
+          'lightning address rejected: no such user',
+          'La lightning address o el monto no son válidos',
+          false,
+        ),
+        (
           503,
           'payout provider unavailable',
           'El servicio no está disponible. Probá más tarde.',
@@ -1423,7 +1429,7 @@ void main() {
         expect(amount, findsOneWidget);
         expect(confirmAction(tester), isNotNull);
       }
-      expect(calls(_createRoute), 3);
+      expect(calls(_createRoute), 4);
 
       net.routes[_createRoute] = createdReply();
       await tester.tap(confirm);
