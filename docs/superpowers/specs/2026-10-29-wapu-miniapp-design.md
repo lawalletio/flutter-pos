@@ -30,9 +30,9 @@ The mini-app drives the WapuPay ramp-on (`type=crypto_purchase`) with the mercha
    - the backend URL, an advanced field that defaults to `https://be-prod.wapu.app`;
    - a **Beta features** switch.
 6. **Beta features.** The switch is the WapuPay account's `beta_version`, the flag that enables buying in wapu-app.
-   - It is on by default: saving a key turns it on.
+   - It is on by default. Saving a key sets the account's flag to match the switch, on or off.
    - If the merchant turns it off, the backend rejects new orders with 403 and the mini-app says why.
-7. **New sale at any time.** "Nueva venta" (new sale) is always reachable and returns to the destination step. The order in progress is abandoned and expires on its own, because the backend has no cancel. If the order already shows bank details, the POS asks for confirmation first.
+7. **New sale at any time.** "Nueva venta" (new sale) is reachable at any time except while an order is being created or funded, and returns to the destination step. The order in progress is abandoned and expires on its own, because the backend has no cancel. If the order already shows bank details, the POS asks for confirmation first.
 8. **History.** A "Historial" (history) button lists the account's ARS to Lightning orders, with in-progress orders first. Tapping one reopens its status and resumes polling.
 9. **Name.** The mini-app is called "Wapu", with the subtitle "Bitcoin sin KYC".
 10. **Platform.** Only the Android APK is in scope.
@@ -167,7 +167,7 @@ All copy is Spanish source text with English translations (`context.tr`).
 5. **Historial.** The app bar button opens the `/wapu/historial` route.
    - It lists orders: in-progress first (`watch_pending`, or CREATED and not expired), then the rest, keeping the API's order within each group.
    - Tapping an order pops its id back to the sale screen, which opens its status.
-6. **Nueva venta.** The app bar button works from every step. It asks for confirmation when the current order is FUNDING_ISSUED.
+6. **Nueva venta.** The app bar button works from every step, except while an order is being created or funded. It asks for confirmation when the current order is FUNDING_ISSUED.
 7. **Config.**
    - The key field is obscured. Once a key is saved, it shows only the key's last 4 characters.
    - Saving validates the key with `GET /users/user-settings`. A 401 shows "invalid key"; nothing is saved.

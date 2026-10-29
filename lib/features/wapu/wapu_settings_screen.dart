@@ -9,7 +9,8 @@ import 'wapu_account.dart';
 import 'wapu_api.dart';
 import 'wapu_error_text.dart';
 
-/// The fallback copy of [wapuErrorKey]: also what a failed storage write says.
+/// The fallback copy of [wapuErrorKey]: also what a failed storage read or
+/// write says.
 const _generic = 'No se pudo completar la operación';
 
 /// The WapuPay key, backend URL and Beta features switch of the signed-in POS
@@ -159,7 +160,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
     } on WapuApiException catch (e) {
       error = e;
     } catch (_) {
-      error = _generic; // the storage write failed
+      error = _generic; // the storage read or write failed
     }
     _finish(error);
   }
@@ -173,7 +174,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
     try {
       await wapuAccounts.forget(_merchant);
     } catch (_) {
-      error = _generic; // the storage write failed
+      error = _generic; // the storage read or write failed
     }
     _finish(error);
   }

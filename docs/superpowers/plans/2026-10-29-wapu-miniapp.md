@@ -313,6 +313,7 @@
 - **Entry states:**
   - Empty merchant shows `'Ingresá con la dirección del comercio para usar Wapu'`.
   - No credentials shows `'Configurá tu API key de Wapu'`, plus a `'Configurar'` button (`Key('wapu-setup')`) that runs the gear action.
+    - While the till is locked, the button is replaced by the copy `'Desbloqueá el POS para configurar Wapu'` (English: `'Unlock the POS to set up Wapu'`), as the gear is hidden: the config stays out of reach.
 - **Destination step:**
   - A `TextField` (`Key('wapu-destination')`) with hint `'nombre@dominio.com'` and label `'Lightning address del cliente'`.
   - A `'Escanear QR'` button that pushes `TokenScanPage(prompt: context.tr('Escaneá la lightning address del cliente'))` and puts the popped raw text into the field.
@@ -338,7 +339,7 @@
     - `normalizes and validates the address`: entering `'  LIGHTNING:Alice@Example.COM '` makes `lnurl.validate` receive `'alice@example.com'`, and the destination field is gone, so the step advanced.
     - `switching POS user resets to that user's state`: with merchant A having a key, change `merchantAddress.value` to B, which has no key, and the setup copy appears.
     - `the manifest lists Wapu`: `miniapps.any((m) => m.route == '/wapu' && m.sublabel == 'Bitcoin sin KYC')`.
-    - `lock map covers the subroutes`: `lockableFlows['/wapu']` contains all three paths.
+    - `lock map covers the sale and its history, not the config`: `lockableFlows['/wapu']` is exactly the two paths `/wapu` and `/wapu/historial`.
 - [ ] **Step 2: Run the tests and see them fail.**
 - [ ] **Step 3: Implement**, and add the `_en` entries for every new string, including `'Bitcoin sin KYC'` → `'Bitcoin without KYC'`.
 - [ ] **Step 4: Run the tests and analyze.** Also run `flutter test test/miniapps_test.dart test/rueda_screen_test.dart` to check that registration broke nothing.
