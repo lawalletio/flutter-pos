@@ -585,9 +585,28 @@ void main() {
     expect(list.map((o) => o.id), ['a', 'e']);
   });
 
-  test('orders is empty when the list is missing', () async {
+  test('orders throws when the reply has no list of tentatives', () async {
+    // An empty history would look like "the order was not created".
+    for (final body in <Object>[
+      <String, Object?>{},
+      '<html/>',
+      {'tentatives': null},
+      {'tentatives': <String, Object?>{}},
+    ]) {
+      final net = FakeNet({
+        'GET /transactions/direct-fiat/tentatives': (200, body),
+      });
+
+      final e = await failure(apiWith(net).orders());
+
+      expect(e.message, 'unexpected response', reason: '$body');
+      expect(e.statusCode, isNull, reason: '$body');
+    }
+  });
+
+  test('orders is empty when the account has no orders', () async {
     final net = FakeNet({
-      'GET /transactions/direct-fiat/tentatives': (200, {}),
+      'GET /transactions/direct-fiat/tentatives': (200, {'tentatives': []}),
     });
 
     expect(await apiWith(net).orders(), isEmpty);

@@ -219,11 +219,14 @@ class WapuApi {
       _singleOrder(await _send('GET', _tentative(orderId)));
 
   /// The account's ARS to Lightning orders, in the order the API lists them.
-  /// An entry with no id cannot be followed, so it is left out.
+  /// An entry with no id cannot be followed, so it is left out. A reply without
+  /// the list throws: read as an empty history, it would say that no order was
+  /// created.
   Future<List<WapuOrder>> orders() async {
     final all = (await _send('GET', '$_direct/tentatives'))['tentatives'];
+    if (all is! List) throw _unexpected;
     return [
-      for (final o in all is List ? all : const [])
+      for (final o in all)
         if (o is Map<String, dynamic>) WapuOrder.fromJson(o),
     ]
         .where((o) =>
