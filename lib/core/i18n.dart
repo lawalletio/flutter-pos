@@ -415,6 +415,7 @@ const Map<String, String> _en = {
   'No se pudo verificar la lightning address':
       'The Lightning address could not be verified',
   'El cliente recibe': 'The customer receives',
+  'El cliente paga': 'The customer pays',
   'Tipo de cambio': 'Exchange rate',
   ' por BTC': ' per BTC',
   'Comisión incluida': 'Fee included',

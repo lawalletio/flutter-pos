@@ -37,7 +37,17 @@ const _maxDigits = 12;
 final _pesos = NumberFormat.decimalPattern('es_AR');
 final _percent = NumberFormat('0.00', 'es_AR');
 
+/// What the customer pays when it is not what was typed: to the centavo.
+final _pesosAndCents = NumberFormat.decimalPattern('es_AR')
+  ..minimumFractionDigits = 2
+  ..maximumFractionDigits = 2;
+
 String _satsText(int sats) => '${formatToPreference(Currency.sat, sats)} sats';
+
+/// Whether [a] and [b] are the same key on the same backend. A reload hands
+/// back a new object each time, so the fields are what is compared.
+bool _sameAccount(WapuCredentials? a, WapuCredentials? b) =>
+    a?.apiKey == b?.apiKey && a?.baseUrl == b?.baseUrl;
 
 /// The Wapu sale. It needs a signed-in POS user with a saved WapuPay key, and
 /// says so when either is missing. With both, the operator scans or types the
@@ -154,6 +164,9 @@ class _WapuScreenState extends State<WapuScreen> {
     final credentials = await wapuAccounts.load(merchantAddress.value);
     if (!mounted || load != _loads) return;
     setState(() {
+      // Another key or backend (the config changed them): a price from the old
+      // one is not this one's, so none stays on screen to be confirmed.
+      if (!_sameAccount(_credentials, credentials)) _clearAmount();
       _credentials = credentials;
       _loaded = true;
     });
@@ -532,7 +545,9 @@ class _WapuScreenState extends State<WapuScreen> {
 
   /// What stands in the way of the order, if anything, then what the customer
   /// gets for the amount. The warnings come first: on a short screen the lines
-  /// scroll, and a Confirmar that is off must say why where it can be seen.
+  /// scroll, and a Confirmar that is off must say why where it can be seen. In
+  /// sats mode the pesos are not what was typed, so what the customer pays leads
+  /// the lines: the operator reads it before confirming.
   List<Widget> _quoteLines(BuildContext context, WapuQuote q) {
     final rate = '\$ ${_pesos.format(q.arsPerBtc.round())}';
     final minimum = '\$ ${_pesos.format(q.minAmountArsCents ~/ 100)}';
@@ -552,6 +567,9 @@ class _WapuScreenState extends State<WapuScreen> {
           padding: EdgeInsets.only(bottom: 8),
           child: WapuErrorText(WapuApiException('', statusCode: 409)),
         ),
+      if (_mode == _Mode.sats)
+        _line(context, 'El cliente paga',
+            '\$ ${_pesosAndCents.format(q.amountArsCents / 100)}'),
       _line(context, 'El cliente recibe', _satsText(q.amountOut)),
       _line(context, 'Tipo de cambio', '$rate${context.tr(' por BTC')}'),
       _line(context, 'Comisión incluida', '${_percent.format(q.feePercent)}%'),

@@ -756,6 +756,41 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('sats mode shows the ARS the customer pays', (tester) async {
+      net.routes[_quoteRoute] = quoteReply(ars: 22400, out: 50000);
+      await toAmount(tester);
+
+      await tester.tap(inSats);
+      await tester.pump();
+      await typeDigits(tester, '50000');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(line('El cliente paga', '\$ 224,00'), findsOneWidget);
+      expect(line('El cliente recibe', '50.000 sats'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('El cliente paga')).dy,
+          lessThan(tester.getTopLeft(find.text('El cliente recibe')).dy),
+          reason: 'the figure the operator must see comes first');
+
+      // To the centavo, with the thousands grouped by dots.
+      net.routes[_quoteRoute] = quoteReply(ars: 123456705, out: 500000);
+      await typeDigits(tester, '0');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(line('El cliente paga', '\$ 1.234.567,05'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('pesos mode has no El cliente paga line', (tester) async {
+      net.routes[_quoteRoute] = quoteReply(ars: 22400, out: 50000);
+      await toAmount(tester);
+
+      await typeDigits(tester, '224');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(line('El cliente recibe', '50.000 sats'), findsOneWidget);
+      expect(find.text('El cliente paga'), findsNothing,
+          reason: 'what was typed is what the customer pays');
+      expect(find.textContaining('224,00'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     group('stale quotes are ignored', () {
       testWidgets('two edits less than 500 ms apart send one request',
           (tester) async {
@@ -992,6 +1027,67 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('a base URL changed in the config drops the old quote',
+        (tester) async {
+      final asked =
+          <String>[]; // the backend of each client the screens ask for
+      final swapped = wapuApiFor;
+      wapuApiFor = (baseUrl, apiKey) {
+        asked.add(baseUrl);
+        return swapped(baseUrl, apiKey);
+      };
+      await toAmount(tester);
+      await typeDigits(tester, '15000');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(confirmAction(tester), isNotNull);
+
+      await tester.tap(gear); // no PIN is set: straight in
+      await settle(tester);
+      await tester.tap(find.byType(ExpansionTile)); // Avanzado
+      await settle(tester);
+      await tester.enterText(
+          find.byKey(const Key('wapu-url')), 'be-stage.wapu.app');
+      await tester.tap(find.byKey(const Key('wapu-save'))); // keeps the key
+      await settle(tester);
+
+      expect(find.byType(WapuSettingsScreen), findsNothing);
+      expect(amount, findsOneWidget,
+          reason: 'the sale goes on from the amount');
+      expect(find.text('\$ 0'), findsOneWidget);
+      expect(find.text('El cliente recibe'), findsNothing,
+          reason: "the old backend's price is not the new one's");
+      expect(confirmAction(tester), isNull);
+
+      await typeDigits(tester, '15000');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(confirmAction(tester), isNotNull);
+      expect(asked.first, kWapuDefaultBaseUrl);
+      expect(asked.last, 'https://be-stage.wapu.app',
+          reason: 'the new price is asked of the new backend');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a config closed with the same account keeps the amount',
+        (tester) async {
+      await toAmount(tester);
+      await typeDigits(tester, '15000');
+      await tester.pump(const Duration(milliseconds: 600));
+
+      await tester.tap(gear);
+      await settle(tester);
+      expect(find.byType(WapuSettingsScreen), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.arrow_back)); // nothing changed
+      await settle(tester);
+
+      expect(find.byType(WapuSettingsScreen), findsNothing);
+      expect(find.text('\$ 15.000'), findsOneWidget);
+      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(confirmAction(tester), isNotNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('the amount step is translated', (tester) async {
       net.routes[_quoteRoute] =
           quoteReply(ars: 50000, min: 2000000, liquidity: false);
@@ -1015,6 +1111,13 @@ void main() {
       await typeDigits(tester, '0');
       await tester.pump(const Duration(milliseconds: 600));
       expect(find.text('The amount is out of range'), findsOneWidget);
+
+      net.routes[_quoteRoute] = quoteReply(ars: 22400, out: 50000);
+      await tester.tap(inSats);
+      await tester.pump();
+      await typeDigits(tester, '5');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(line('The customer pays', '\$ 224,00'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });
