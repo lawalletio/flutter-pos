@@ -680,6 +680,29 @@ void main() {
     }
   });
 
+  test('on create, a server fault is an unknown outcome but 503 is not', () {
+    const unknown =
+        'No sabemos si la orden se creó. Revisá el Historial antes de reintentar.';
+
+    for (final code in [500, 502, 504]) {
+      expect(
+          wapuErrorKey(http(code, 'upstream failed'), creating: true), unknown,
+          reason: '$code');
+    }
+    // The backend raises 503 before it creates anything.
+    expect(
+        wapuErrorKey(http(503, 'lightning address unreachable'),
+            creating: true),
+        'El servicio no está disponible. Probá más tarde.');
+    // A refusal below 500 created nothing either.
+    expect(
+        wapuErrorKey(http(422, 'amount too small for the fee'), creating: true),
+        'El monto está fuera de los límites');
+    // Off a create, a server fault is just a failure.
+    expect(wapuErrorKey(http(500, 'upstream failed')),
+        'No se pudo completar la operación');
+  });
+
   test('every error key has an English entry', () {
     final en = AppLocalizations(AppLanguage.en);
 
