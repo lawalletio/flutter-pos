@@ -22,6 +22,8 @@ import 'package:lawallet_pos/features/wapu/wapu_account.dart';
 import 'package:lawallet_pos/features/wapu/wapu_api.dart';
 import 'package:lawallet_pos/features/wapu/wapu_history_screen.dart';
 import 'package:lawallet_pos/features/wapu/wapu_screen.dart';
+import 'package:lawallet_pos/features/wapu/wapu_status_view.dart'
+    show WapuStatusView;
 
 const _me = 'shop@lacrypta.ar';
 const _other = 'other@lacrypta.ar';
@@ -717,6 +719,59 @@ void main() {
       ]) {
         expect(find.text(text), findsOneWidget, reason: text);
       }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an expired order from the History shows its details',
+        (tester) async {
+      net.routes[_listRoute] =
+          listReply([orderJson('d', status: 'EXPIRED', watch: false)]);
+      net.routes[_read('d')] =
+          (200, orderJson('d', status: 'EXPIRED', watch: false));
+      await open(tester);
+
+      await pick(tester, 'd');
+
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.text('No se recibieron ARS ni se enviaron sats.'),
+          findsOneWidget);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('Vencida'), findsOneWidget);
+      expect(find.text('Depósito esperado'), findsOneWidget);
+      expect(find.byKey(const Key('wapu-new-sale-big')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_read('d')), 1, reason: 'nothing is left to wait for');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an order past its window is expired, and is read, not ticked',
+        (tester) async {
+      // The backend still says FUNDING_ISSUED, and still watches it.
+      net.routes[_listRoute] =
+          listReply([orderJson('e', expiresIn: const Duration(minutes: -1))]);
+      net.routes[_read('e')] =
+          (200, orderJson('e', expiresIn: const Duration(minutes: -1)));
+      await open(tester);
+
+      await pick(tester, 'e');
+
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.textContaining('Vence en'), findsNothing);
+      expect(find.text('alias.e'), findsNothing);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.byKey(const Key('wapu-new-sale-big')), findsNothing,
+          reason: 'still watched: the app bar has Nueva venta');
+      // No clock repaints it: its `now` stays while the polls come at 10 s.
+      final view = find.byType(WapuStatusView);
+      final last = tester.widget<WapuStatusView>(view).now;
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(seconds: 5));
+      expect(tester.widget<WapuStatusView>(view).now, last);
+      expect(calls(_read('e')), 1);
+
+      await tester.pump(const Duration(seconds: 5));
+      expect(calls(_read('e')), 2, reason: 'it is still read');
       await tester.pumpWidget(const SizedBox());
     });
 

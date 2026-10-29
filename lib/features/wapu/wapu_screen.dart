@@ -61,11 +61,13 @@ Future<_Answer<T>> _answer<T>(Future<T> Function() call) async {
 }
 
 /// Whether the view of [o] changes with the clock at [now]: the countdown of an
-/// order that waits for the transfer, and the window of a created one, which
-/// closes into "Orden vencida" with no news from the backend.
+/// order that waits for the transfer, and the window of a created one. Both
+/// close into "Orden vencida" with no news from the backend, and with the
+/// window closed nothing moves with the clock any more: the repaint that
+/// crosses it is the last.
 bool _ticks(WapuOrder o, DateTime now) =>
-    o.status == 'FUNDING_ISSUED' ||
-    (o.status == 'CREATED' && (o.expiresAt?.isAfter(now) ?? false));
+    (o.status == 'FUNDING_ISSUED' || o.status == 'CREATED') &&
+    (o.expiresAt?.isAfter(now) ?? false);
 
 /// Whether [a] and [b] are the same key on the same backend. A reload hands
 /// back a new object each time, so the fields are what is compared.

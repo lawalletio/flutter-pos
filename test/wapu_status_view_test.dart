@@ -94,6 +94,18 @@ final _expired = _order(
   watchPending: false,
 );
 
+/// Its window closed 3 s ago and the poll has not said so yet: the backend
+/// still calls it FUNDING_ISSUED, and still watches it.
+final _waitingPastExpiry = _order(
+  alias: _alias,
+  cvu: _cvu,
+  expiresAt: _now.subtract(const Duration(seconds: 3)),
+  lateWatchUntil: _lateWatchUntil,
+);
+
+/// What the view says of an order that expired, in Spanish.
+const _noArs = 'No se recibieron ARS ni se enviaron sats.';
+
 final _sending = _order(status: 'EXECUTED', payoutStatus: 'sending');
 final _review = _order(status: 'EXECUTED', payoutStatus: 'review');
 
@@ -260,17 +272,72 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('counts down to zero and no further', (tester) async {
+    testWidgets('counts down to the last second, and then it has expired',
+        (tester) async {
       await show(
           tester,
           _order(
               alias: _alias,
               cvu: _cvu,
+              expiresAt: _now.add(const Duration(seconds: 1))));
+
+      expect(find.text('Vence en 00:01'), findsOneWidget);
+      expect(find.text(_alias), findsOneWidget);
+      expect(receipt, findsNothing);
+
+      // At the expiry there is no 00:00 to show: the order is over.
+      await show(tester, _order(alias: _alias, cvu: _cvu, expiresAt: _now));
+
+      expect(find.textContaining('Vence en'), findsNothing);
+      expect(find.text('Esperando la transferencia'), findsNothing);
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(receipt, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('past its expiry shows the details, not a stuck countdown',
+        (tester) async {
+      await show(tester, _waitingPastExpiry);
+
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.text(_noArs), findsOneWidget);
+      expect(
+          find.text('Si el cliente ya transfirió, '
+              'lo seguimos buscando hasta las $_lateWatchClock'),
+          findsOneWidget);
+      expect(find.textContaining('Vence en'), findsNothing);
+      for (final gone in [
+        'Esperando la transferencia',
+        'Alias',
+        'Monto exacto',
+        'Copiar',
+        _alias,
+      ]) {
+        expect(find.text(gone), findsNothing, reason: gone);
+      }
+      // The receipt of an order that expired: nothing was deposited.
+      expect(receipt, findsOneWidget);
+      expect(find.text('Estado'), findsOneWidget);
+      expect(find.text('Vencida'), findsOneWidget);
+      expect(find.text('Depósito esperado'), findsOneWidget);
+      expect(find.text('15.000,37 ARS'), findsOneWidget);
+      expect(newSaleBig, findsNothing, reason: 'still being watched');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('past its expiry and no longer watched offers Nueva venta',
+        (tester) async {
+      await show(
+          tester,
+          _order(
+              alias: _alias,
+              cvu: _cvu,
+              watchPending: false,
               expiresAt: _now.subtract(const Duration(seconds: 3))));
 
-      expect(find.text('Vence en 00:00'), findsOneWidget);
-      expect(find.text(_alias), findsOneWidget,
-          reason: 'until the poll closes');
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.textContaining('lo seguimos buscando'), findsNothing);
+      expect(newSaleBig, findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -279,6 +346,8 @@ void main() {
 
       expect(find.textContaining('Vence en'), findsNothing);
       expect(find.text(_alias), findsOneWidget);
+      expect(find.text('Orden vencida'), findsNothing,
+          reason: 'with no expiry the window never closes');
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -316,7 +385,11 @@ void main() {
       await show(tester, _createdPastExpiry);
 
       expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.text(_noArs), findsOneWidget);
       expect(fund, findsNothing);
+      expect(find.text('Orden creada'), findsNothing);
+      expect(receipt, findsOneWidget);
+      expect(find.text('Vencida'), findsOneWidget);
       expect(newSaleBig, findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
@@ -327,12 +400,15 @@ void main() {
         (tester) async {
       await show(tester, _lateWatch);
 
-      expect(find.text('Venció el plazo'), findsOneWidget);
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.text(_noArs), findsOneWidget);
       expect(
           find.text('Si el cliente ya transfirió, '
               'lo seguimos buscando hasta las $_lateWatchClock'),
           findsOneWidget);
-      expect(find.text('Orden vencida'), findsNothing);
+      expect(find.text('Alias'), findsNothing,
+          reason: 'there is no transfer to ask for any more');
+      expect(receipt, findsOneWidget);
       expect(newSaleBig, findsNothing, reason: 'still being watched');
       await tester.pumpWidget(const SizedBox());
     });
@@ -341,17 +417,30 @@ void main() {
         (tester) async {
       await show(tester, _order(status: 'EXPIRED', payoutStatus: 'expired'));
 
-      expect(find.text('Venció el plazo'), findsOneWidget);
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.text(_noArs), findsOneWidget);
       expect(find.textContaining('lo seguimos buscando'), findsNothing);
+      expect(receipt, findsOneWidget);
+      expect(newSaleBig, findsNothing, reason: 'still being watched');
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('closed, says so', (tester) async {
+    testWidgets(
+        'closed, shows the receipt, says no ARS came, offers Nueva venta',
+        (tester) async {
       await show(tester, _expired);
 
       expect(find.text('Orden vencida'), findsOneWidget);
-      expect(find.text('Venció el plazo'), findsNothing);
+      expect(find.text(_noArs), findsOneWidget);
       expect(find.textContaining('lo seguimos buscando'), findsNothing);
+      expect(receipt, findsOneWidget);
+      expect(find.text('Vencida'), findsOneWidget);
+      expect(find.text('Depósito esperado'), findsOneWidget);
+      expect(find.text('Depósito del cliente'), findsNothing);
+      expect(find.text('Monto'), findsOneWidget);
+      expect(find.text('12.500 SAT'), findsOneWidget);
+      expect(find.text(_id), findsOneWidget);
+      expect(newSaleBig, findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -563,6 +652,14 @@ void main() {
       ('SETTLED_TO_BALANCE', _settled),
       ('a closed EXPIRED order', _expired),
       ('a CREATED order past its expiry', _createdPastExpiry),
+      (
+        'a FUNDING_ISSUED order past its expiry that is no longer watched',
+        _order(
+            alias: _alias,
+            cvu: _cvu,
+            watchPending: false,
+            expiresAt: _now.subtract(const Duration(seconds: 3))),
+      ),
     ]) {
       testWidgets('$state offers it, and it starts the next sale',
           (tester) async {
@@ -583,6 +680,7 @@ void main() {
       ('FUNDING_ISSUED', _waiting),
       ('CREATED', _created),
       ('EXPIRED with the late watch on', _lateWatch),
+      ('FUNDING_ISSUED past its expiry, still watched', _waitingPastExpiry),
       ('EXECUTED sending', _sending),
       ('EXECUTED review', _review),
     ]) {
@@ -614,12 +712,37 @@ void main() {
         'EXPIRED with the late watch on',
         _lateWatch,
         [
-          'The time limit has passed',
+          'Order expired',
+          'No ARS was received and no sats were sent.',
+          'If the customer already transferred, '
+              'we keep looking until $_lateWatchClock',
+          'Expired',
+          'Expected deposit',
+        ]
+      ),
+      (
+        'FUNDING_ISSUED past its expiry',
+        _waitingPastExpiry,
+        [
+          'Order expired',
+          'No ARS was received and no sats were sent.',
           'If the customer already transferred, '
               'we keep looking until $_lateWatchClock',
         ]
       ),
-      ('a closed EXPIRED order', _expired, ['Order expired', 'New sale']),
+      (
+        'a closed EXPIRED order',
+        _expired,
+        [
+          'Order expired',
+          'No ARS was received and no sats were sent.',
+          'Amount',
+          'Status',
+          'Expired',
+          'Expected deposit',
+          'New sale',
+        ]
+      ),
       ('EXECUTED sending', _sending, ['Payment received', 'Sending the sats…']),
       ('EXECUTED review', _review, ['Under review', 'Save the order ID: $_id']),
       (
@@ -733,6 +856,17 @@ void main() {
 
       expect(tester.getSize(newSaleBig).height, greaterThanOrEqualTo(74));
       expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an expired order fits, with its notes and its receipt',
+        (tester) async {
+      for (final order in [_lateWatch, _waitingPastExpiry, _expired]) {
+        await showOnTill(tester, order);
+
+        expect(tester.takeException(), isNull);
+        expect(tester.getRect(receipt).right, lessThanOrEqualTo(480));
+      }
       await tester.pumpWidget(const SizedBox());
     });
 

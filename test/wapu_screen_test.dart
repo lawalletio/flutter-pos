@@ -1957,6 +1957,10 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
 
       expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.text('No se recibieron ARS ni se enviaron sats.'),
+          findsOneWidget);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('Vencida'), findsOneWidget);
       expect(fundButton, findsNothing, reason: 'it cannot be funded any more');
       expect(find.byKey(const Key('wapu-new-sale-big')), findsOneWidget);
       // The clock stopped with the window: a repaint would hand the view a
@@ -1967,6 +1971,62 @@ void main() {
           () => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump(const Duration(seconds: 5));
       expect(tester.widget<WapuStatusView>(view).now, last);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the countdown stops with the window, and the polls go on',
+        (tester) async {
+      await toAmount(tester);
+      await price(tester);
+      // The window is set when funding is answered, 2 s from now.
+      net.routes[_fundRoute] =
+          orderReply(code: 201, expiresIn: const Duration(seconds: 2));
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget, reason: 'the order is funded');
+      expect(find.textContaining('Vence en'), findsOneWidget);
+
+      // The window reads the device's clock, which a test cannot move: let it
+      // really close, then the tick that repaints the order.
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 2100)));
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(find.text('Orden vencida'), findsOneWidget,
+          reason: 'the backend has not said so yet');
+      expect(find.textContaining('Vence en'), findsNothing,
+          reason: 'no countdown stuck at 00:00');
+      expect(find.text(_alias), findsNothing);
+      expect(find.text('No se recibieron ARS ni se enviaron sats.'),
+          findsOneWidget);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('Vencida'), findsOneWidget);
+      expect(find.byKey(const Key('wapu-new-sale-big')), findsNothing,
+          reason: 'it is still watched: the app bar has Nueva venta');
+      // The clock stopped with the window: a repaint would hand the view a
+      // later `now`, and there is none.
+      final view = find.byType(WapuStatusView);
+      final last = tester.widget<WapuStatusView>(view).now;
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(seconds: 5));
+      expect(tester.widget<WapuStatusView>(view).now, last);
+
+      // The polls did not: a transfer that lands late still moves the order on.
+      net.routes[_detailRoute] = completedReply();
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      expect(calls(_detailRoute), 1);
+      expect(find.text('¡Listo! El cliente recibió 12.500 sats'),
+          findsOneWidget);
+      expect(find.text('Orden vencida'), findsNothing);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('Completada'), findsOneWidget);
+      expect(find.text('Depósito del cliente'), findsOneWidget);
+      expect(paid(), 1);
+
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_detailRoute), 1, reason: 'and they stop with the order');
       await tester.pumpWidget(const SizedBox());
     });
 

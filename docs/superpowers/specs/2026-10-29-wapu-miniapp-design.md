@@ -161,7 +161,7 @@ All copy is Spanish source text with English translations (`context.tr`).
    - Sending, then "Listo" with the order's receipt. Reaching COMPLETED plays the existing paid sound (`AppSounds.play(AppSound.paid)`). The receipt lists the sats, the date (local time, when the body has `created_at`), the status, the destination (a BOLT11 invoice is shortened), the order id with a copy button and a QR, the fee, the ARS the customer paid and the total in sats. The total is `round((amount_out + network_fee_out) × total_amount_usdt / funding_amount_usdt)`, and the fee is that minus `amount_out`; without the two USDT figures they are `amount_out + network_fee_out` and `network_fee_out`. The History opens the same view, so it is the detail of an order too.
    - In review: tells the operator to keep the order ID.
    - Settled to balance: says the customer did not get the sats and the money is in the merchant's Wapu balance.
-   - Expired: if `watch_pending` is still true, says a late transfer is still detected until `late_watch_until`.
+   - Expired (`EXPIRED`, or `FUNDING_ISSUED` and `CREATED` once `expires_at` has passed, before the poll says so): the countdown gives way to the order's details. It says that no ARS was received and no sats were sent, and shows the receipt with the status "Vencida" and the deposit that was expected. If `watch_pending` is still true, it also says a late transfer is still detected until `late_watch_until`.
    - A CREATED order shows "Pedir datos de transferencia" (request transfer details), which calls funding.
    - Terminal states show a large "Nueva venta" button.
 5. **Historial.** The app bar button opens the `/wapu/historial` route.

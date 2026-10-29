@@ -407,10 +407,9 @@
 
 | State | Copy |
 |---|---|
-| FUNDING_ISSUED | Title `'Esperando la transferencia'`. Rows `'Alias'`, `'CVU'` and `'Monto exacto'` (`formatArsCents(amountArsCents)`), each with a copy button; the amount copies the plain decimal string `'15000.37'`. Hint `'Transferí exactamente este monto, con centavos'`. `'Vence en '` + `formatCountdown(expiresAt - now)`. |
+| FUNDING_ISSUED, `expiresAt` after `now` | Title `'Esperando la transferencia'`. Rows `'Alias'`, `'CVU'` and `'Monto exacto'` (`formatArsCents(amountArsCents)`), each with a copy button; the amount copies the plain decimal string `'15000.37'`. Hint `'Transferí exactamente este monto, con centavos'`. `'Vence en '` + `formatCountdown(expiresAt - now)`. |
 | CREATED, not expired | `'Orden creada'`, plus a `'Pedir datos de transferencia'` button (`Key('wapu-fund')`) that calls `onRequestFunding`. |
-| EXPIRED with `watchPending` | `'Venció el plazo'`, plus `'Si el cliente ya transfirió, lo seguimos buscando hasta las '` + `HH:mm`, the local time of `lateWatchUntil`. |
-| EXPIRED, or CREATED past `expiresAt` | `'Orden vencida'` |
+| EXPIRED, FUNDING_ISSUED with `expiresAt` not after `now`, or CREATED past `expiresAt` | Title `'Orden vencida'`, then `'No se recibieron ARS ni se enviaron sats.'`. With `watchPending` and `lateWatchUntil`, also `'Si el cliente ya transfirió, lo seguimos buscando hasta las '` + `HH:mm`, the local time of `lateWatchUntil`. Then the `WapuReceipt`, with the status `'Vencida'` and the deposit row `'Depósito esperado'`. The big `'Nueva venta'` shows only without `watchPending`. |
 | EXECUTED + `sending` | The Wapu logo (`Key('wapu-logo')`, `assets/images/wapu_logo.png`) on a white plate, then `'Pago recibido'`, a small spinner beside `'Enviando los sats…'`, and the sats and the payout address. |
 | EXECUTED + `review` | `'En revisión'`, plus `'Guardá el ID de la orden: '` + id |
 | COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, then the `WapuReceipt` (`lib/features/wapu/wapu_receipt.dart`, `Key('wapu-receipt')`): the rows `'Comprado'`, `'Fecha'` (only with `createdAt`), `'Estado'`, `'Para'` (`shortDestination`), the id with its copy (`Key('wapu-copy-id')`) and QR (`Key('wapu-id-qr')`) buttons, `'Comisión de la operación'`, `'Depósito del cliente'` and `'Total'`. |
@@ -452,7 +451,7 @@
   - On error it keeps the last order: a 401 shows the copy key above the view and keeps the bank details.
   - Polling stops when `!watchPending`.
   - A transition into COMPLETED calls `AppSounds.play(AppSound.paid)` once.
-  - A 1 s `Timer.periodic` repaints the countdown while the status is FUNDING_ISSUED.
+  - A 1 s `Timer.periodic` repaints the countdown while the status is FUNDING_ISSUED or CREATED and `expiresAt` is after now. It stops at the repaint that crosses `expiresAt`, and the 10 s poll goes on while `watchPending`.
   - Cancel every timer in `dispose` and on a new sale.
 - **Nueva venta (new sale):**
   - Tapping `Key('wapu-new-sale')` while the order is FUNDING_ISSUED shows a dialog titled `'Nueva venta'` with `'La orden queda abierta hasta que venza. La podés retomar desde el Historial.'` and the actions `'Cancelar'` and `'Nueva venta'`.

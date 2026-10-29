@@ -438,10 +438,11 @@ const Map<String, String> _en = {
   'Copiado': 'Copied',
   'Orden creada': 'Order created',
   'Pedir datos de transferencia': 'Request transfer details',
-  'Venció el plazo': 'The time limit has passed',
   'Si el cliente ya transfirió, lo seguimos buscando hasta las ':
       'If the customer already transferred, we keep looking until ',
   'Orden vencida': 'Order expired',
+  'No se recibieron ARS ni se enviaron sats.':
+      'No ARS was received and no sats were sent.',
   'Pago recibido': 'Payment received',
   'Enviando los sats…': 'Sending the sats…',
   'En revisión': 'Under review',

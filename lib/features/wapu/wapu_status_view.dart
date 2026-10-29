@@ -53,11 +53,14 @@ class WapuStatusView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final o = order;
+    final expiresAt = o.expiresAt;
+    final windowClosed = expiresAt != null && !expiresAt.isAfter(now);
     final List<Widget> body = switch ((o.status, o.payoutStatus)) {
-      ('FUNDING_ISSUED', _) => _waiting(context),
+      // The backend flips the status a poll after the window closes. Until it
+      // does, the clock decides: a countdown at 00:00 would be a lie.
+      ('FUNDING_ISSUED', _) when !windowClosed => _waiting(context),
       ('CREATED', _) when o.isInProgress(now) => _created(context),
-      ('EXPIRED', _) when o.watchPending => _lateWatch(context),
-      ('CREATED' || 'EXPIRED', _) => _closed(context),
+      ('FUNDING_ISSUED' || 'CREATED' || 'EXPIRED', _) => _expired(context),
       ('EXECUTED', 'review') => _review(context),
       // The ARS was received, so any other payout status (sending, or one that
       // is not known here) is the sats on their way, never the raw status.
@@ -123,20 +126,23 @@ class WapuStatusView extends StatelessWidget {
         ),
       ];
 
-  List<Widget> _lateWatch(BuildContext context) {
+  /// The window closed and no ARS came in: the details of the order, and why
+  /// there is nothing to send. While the backend still watches for a late
+  /// transfer the big Nueva venta waits, and the app bar's is the way out.
+  List<Widget> _expired(BuildContext context) {
     final until = order.lateWatchUntil;
     return [
-      _title(context.tr('Venció el plazo')),
-      if (until != null)
+      _title(context.tr('Orden vencida')),
+      _note(context.tr('No se recibieron ARS ni se enviaron sats.')),
+      if (order.watchPending && until != null)
         _note(
           '${context.tr('Si el cliente ya transfirió, lo seguimos buscando hasta las ')}'
           '${DateFormat.Hm().format(until.toLocal())}',
         ),
+      WapuReceipt(order: order),
+      if (!order.watchPending) _newSale(context),
     ];
   }
-
-  List<Widget> _closed(BuildContext context) =>
-      [_title(context.tr('Orden vencida')), _newSale(context)];
 
   /// The ARS is in and the sats are on their way. The logo sits on a white
   /// plate, or its dark outline would vanish on the dark theme.
