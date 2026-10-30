@@ -17,6 +17,8 @@ import 'package:lawallet_pos/data/lnurl/lnurl_service.dart';
 import 'package:lawallet_pos/domain/config/miniapp_pin.dart';
 import 'package:lawallet_pos/domain/config/session.dart';
 import 'package:lawallet_pos/domain/config/settings_state.dart';
+import 'package:lawallet_pos/features/cards/cards_api.dart'
+    show cardOwnerAddress;
 import 'package:lawallet_pos/features/cards/cards_widgets.dart'
     show TokenScanPage;
 import 'package:lawallet_pos/features/miniapps/miniapps.dart';
@@ -98,8 +100,9 @@ class FakeNet implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
-/// Resolves nothing: it records each address it is asked to validate, then
-/// fails or waits when told to.
+/// Resolves nothing on the network: it records each address it is asked to
+/// validate, then fails or waits when told to, and [resolve] answers the
+/// addresses of [callbacks] alone.
 class FakeLnurl extends LnurlService {
   /// Thrown by [validate].
   Object? fail;
@@ -109,11 +112,27 @@ class FakeLnurl extends LnurlService {
 
   final validated = <String>[];
 
+  /// The callback [resolve] answers for each address it knows.
+  final callbacks = <String, String>{};
+
+  final resolved = <String>[];
+
   @override
   Future<void> validate(String address) async {
     validated.add(address);
     await hold?.future;
     if (fail != null) throw fail!;
+  }
+
+  @override
+  Future<LnurlPayParams> resolve(String address) async {
+    resolved.add(address);
+    final callback = callbacks[address];
+    if (callback == null) {
+      throw LnurlException('La dirección no es una Lightning Address válida');
+    }
+    return LnurlPayParams(
+        callback: callback, minSendable: 1000, maxSendable: 100000000);
   }
 }
 
@@ -399,7 +418,8 @@ void main() {
 
   /// Pumps /wapu behind the till's lock redirect, on the Z92's portrait screen,
   /// signed in as [merchant] (nobody, when empty). With [overHub] the sale is
-  /// pushed on top of the hub, so that a back has somewhere to go.
+  /// pushed on top of the hub, so that a back has somewhere to go. The History
+  /// is a stand-in: here it is only a screen on top of the sale.
   Future<void> open(WidgetTester tester,
       {String merchant = _me,
       bool english = false,
@@ -420,6 +440,8 @@ void main() {
           routes: [
             GoRoute(
                 path: 'config', builder: (_, __) => const WapuSettingsScreen()),
+            GoRoute(
+                path: 'historial', builder: (_, __) => const Text('historial')),
           ],
         ),
       ],
@@ -814,6 +836,299 @@ void main() {
     expect(fieldText(tester), 'bob@example.com');
     expect(find.text(_notAnAddress), findsNothing);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  group('card tap', () {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const nfc = MethodChannel('pos/nfc');
+    const tags = EventChannel('pos/nfc/tags');
+
+    /// What a LaWallet card sends: where its info is, then the SUN that spends
+    /// it.
+    const card = 'lnurlw://beta.lawallet.io/api/cards/c1/scan?p=A1B2&c=C3D4';
+    const otherCard = 'lnurlw://bolt.example.com/withdraw?p=A1B2&c=C3D4';
+    const infoRoute = 'GET /api/cards/c1/scan';
+    const settingsRoute = 'GET /api/settings';
+    const reading = 'Leyendo la tarjeta…';
+
+    /// The methods the sale called on the reader.
+    final nfcCalls = <String>[];
+
+    /// Hands the sale a tap while it listens to the reader: null before it
+    /// does, and once it let go.
+    MockStreamHandlerEventSink? reader;
+
+    /// Answers the reader's methods, as a till with a reader when [available].
+    void nfcReplies({bool available = true}) =>
+        messenger.setMockMethodCallHandler(nfc, (call) async {
+          nfcCalls.add(call.method);
+          return switch (call.method) {
+            'isAvailable' => available,
+            'startSession' => true,
+            _ => null,
+          };
+        });
+
+    setUp(() {
+      seed({_me: 'key-1'});
+      nfcCalls.clear();
+      reader = null;
+      nfcReplies();
+      wapuCardAddress =
+          (url) => cardOwnerAddress(url, dio: Dio()..httpClientAdapter = net);
+      net.routes[infoRoute] = (
+        200,
+        {
+          'id': 'c1',
+          'paired': true,
+          'user': {'pubkey': 'ab12', 'username': 'ana'},
+        }
+      );
+      net.routes[settingsRoute] = (200, {'domain': 'lawallet.io'});
+      fake.callbacks['ana@lawallet.io'] =
+          'https://beta.lawallet.io/api/lud16/ana/callback';
+    });
+
+    tearDown(() {
+      messenger.setMockMethodCallHandler(nfc, null);
+      messenger.setMockStreamHandler(tags, null);
+      wapuCardAddress = cardOwnerAddress;
+    });
+
+    /// Opens the sale on a till whose reader hands its taps to [reader]. The
+    /// reader is mocked here, in the test's own zone: mocked in setUp, its taps
+    /// would only land on real time, which the pumps never let run.
+    Future<void> openWithReader(WidgetTester tester,
+        {bool english = false}) async {
+      messenger.setMockStreamHandler(
+          tags,
+          MockStreamHandler.inline(
+            onListen: (_, sink) {
+              reader = sink;
+            },
+            onCancel: (_) {
+              reader = null;
+            },
+          ));
+      await open(tester, english: english);
+    }
+
+    /// Taps [url] on the reader and lets its lookup answer.
+    Future<void> tap(WidgetTester tester, [String url = card]) async {
+      reader!.success(url);
+      await settle(tester);
+    }
+
+    /// The taps the till took, by its buzz.
+    int buzzes() => nfcCalls.where((c) => c == 'vibrate').length;
+
+    /// Holds the card's lookup until the returned completer completes.
+    Completer<void> holdLookup() {
+      final held = Completer<void>();
+      net.hold =
+          (o) => o.uri.path.startsWith('/api/') ? held.future : Future.value();
+      return held;
+    }
+
+    /// A reply of the card's instance that gives no address, and why, in
+    /// Spanish and in English.
+    final failures = [
+      (
+        (404, {'error': 'Card not found'}),
+        'No encontramos esa tarjeta',
+        'That card was not found'
+      ),
+      (
+        (200, {'id': 'c1', 'paired': false, 'user': null}),
+        'La tarjeta no tiene una lightning address',
+        'The card has no lightning address'
+      ),
+      (
+        (400, {'error': 'Bad request'}), // an instance older than the info
+        'No se pudo leer la tarjeta',
+        'The card could not be read'
+      ),
+    ];
+
+    testWidgets("a LaWallet card puts its owner's address in the field",
+        (tester) async {
+      await openWithReader(tester);
+      expect(nfcCalls, ['isAvailable', 'startSession']);
+      await submit(tester, 'hello'); // typed, and refused
+      expect(find.text(_notAnAddress), findsOneWidget);
+
+      await tap(tester);
+
+      expect(fieldText(tester), 'ana@lawallet.io',
+          reason: 'over what was typed');
+      expect(find.text(_notAnAddress), findsNothing);
+      expect(buzzes(), 1);
+      expect(net.calls, [infoRoute, settingsRoute]);
+      expect(net.hosts.toSet(), {'beta.lawallet.io'});
+      expect(net.queries.first, isEmpty, reason: 'the SUN stays on the card');
+      expect(fake.validated, isEmpty, reason: 'Continuar was not pressed');
+      expect(destination, findsOneWidget);
+
+      await tester.tap(next);
+      await settle(tester);
+      expect(fake.validated, ['ana@lawallet.io']);
+      expect(amount, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the step waits while the card is read', (tester) async {
+      final held = holdLookup();
+      await openWithReader(tester);
+      await tap(tester);
+      expect(find.text(reading), findsOneWidget);
+      expect(tester.widget<TextField>(destination).enabled, isFalse);
+      expect(tester.widget<FilledButton>(next).onPressed, isNull);
+
+      await tap(tester); // another card, while the first is read
+      expect(buzzes(), 1, reason: 'one card at a time');
+      expect(net.calls, [infoRoute]);
+
+      held.complete();
+      await settle(tester);
+      expect(find.text(reading), findsNothing);
+      expect(fieldText(tester), 'ana@lawallet.io');
+      expect(tester.widget<TextField>(destination).enabled, isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an answer for a sale that was left is dropped',
+        (tester) async {
+      final held = holdLookup();
+      await openWithReader(tester);
+      await tap(tester);
+      expect(find.text(reading), findsOneWidget);
+
+      await tester.tap(newSale);
+      await settle(tester);
+      expect(find.text(reading), findsNothing);
+      expect(tester.widget<TextField>(destination).enabled, isTrue);
+
+      held.complete();
+      await settle(tester);
+      expect(fieldText(tester), isEmpty, reason: "the old sale's card");
+
+      await tap(tester); // the new sale reads its own
+      expect(fieldText(tester), 'ana@lawallet.io');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('says why a card gave no address', (tester) async {
+      await openWithReader(tester);
+      for (final tag in [otherCard, '']) {
+        await tap(tester, tag); // another Boltcard, then a blank one
+        expect(find.text('Esa tarjeta no es de LaWallet'), findsOneWidget,
+            reason: tag);
+      }
+      expect(net.calls, isEmpty, reason: 'not ours: nothing to ask');
+      expect(fake.resolved, isEmpty);
+
+      for (final (reply, copy, _) in failures) {
+        net.routes[infoRoute] = reply;
+        await tap(tester);
+        expect(find.text(copy), findsOneWidget, reason: copy);
+      }
+      expect(fieldText(tester), isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap past the first step is not read', (tester) async {
+      net.routes[_quoteRoute] = quoteReply();
+      net.routes[_createRoute] = createdReply();
+      net.routes[_fundRoute] = orderReply(code: 201);
+      net.routes[_detailRoute] = orderReply();
+      await openWithReader(tester);
+      await submit(tester, 'alice@example.com');
+      expect(amount, findsOneWidget);
+      await tap(tester);
+
+      await typeDigits(tester, '15000');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget, reason: 'on the status');
+      await tap(tester);
+
+      expect(buzzes(), 0);
+      expect(net.calls, isNot(contains(infoRoute)));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap under another screen is not read', (tester) async {
+      await openWithReader(tester);
+      final router = GoRouter.of(tester.element(find.byType(WapuScreen)));
+
+      await tester.tap(gear);
+      await settle(tester);
+      expect(find.byType(WapuSettingsScreen), findsOneWidget);
+      await tap(tester);
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await settle(tester);
+
+      await tester.tap(history);
+      await settle(tester);
+      expect(find.text('historial'), findsOneWidget);
+      await tap(tester);
+      router.pop();
+      await settle(tester);
+
+      await tester.tap(find.text('Escanear QR'));
+      await settle(tester);
+      expect(find.byType(TokenScanPage), findsOneWidget);
+      await tap(tester);
+      await tester.tap(find.byIcon(Icons.close));
+      await settle(tester);
+
+      expect(buzzes(), 0);
+      expect(net.calls, isNot(contains(infoRoute)));
+      expect(fieldText(tester), isEmpty);
+
+      await tap(tester); // back on the sale, the reader is still on
+      expect(fieldText(tester), 'ana@lawallet.io');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the reader is let go with the sale', (tester) async {
+      await openWithReader(tester);
+      expect(reader, isNotNull);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(reader, isNull);
+    });
+
+    testWidgets('without a reader nothing listens', (tester) async {
+      nfcReplies(available: false);
+      await openWithReader(tester);
+
+      expect(nfcCalls, ['isAvailable']);
+      expect(reader, isNull);
+      expect(destination, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the card copy is translated', (tester) async {
+      final held = holdLookup();
+      await openWithReader(tester, english: true);
+      await tap(tester);
+      expect(find.text('Reading the card…'), findsOneWidget);
+      held.complete();
+      await settle(tester);
+
+      await tap(tester, otherCard);
+      expect(find.text('That card is not a LaWallet card'), findsOneWidget);
+      for (final (reply, _, copy) in failures) {
+        net.routes[infoRoute] = reply;
+        await tap(tester);
+        expect(find.text(copy), findsOneWidget, reason: copy);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   group('after the config closes', () {

@@ -422,6 +422,11 @@ const Map<String, String> _en = {
   'La lightning address no es válida': 'The Lightning address is not valid',
   'No se pudo verificar la lightning address':
       'The Lightning address could not be verified',
+  'Esa tarjeta no es de LaWallet': 'That card is not a LaWallet card',
+  'No encontramos esa tarjeta': 'That card was not found',
+  'La tarjeta no tiene una lightning address':
+      'The card has no lightning address',
+  'No se pudo leer la tarjeta': 'The card could not be read',
   'El invoice no es válido': 'The invoice is not valid',
   'El invoice no es de la red principal de Bitcoin':
       'The invoice is not for the Bitcoin mainnet',

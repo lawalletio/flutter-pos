@@ -151,6 +151,7 @@ All copy is Spanish source text with English translations (`context.tr`).
      - is for the Bitcoin mainnet (`lnbc`, not regtest, testnet or signet);
      - has an amount;
      - has more than 15 minutes of life left. Its life ends at its timestamp plus its `x` expiry, or an hour when it has none. Exactly 15 minutes left is refused.
+   - On a till with a card reader, a LaWallet card tapped on this step puts its owner's lightning address in the field, over what was typed; the operator still presses Continuar. It comes from the card's public info (`GET /api/cards/<id>/scan` with `x-request-action: info`, never the tap URL or its SUN): `<username>@<domain>` when the instance's settings name a domain that resolves to the card's host, else `<username>@<host>`.
 2. **Amount.** The amount pad is built on the existing `Numpad`. It takes whole pesos by default, with a toggle to sats.
    - `AmountPad` is not reused: it yields only sats at POS rates, and it rewrites the global currency.
    - The quote refreshes 500 ms after the last keypress.

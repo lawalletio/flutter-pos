@@ -16,6 +16,8 @@ import '../../data/lnurl/lnurl_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/config/session.dart';
+import '../../platform/nfc_channel.dart';
+import '../cards/cards_api.dart' show CardAddressError, cardOwnerAddress;
 import '../cards/cards_widgets.dart' show TokenScanPage;
 import 'wapu_account.dart';
 import 'wapu_api.dart';
@@ -75,9 +77,14 @@ bool _ticks(WapuOrder o, DateTime now) =>
 bool _sameAccount(WapuCredentials? a, WapuCredentials? b) =>
     a?.apiKey == b?.apiKey && a?.baseUrl == b?.baseUrl;
 
+/// How the sale reads the lightning address of a tapped card's owner. A
+/// variable so a test can swap in a fake network.
+Future<String> Function(String tapUrl) wapuCardAddress = cardOwnerAddress;
+
 /// The Wapu sale. It needs a signed-in POS user with a saved WapuPay key, and
 /// says so when either is missing. With both, the operator scans or types the
-/// customer's lightning address or invoice, and the sale goes on from there.
+/// customer's lightning address or invoice, or the customer taps their
+/// LaWallet card, and the sale goes on from there.
 ///
 /// Free text (an address, a message that may carry one) is Material [m.Text],
 /// not the app's [Text], which would uppercase it and squeeze it into one line.
@@ -129,6 +136,13 @@ class _WapuScreenState extends State<WapuScreen> {
   /// A lookup of the typed address, or of an order to resume, is under way, so
   /// the first step waits.
   bool _checking = false;
+
+  /// The owner of a tapped card is being looked up. The first step waits, as
+  /// it does for [_checking], and says so.
+  bool _readingCard = false;
+
+  /// The taps of the card reader, while the sale listens to it.
+  StreamSubscription<String>? _cardTaps;
 
   /// Why the address or the invoice cannot be used, or the order of the History
   /// could not be opened, as Spanish source text.
@@ -209,11 +223,13 @@ class _WapuScreenState extends State<WapuScreen> {
     super.initState();
     merchantAddress.addListener(_onMerchant);
     _load();
+    _listenForCards();
   }
 
   @override
   void dispose() {
     merchantAddress.removeListener(_onMerchant);
+    _cardTaps?.cancel();
     _debounce?.cancel();
     _stopClocks();
     _destination.dispose();
@@ -247,6 +263,7 @@ class _WapuScreenState extends State<WapuScreen> {
     _invoice = null;
     _error = null;
     _checking = false;
+    _readingCard = false;
     _step = _Step.destination;
     _mode = _Mode.ars;
     _clearAmount();
@@ -299,6 +316,56 @@ class _WapuScreenState extends State<WapuScreen> {
     setState(() {
       _destination.text = raw;
       _error = null;
+    });
+  }
+
+  /// Listens to the card reader, on a till that has one, while the sale is on
+  /// screen. The reader has one listener at a time, and nothing else listens
+  /// meanwhile: [_cardTapped] decides what a tap does.
+  Future<void> _listenForCards() async {
+    if (!await NfcChannel.isAvailable() || !mounted) return;
+    await NfcChannel.startSession();
+    if (mounted) _cardTaps = NfcChannel.taps().listen(_cardTapped);
+  }
+
+  /// A card tapped on the reader. On the first step, in front of the operator
+  /// and with nothing else under way, a LaWallet card puts its owner's
+  /// lightning address in the field, over what was typed, and Continuar
+  /// checks it as any other. Any other tag says why it was not taken.
+  Future<void> _cardTapped(String url) async {
+    if (!_inSale ||
+        _step != _Step.destination ||
+        _checking ||
+        _readingCard ||
+        ModalRoute.of(context)?.isCurrent == false) {
+      return;
+    }
+    // The cue of the Cards screen.
+    AppSounds.play(AppSound.card);
+    NfcChannel.vibrate();
+    final gen = _gen;
+    setState(() {
+      _readingCard = true;
+      _error = null;
+    });
+    String? address;
+    String? error;
+    try {
+      address = await wapuCardAddress(url);
+    } catch (e) {
+      error = switch (e) {
+        CardAddressError.notLaWallet => 'Esa tarjeta no es de LaWallet',
+        CardAddressError.notFound => 'No encontramos esa tarjeta',
+        CardAddressError.noAddress =>
+          'La tarjeta no tiene una lightning address',
+        _ => 'No se pudo leer la tarjeta',
+      };
+    }
+    if (!mounted || gen != _gen) return;
+    setState(() {
+      _readingCard = false;
+      _error = error;
+      if (address != null) _destination.text = address;
     });
   }
 
@@ -859,7 +926,9 @@ class _WapuScreenState extends State<WapuScreen> {
   }
 
   Widget _destinationStep(BuildContext context) {
-    final error = _error;
+    final waiting = _checking || _readingCard;
+    // While a card is read, the line under the field says so.
+    final note = _readingCard ? 'Leyendo la tarjeta…' : _error;
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
@@ -867,7 +936,7 @@ class _WapuScreenState extends State<WapuScreen> {
         TextField(
           key: const Key('wapu-destination'),
           controller: _destination,
-          enabled: !_checking,
+          enabled: !waiting,
           keyboardType: TextInputType.emailAddress,
           textInputAction: TextInputAction.done,
           autocorrect: false,
@@ -885,25 +954,26 @@ class _WapuScreenState extends State<WapuScreen> {
             ),
           ),
         ),
-        if (error != null)
+        if (note != null)
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: m.Text(
-              context.tr(error),
+              context.tr(note),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.error),
+              style: TextStyle(
+                  color: _readingCard ? AppColors.muted : AppColors.error),
             ),
           ),
         const SizedBox(height: 16),
         OutlinedButton.icon(
-          onPressed: _checking ? null : _scan,
+          onPressed: waiting ? null : _scan,
           icon: const Icon(Icons.qr_code_scanner),
           label: Text(context.tr('Escanear QR')),
         ),
         const SizedBox(height: 12),
         FilledButton(
           key: const Key('wapu-continue'),
-          onPressed: _checking ? null : _continue,
+          onPressed: waiting ? null : _continue,
           child: _checking
               ? const SizedBox(
                   width: 24,
