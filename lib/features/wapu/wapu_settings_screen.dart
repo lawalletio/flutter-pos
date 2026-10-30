@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../core/ui.dart';
 import '../../core/widgets.dart';
 import '../../domain/config/session.dart';
+import '../cards/cards_widgets.dart' show TokenScanPage;
 import 'wapu_account.dart';
 import 'wapu_api.dart';
 import 'wapu_error_text.dart';
@@ -43,6 +44,9 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
   /// A read or a write is under way, so every control waits. Starts on, while
   /// the saved credentials and the account's beta flag load.
   bool _busy = true;
+
+  /// Whether the key being typed shows as text. It starts hidden.
+  bool _showKey = false;
 
   /// What went wrong, one thing at a time: the [WapuApiException] of a failed
   /// call, which [WapuErrorText] draws with the backend's own message, or the
@@ -117,6 +121,17 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
         _error = error;
       }
     });
+  }
+
+  /// Reads the key from a QR code, in place of what was typed. Closing the
+  /// camera, or a code with nothing in it, leaves the field as it was.
+  Future<void> _scan() async {
+    final prompt = context.tr('Escaneá el QR de tu API key');
+    final raw = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (_) => TokenScanPage(prompt: prompt)));
+    final scanned = raw?.trim() ?? '';
+    if (scanned.isEmpty || !mounted) return;
+    _key.text = scanned;
   }
 
   /// Checks the key against the account, saves it, and sets the account's beta
@@ -217,7 +232,7 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
             TextField(
               key: const Key('wapu-key'),
               controller: _key,
-              obscureText: true,
+              obscureText: !_showKey,
               autocorrect: false,
               enableSuggestions: false,
               decoration: _decoration(
@@ -225,6 +240,26 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
                 hint: saved == null
                     ? null
                     : '${context.tr('Guardada: ')}••••${_last4(saved.apiKey)}',
+                suffix: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      key: const Key('wapu-key-scan'),
+                      icon: const Icon(Icons.qr_code_scanner),
+                      tooltip: context.tr('Escanear la API key'),
+                      onPressed: _scan,
+                    ),
+                    IconButton(
+                      key: const Key('wapu-key-visibility'),
+                      icon: Icon(
+                          _showKey ? Icons.visibility_off : Icons.visibility),
+                      tooltip: _showKey
+                          ? context.tr('Ocultar la API key')
+                          : context.tr('Mostrar la API key'),
+                      onPressed: () => setState(() => _showKey = !_showKey),
+                    ),
+                  ],
+                ),
               ),
             ),
             SwitchListTile(
@@ -280,9 +315,12 @@ class _WapuSettingsScreenState extends State<WapuSettingsScreen> {
 }
 
 /// A filled field with the label always up, so a hint can sit beside it.
-InputDecoration _decoration(String label, {String? hint}) => InputDecoration(
+/// [suffix] holds the buttons at its end.
+InputDecoration _decoration(String label, {String? hint, Widget? suffix}) =>
+    InputDecoration(
       labelText: label,
       hintText: hint,
+      suffixIcon: suffix,
       floatingLabelBehavior: FloatingLabelBehavior.always,
       filled: true,
       fillColor: AppColors.surface,

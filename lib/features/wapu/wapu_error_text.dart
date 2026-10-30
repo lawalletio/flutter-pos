@@ -44,3 +44,57 @@ class WapuErrorText extends StatelessWidget {
     );
   }
 }
+
+/// A call that got no answer from the backend (so [WapuApiException] has no
+/// status code), on a screen that tries it again by itself. It reads as a muted
+/// line that says so, not as a red error. A tap opens it onto the
+/// [WapuErrorText] of [error], and another closes it. It stays open while a
+/// newer failure takes the place of the one it shows.
+class WapuReconnecting extends StatefulWidget {
+  const WapuReconnecting(this.error, {super.key});
+
+  final WapuApiException error;
+
+  @override
+  State<WapuReconnecting> createState() => _WapuReconnectingState();
+}
+
+class _WapuReconnectingState extends State<WapuReconnecting> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      key: const Key('wapu-reconnecting'),
+      onTap: () => setState(() => _open = !_open),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.wifi_off, size: 18, color: AppColors.muted),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    context
+                        .tr('Problema en la conexión. Intentando reconectar.'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.muted),
+                  ),
+                ),
+              ],
+            ),
+            if (_open)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: WapuErrorText(widget.error),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

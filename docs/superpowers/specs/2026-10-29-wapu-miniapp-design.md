@@ -66,6 +66,7 @@ The contract comes from survivors `develop` at 6c0f1dbe. All paths are relative 
 | List | `GET /transactions/direct-fiat/tentatives` | 200 with `{"tentatives": [order, ...]}` |
 | Read settings | `GET /users/user-settings` | 200 with `{language, beta_version, favorite_currency}` |
 | Write settings | `PATCH /users/user-settings` with `{"beta_version": bool}` | 200 |
+| Profile | `GET /users/profile` | 200 with `{username, phone, telegram, email, npub, beta_version}`. The POS reads only `username`. |
 
 **Quote fields:**
 
@@ -79,7 +80,7 @@ The contract comes from survivors `develop` at 6c0f1dbe. All paths are relative 
 - identity and status: `tentative_id`, `type`, `direction`, `status`, `payout_status`;
 - payout target: `payout_currency`, `payout_network`, `payout_address`;
 - amounts: `amount_ars_cents`, `amount_out`, `amount_out_unit`, `network_fee_out`, and the USDT amounts;
-- timing: `expires_at`, `late_watch_until` (nullable), `watch_pending`;
+- timing: `created_at` (UTC; the list of orders has it, and every order body will), `expires_at`, `late_watch_until` (nullable), `watch_pending`;
 - results: `txid`, `payment_hash`, `error_code`;
 - bank details, present after funding only: `alias`, `cvu`.
 
@@ -96,7 +97,7 @@ Funding can raise `amount_ars_cents` by up to 100 cents so that each pending amo
 | EXECUTED | sending | true | ARS received, sats being sent. |
 | EXECUTED | review | true | A human must look at it. |
 | COMPLETED | completed | false | Sats delivered. `payment_hash` is set. |
-| SETTLED_TO_BALANCE | settled_to_balance | false | The payout failed. The money went to the merchant's Wapu balance. |
+| SETTLED_TO_BALANCE | settled_to_balance | false | The payout failed. The money went to the merchant's Wapu balance. `error_code` is `invoice_expired` when the customer's invoice expired before the payout. |
 
 **Polling rule:** poll the order while `watch_pending` is true. A CREATED order does not change on its own, so it is not polled.
 
@@ -158,10 +159,10 @@ All copy is Spanish source text with English translations (`context.tr`).
    - If funding fails, Retry calls funding again, which is safe.
 4. **Status.** The status screen polls every 10 s.
    - Waiting for the transfer: alias, CVU and the exact amount with cents, each with a copy button, plus a countdown to `expires_at`.
-   - Sending, then "Listo" with the payment hash. Reaching COMPLETED plays the existing paid sound (`AppSounds.play(AppSound.paid)`).
+   - Sending, then "Listo" with the order's receipt. Reaching COMPLETED plays the existing paid sound (`AppSounds.play(AppSound.paid)`). The receipt lists the sats bought, the date (local time, when the body has `created_at`), the status, the destination (a BOLT11 invoice is shortened), the order id with a copy button and a QR, the network fee, the ARS the customer paid and the total in sats. The sats bought are `round((amount_out + network_fee_out) × total_amount_usdt / funding_amount_usdt)`, or `amount_out + network_fee_out` without the two USDT figures. The fee is `network_fee_out`, and the total is `amount_out`, the sats the customer received, as in the headline. What was bought, less the fee and the total, is Wapu's commission, which the quote shows as included. The History opens the same view, so it is the detail of an order too.
    - In review: tells the operator to keep the order ID.
-   - Settled to balance: says the customer did not get the sats and the money is in the merchant's Wapu balance.
-   - Expired: if `watch_pending` is still true, says a late transfer is still detected until `late_watch_until`.
+   - Settled to balance: says the customer did not get the sats and the money is in the merchant's Wapu balance, and shows the receipt with the status "Acreditada en saldo Wapu". When `error_code` is `invoice_expired`, the message says that the order expired but the ARS deposit was detected, and that the balance was credited to the Wapu account, naming its `username` (read once per key with `GET /users/profile`; "tu cuenta de Wapu" when it cannot be read).
+   - Expired (`EXPIRED`, or `FUNDING_ISSUED` and `CREATED` once `expires_at` has passed, before the poll says so): the countdown gives way to the order's details. It says that no ARS was received and no sats were sent, and shows the receipt with the status "Vencida" and the deposit that was expected. If `watch_pending` is still true, it also says a late transfer is still detected until `late_watch_until`.
    - A CREATED order shows "Pedir datos de transferencia" (request transfer details), which calls funding.
    - Terminal states show a large "Nueva venta" button.
 5. **Historial.** The app bar button opens the `/wapu/historial` route.

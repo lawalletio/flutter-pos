@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:lawallet_pos/core/flow_lock.dart';
 import 'package:lawallet_pos/core/i18n.dart';
 import 'package:lawallet_pos/core/router.dart';
@@ -21,6 +22,8 @@ import 'package:lawallet_pos/features/wapu/wapu_account.dart';
 import 'package:lawallet_pos/features/wapu/wapu_api.dart';
 import 'package:lawallet_pos/features/wapu/wapu_history_screen.dart';
 import 'package:lawallet_pos/features/wapu/wapu_screen.dart';
+import 'package:lawallet_pos/features/wapu/wapu_status_view.dart'
+    show WapuStatusView;
 
 const _me = 'shop@lacrypta.ar';
 const _other = 'other@lacrypta.ar';
@@ -32,6 +35,14 @@ const _timedOut = 'El servidor no respondió. Probá de nuevo.';
 
 const _tentatives = '/transactions/direct-fiat/tentatives';
 const _listRoute = 'GET $_tentatives';
+
+const _profileRoute = 'GET /users/profile';
+
+/// The message of an order credited to the balance after its invoice expired,
+/// up to the account: its username follows, or `tu cuenta de Wapu.` when the
+/// username is not known.
+const _expiredInvoice = 'La orden expiró pero se detectó el depósito en ARS, '
+    'el saldo fue acreditado en';
 
 /// The route that reads the order [id] on its own.
 String _read(String id) => 'GET $_tentatives/$id';
@@ -116,6 +127,8 @@ Map<String, Object?> orderJson(
   int out = 12500,
   Duration expiresIn = const Duration(minutes: 15),
   String? hash,
+  String? created,
+  String? error,
 }) {
   final bank = status == 'FUNDING_ISSUED' || (status == 'EXPIRED' && watch);
   return {
@@ -127,24 +140,36 @@ Map<String, Object?> orderJson(
     'amount_ars_cents': ars,
     'amount_out': out,
     'network_fee_out': 21,
+    if (created != null) 'created_at': created,
     'expires_at': DateTime.now().toUtc().add(expiresIn).toIso8601String(),
     'late_watch_until': null,
     'watch_pending': watch,
     if (bank) 'alias': 'alias.$id',
     if (bank) 'cvu': _cvu,
     'payment_hash': hash,
+    'error_code': error,
   };
 }
 
 /// An order that was sent and received.
-Map<String, Object?> doneJson(String id, {int out = 17000}) => orderJson(id,
-    status: 'COMPLETED',
-    payout: 'completed',
+Map<String, Object?> doneJson(String id, {int out = 17000, String? created}) =>
+    orderJson(id,
+        status: 'COMPLETED',
+        payout: 'completed',
+        watch: false,
+        hash: _hash,
+        out: out,
+        ars: 2000000,
+        address: 'carol@example.com',
+        created: created);
+
+/// An order whose customer's invoice expired before the sats went out: the ARS
+/// were credited to the merchant's Wapu balance.
+Map<String, Object?> creditedJson(String id) => orderJson(id,
+    status: 'SETTLED_TO_BALANCE',
+    payout: 'settled_to_balance',
     watch: false,
-    hash: _hash,
-    out: out,
-    ars: 2000000,
-    address: 'carol@example.com');
+    error: 'invoice_expired');
 
 /// What the backend answers to the list of orders, in [orders]' order.
 (int, Object) listReply(List<Map<String, Object?>> orders) =>
@@ -672,12 +697,146 @@ void main() {
 
       expect(find.text('¡Listo! El cliente recibió 17.000 sats'),
           findsOneWidget);
-      expect(find.text(_hash), findsOneWidget);
+      expect(find.text(_hash), findsNothing,
+          reason: 'the receipt has the order id, not the payment hash');
       expect(find.text('alias.a'), findsNothing);
       await tester.pump(const Duration(seconds: 30));
       expect(calls(_read('a')), 1, reason: 'nothing is left to wait for');
       expect(played.where((n) => n == 'arpeggio'), isEmpty,
           reason: 'nothing was paid just now');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a completed order from the History shows its receipt',
+        (tester) async {
+      const created = '2026-10-29T16:50:34Z';
+      final clock = DateFormat('yyyy-MM-dd HH:mm:ss')
+          .format(DateTime.utc(2026, 10, 29, 16, 50, 34).toLocal());
+      net.routes[_listRoute] =
+          listReply([doneJson('a', created: created), orderJson('b')]);
+      net.routes[_read('a')] = (200, doneJson('a', created: created));
+      await open(tester);
+
+      await pick(tester, 'a');
+
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      for (final text in [
+        'Comprado',
+        '17.021 SAT', // no USDT figures to scale: the sats and the fee
+        'Fecha',
+        clock,
+        'Completada',
+        'carol@example.com',
+        'a', // the id
+        'Comisión de la operación',
+        '21 SAT',
+        'Depósito del cliente',
+        '20.000,00 ARS',
+        'Total',
+        '17.000 SAT', // what the customer got
+      ]) {
+        expect(find.text(text), findsOneWidget, reason: text);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an order credited after its invoice expired names the account',
+        (tester) async {
+      net.routes[_listRoute] =
+          listReply([creditedJson('f'), creditedJson('g')]);
+      net.routes[_read('f')] = (200, creditedJson('f'));
+      net.routes[_read('g')] = (200, creditedJson('g'));
+      net.routes[_profileRoute] = (200, {'username': 'ShopUser'});
+      await open(tester);
+
+      await pick(tester, 'f');
+
+      const message = '$_expiredInvoice la cuenta de Wapu ShopUser';
+      expect(find.text(message), findsOneWidget);
+      expect(find.text('No se pudieron enviar los sats'), findsNothing);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('Acreditada en saldo Wapu'), findsOneWidget);
+      expect(find.text('f'), findsOneWidget, reason: 'its id, in the receipt');
+      expect(calls(_profileRoute), 1);
+      expect(find.byKey(const Key('wapu-new-sale-big')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_read('f')), 1, reason: 'nothing is left to wait for');
+
+      // Another credited order of the same account: its name is known.
+      await pick(tester, 'g');
+
+      expect(find.text(message), findsOneWidget);
+      expect(find.text('g'), findsOneWidget);
+      expect(calls(_profileRoute), 1, reason: 'asked once for the key');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a credited order says "tu cuenta" when the profile fails',
+        (tester) async {
+      net.routes[_listRoute] = listReply([creditedJson('f')]);
+      net.routes[_read('f')] = (200, creditedJson('f'));
+      net.routes[_profileRoute] = (500, {'error': 'boom'});
+      await open(tester);
+
+      await pick(tester, 'f');
+
+      expect(find.text('$_expiredInvoice tu cuenta de Wapu.'), findsOneWidget);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('No se pudo completar la operación'), findsNothing);
+      expect(calls(_profileRoute), 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an expired order from the History shows its details',
+        (tester) async {
+      net.routes[_listRoute] =
+          listReply([orderJson('d', status: 'EXPIRED', watch: false)]);
+      net.routes[_read('d')] =
+          (200, orderJson('d', status: 'EXPIRED', watch: false));
+      await open(tester);
+
+      await pick(tester, 'd');
+
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.text('No se recibieron ARS ni se enviaron sats.'),
+          findsOneWidget);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.text('Vencida'), findsOneWidget);
+      expect(find.text('Depósito esperado'), findsOneWidget);
+      expect(find.byKey(const Key('wapu-new-sale-big')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 30));
+      expect(calls(_read('d')), 1, reason: 'nothing is left to wait for');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an order past its window is expired, and is read, not ticked',
+        (tester) async {
+      // The backend still says FUNDING_ISSUED, and still watches it.
+      net.routes[_listRoute] =
+          listReply([orderJson('e', expiresIn: const Duration(minutes: -1))]);
+      net.routes[_read('e')] =
+          (200, orderJson('e', expiresIn: const Duration(minutes: -1)));
+      await open(tester);
+
+      await pick(tester, 'e');
+
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.textContaining('Vence en'), findsNothing);
+      expect(find.text('alias.e'), findsNothing);
+      expect(find.byKey(const Key('wapu-receipt')), findsOneWidget);
+      expect(find.byKey(const Key('wapu-new-sale-big')), findsNothing,
+          reason: 'still watched: the app bar has Nueva venta');
+      // No clock repaints it: its `now` stays while the polls come at 10 s.
+      final view = find.byType(WapuStatusView);
+      final last = tester.widget<WapuStatusView>(view).now;
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump(const Duration(seconds: 5));
+      expect(tester.widget<WapuStatusView>(view).now, last);
+      expect(calls(_read('e')), 1);
+
+      await tester.pump(const Duration(seconds: 5));
+      expect(calls(_read('e')), 2, reason: 'it is still read');
       await tester.pumpWidget(const SizedBox());
     });
 

@@ -8,14 +8,10 @@ import '../../core/ui.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import 'wapu_api.dart';
-
-/// Pesos with dots between the thousands and a comma before the cents.
-final _pesosAndCents = NumberFormat.decimalPattern('es_AR')
-  ..minimumFractionDigits = 2
-  ..maximumFractionDigits = 2;
+import 'wapu_receipt.dart';
 
 /// [cents] as pesos, always with the two decimals: `1500037` is `$ 15.000,37`.
-String formatArsCents(int cents) => '\$ ${_pesosAndCents.format(cents / 100)}';
+String formatArsCents(int cents) => '\$ ${formatPesos(cents)}';
 
 /// [d] as `mm:ss`. Time that has run out is `00:00`.
 String formatCountdown(Duration d) {
@@ -40,6 +36,7 @@ class WapuStatusView extends StatelessWidget {
     this.onRequestFunding,
     this.onNewSale,
     this.busy = false,
+    this.wapuUser,
   });
 
   final WapuOrder order;
@@ -54,20 +51,25 @@ class WapuStatusView extends StatelessWidget {
   /// The bank details are being asked for: the button waits.
   final bool busy;
 
+  /// The username of the merchant's Wapu account, when it is known: the
+  /// message of an order credited to that account names it.
+  final String? wapuUser;
+
   @override
   Widget build(BuildContext context) {
     final o = order;
+    final expiresAt = o.expiresAt;
+    final windowClosed = expiresAt != null && !expiresAt.isAfter(now);
     final List<Widget> body = switch ((o.status, o.payoutStatus)) {
-      ('FUNDING_ISSUED', _) => _waiting(context),
+      // The backend flips the status a poll after the window closes. Until it
+      // does, the clock decides: a countdown at 00:00 would be a lie.
+      ('FUNDING_ISSUED', _) when !windowClosed => _waiting(context),
       ('CREATED', _) when o.isInProgress(now) => _created(context),
-      ('EXPIRED', _) when o.watchPending => _lateWatch(context),
-      ('CREATED' || 'EXPIRED', _) => _closed(context),
+      ('FUNDING_ISSUED' || 'CREATED' || 'EXPIRED', _) => _expired(context),
       ('EXECUTED', 'review') => _review(context),
       // The ARS was received, so any other payout status (sending, or one that
       // is not known here) is the sats on their way, never the raw status.
-      ('EXECUTED', _) => [
-          _title(context.tr('Pago recibido. Enviando los sats…')),
-        ],
+      ('EXECUTED', _) => _sending(context),
       ('COMPLETED', _) => _completed(context),
       ('SETTLED_TO_BALANCE', _) => _settled(context),
       _ => [_title(o.status)],
@@ -129,20 +131,69 @@ class WapuStatusView extends StatelessWidget {
         ),
       ];
 
-  List<Widget> _lateWatch(BuildContext context) {
+  /// The window closed and no ARS came in: the details of the order, and why
+  /// there is nothing to send. While the backend still watches for a late
+  /// transfer the big Nueva venta waits, and the app bar's is the way out.
+  List<Widget> _expired(BuildContext context) {
     final until = order.lateWatchUntil;
     return [
-      _title(context.tr('Venció el plazo')),
-      if (until != null)
+      _title(context.tr('Orden vencida')),
+      _note(context.tr('No se recibieron ARS ni se enviaron sats.')),
+      if (order.watchPending && until != null)
         _note(
           '${context.tr('Si el cliente ya transfirió, lo seguimos buscando hasta las ')}'
           '${DateFormat.Hm().format(until.toLocal())}',
         ),
+      WapuReceipt(order: order),
+      if (!order.watchPending) _newSale(context),
     ];
   }
 
-  List<Widget> _closed(BuildContext context) =>
-      [_title(context.tr('Orden vencida')), _newSale(context)];
+  /// The ARS is in and the sats are on their way. The logo sits on a white
+  /// plate, or its dark outline would vanish on the dark theme.
+  List<Widget> _sending(BuildContext context) {
+    final sats = formatToPreference(Currency.sat, order.amountOut);
+    return [
+      Center(
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.onDark,
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Image.asset(
+            'assets/images/wapu_logo.png',
+            key: const Key('wapu-logo'),
+            width: 140,
+            height: 140,
+          ),
+        ),
+      ),
+      const SizedBox(height: 24),
+      _title(context.tr('Pago recibido')),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: m.Text(
+              context.tr('Enviando los sats…'),
+              softWrap: true,
+              style: const TextStyle(fontSize: 18),
+            ),
+          ),
+        ],
+      ),
+      // A reply without them reads as 0 and empty: nothing to say.
+      if (order.amountOut > 0 && order.payoutAddress.isNotEmpty)
+        _note('$sats sats → ${order.payoutAddress}'),
+    ];
+  }
 
   List<Widget> _review(BuildContext context) => [
         _title(context.tr('En revisión')),
@@ -154,29 +205,41 @@ class WapuStatusView extends StatelessWidget {
       ];
 
   List<Widget> _completed(BuildContext context) {
-    final hash = order.paymentHash;
     final sats = formatToPreference(Currency.sat, order.amountOut);
     return [
       _title(
         '${context.tr('¡Listo! El cliente recibió ')}$sats sats',
         color: AppColors.primary,
       ),
-      if (hash != null)
-        SelectableText(
-          hash,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 13, color: AppColors.muted),
-        ),
+      WapuReceipt(order: order),
       _newSale(context),
     ];
   }
 
+  /// The payout failed and the ARS went to the merchant's Wapu balance.
   List<Widget> _settled(BuildContext context) => [
-        _title(context.tr('No se pudieron enviar los sats'),
-            color: AppColors.error),
-        _note(context.tr('El monto quedó en tu saldo de Wapu.')),
+        if (order.errorCode == 'invoice_expired')
+          _title(_invoiceExpired(context), color: AppColors.error)
+        else ...[
+          _title(context.tr('No se pudieron enviar los sats'),
+              color: AppColors.error),
+          _note(context.tr('El monto quedó en tu saldo de Wapu.')),
+        ],
+        WapuReceipt(order: order),
         _newSale(context),
       ];
+
+  /// The customer's invoice expired before the payout, so the deposit went to
+  /// the merchant's Wapu account, which the message names when its username is
+  /// known.
+  String _invoiceExpired(BuildContext context) {
+    final user = wapuUser;
+    return user == null
+        ? context.tr('La orden expiró pero se detectó el depósito en ARS, '
+            'el saldo fue acreditado en tu cuenta de Wapu.')
+        : '${context.tr('La orden expiró pero se detectó el depósito en ARS, '
+            'el saldo fue acreditado en la cuenta de Wapu ')}$user';
+  }
 
   /// Where the order stands, in a line big enough to read across the counter.
   Widget _title(String text, {Color? color}) => Padding(
