@@ -153,17 +153,27 @@ All copy is Spanish source text with English translations (`context.tr`).
      - has more than 15 minutes of life left. Its life ends at its timestamp plus its `x` expiry, or an hour when it has none. Exactly 15 minutes left is refused.
    - On a till with a card reader, a LaWallet card tapped on this step puts its owner's lightning address in the field, over what was typed; the operator still presses Continuar. It comes from the card's public info (`GET /api/cards/<id>/scan` with `x-request-action: info`, never the tap URL or its SUN): `<username>@<domain>` when the instance's settings name a domain that resolves to the card's host, else `<username>@<host>`.
 2. **Amount.** The amount pad is built on the existing `Numpad`. It takes whole pesos by default, with a toggle to sats.
-   - `AmountPad` is not reused: it yields only sats at POS rates, and it rewrites the global currency.
+   - `AmountPad` is not reused: it yields only sats at POS rates, and it rewrites the global currency. The screen is laid out like the cash register's, so that it fits the Z92.
    - The quote refreshes 500 ms after the last keypress.
-   - An invoice sets the amount, so the sale is in sats mode with the invoice's sats, shown with the note "Monto fijado por el invoice". There is no unit toggle and no pad, and the quote is asked for at once with `amount_out`. The destination shows the invoice shortened (first 12 characters, an ellipsis, last 8). Its pencil goes back to step 1 and drops the invoice with its amount.
+   - An invoice sets the amount, so the sale is in sats mode with the invoice's sats, shown with the note "Monto fijado por el invoice". There is no unit toggle and no pad, and the quote is asked for at once with `amount_out`.
+   - There is no header with the destination. Back, the app bar's arrow and the system button alike, goes back to step 1: the field keeps what was typed, an address leaves the amount as it was, and an invoice goes with its amount. While the till is locked the app bar has no arrow, and the system button is what is left. While an order is being created, back does nothing.
 
-   The screen shows:
-   - the sats the customer receives;
+   The screen shows, under the unit toggle and above the pad:
+   - the amount typed, in the cash register's large font, which shrinks to the room the pad leaves and takes at most half of it;
+   - under it, one plain muted line with what the customer gets: "El cliente recibe N sats" in pesos mode, and "El cliente paga $ N" in sats mode and for an invoice, where the amount typed already is what the customer receives;
+   - an info button next to that line, which waits while an order is being created;
+   - above that line, what stands in the way of the order: the minimum, when the amount is below it, and a banner when `liquidity_ok` is false. They stay on the screen because they say why Confirm is off;
+   - in place of the line, while there is no price: the quote's error, or a spinner.
+
+   What is under the amount takes what it needs, up to two thirds of the room the pad leaves, and scrolls past that, so a long error never pushes the pad or Confirm off a short screen. The room of the line is kept while the price comes and goes, so the amount does not jump as the operator types.
+
+   The info button opens a floating card with an X, "Detalle", with the rest of the quote as it was when the card opened:
    - the effective rate (ARS per BTC);
    - the fee percentage, already included;
    - the estimated network fee;
-   - the minimum, when the amount is below it;
-   - a banner when `liquidity_ok` is false.
+   - where the sats go ("Para"): the address in full, or the invoice shortened (first 12 characters, an ellipsis, last 8).
+
+   A tap outside the card closes it too.
 
    Confirm is enabled only with a fresh quote that has liquidity and is not below the minimum.
 3. **Confirm.** One tap creates the order and then requests funding.
@@ -245,6 +255,8 @@ No new package is added. `flutter_secure_storage` is already declared in `pubspe
   - setup is required without a key;
   - the destination gate, with a fake `lnurl`, and an invoice that locks the amount;
   - the debounced quote and the minimum or liquidity gating;
+  - the card of the rest of the quote, and back from the amount step with the app bar's arrow and the system button, also while the till is locked;
+  - the layout of the amount step on the Z92, 720x1280 px and 720x1172 px at 240 dpi with the app's 1.3 text scale: the amount, the line, its button, the pad and Confirm lie inside the screen with nothing under the amount to scroll, and a long error scrolls instead of pushing them off;
   - confirm leads to the status with bank details and copy buttons;
   - polling transitions to "Listo" and to "settled to balance";
   - a create timeout shows the "check Historial" message;
