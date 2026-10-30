@@ -286,7 +286,7 @@ Sun? parseSun(String cardUrl) {
 
 /// Why [cardOwnerAddress] has no address for a tapped card.
 enum CardAddressError implements Exception {
-  /// The tag is not a LaWallet card: its URL has no `/api/cards/<id>`.
+  /// The tag is not a LaWallet card: its URL's path has no `/api/cards/<id>`.
   notLaWallet,
 
   /// The card's instance does not know it (404).
@@ -322,15 +322,17 @@ final _cardInfo = Dio(BaseOptions(
 /// [service] stand in for the network in tests.
 Future<String> cardOwnerAddress(String tapUrl,
     {Dio? dio, LnurlService? service}) async {
-  final host = Uri.tryParse(tapUrl)?.host ?? '';
-  if (host.isEmpty || !tapUrl.contains('/api/cards/')) {
-    throw CardAddressError.notLaWallet;
-  }
+  final uri = Uri.tryParse(tapUrl);
+  final host = uri?.host ?? '';
+  // The id comes from the path alone, never from the query that holds the SUN.
+  final id =
+      RegExp(r'/api/cards/([^/]+)').firstMatch(uri?.path ?? '')?.group(1);
+  if (host.isEmpty || id == null) throw CardAddressError.notLaWallet;
   final client = dio ?? _cardInfo;
   final Object? info;
   try {
     info = (await client.getUri(
-      Uri.https(host, '/api/cards/${resolveCardId(tapUrl)}/scan'),
+      Uri.https(host, '/api/cards/$id/scan'),
       options: Options(headers: {'x-request-action': 'info'}),
     ))
         .data;

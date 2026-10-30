@@ -200,6 +200,10 @@ void main() {
       'lnurlw://bolt.example.com/withdraw?p=A1B2&c=C3D4', // another Boltcard
       '', // a blank one
       'hello /api/cards/c1/scan', // no host
+      // No id in the path: its SUN must not go out in the info's path.
+      'lnurlw://beta.lawallet.io/api/cards/?p=A1B2&c=C3D4',
+      'lnurlw://beta.lawallet.io/api/cards//scan?p=A1B2&c=C3D4',
+      'lnurlw://x.io/w?u=/api/cards/c1&p=A1B2&c=C3D4', // only in the query
     ]) {
       await expectLater(lookup(tag), throwsA(CardAddressError.notLaWallet),
           reason: tag);
