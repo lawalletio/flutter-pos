@@ -504,6 +504,17 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('an invoice is shown short, as the receipt shows it',
+        (tester) async {
+      const invoice = 'lnbc25u1p3xyzabcdefghijklmnopqrstuvwxyz0123456789';
+      net.routes[_listRoute] = listReply([orderJson('b', address: invoice)]);
+      await openHistory(tester);
+
+      expect(find.text('lnbc25u1p3xy…23456789'), findsOneWidget);
+      expect(find.text(invoice), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('the history is translated', (tester) async {
       net.routes[_listRoute] = listReply([
         orderJson('b'),

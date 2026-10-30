@@ -411,18 +411,25 @@ const Map<String, String> _en = {
       'Sign in with the merchant address to use Wapu',
   'Configurá tu API key de Wapu': 'Set up your Wapu API key',
   'Desbloqueá el POS para configurar Wapu': 'Unlock the POS to set up Wapu',
-  'Lightning address del cliente': "Customer's Lightning address",
+  'Lightning address o invoice del cliente':
+      "Customer's Lightning address or invoice",
   'nombre@dominio.com': 'name@domain.com',
   'Escanear QR': 'Scan QR',
-  'Escaneá la lightning address del cliente':
-      "Scan the customer's Lightning address",
-  'Eso es un invoice. Pedile al cliente su lightning address':
-      'That is an invoice. Ask the customer for their Lightning address',
+  'Escaneá la lightning address o el invoice del cliente':
+      "Scan the customer's Lightning address or invoice",
   'Eso es un LNURL. Pedile al cliente su lightning address':
       'That is an LNURL. Ask the customer for their Lightning address',
   'La lightning address no es válida': 'The Lightning address is not valid',
   'No se pudo verificar la lightning address':
       'The Lightning address could not be verified',
+  'El invoice no es válido': 'The invoice is not valid',
+  'El invoice no es de la red principal de Bitcoin':
+      'The invoice is not for the Bitcoin mainnet',
+  'El invoice no tiene monto. Pedile al cliente uno con monto.':
+      'The invoice has no amount. Ask the customer for one with an amount.',
+  'El invoice vence en menos de 15 minutos. Pedile al cliente uno nuevo.':
+      'The invoice expires in less than 15 minutes. Ask the customer for a new one.',
+  'Monto fijado por el invoice': 'Amount set by the invoice',
   'El cliente recibe': 'The customer receives',
   'El cliente paga': 'The customer pays',
   'Tipo de cambio': 'Exchange rate',

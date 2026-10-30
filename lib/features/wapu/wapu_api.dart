@@ -138,7 +138,7 @@ class WapuOrder {
   final String status;
   final String payoutStatus;
 
-  /// The customer's lightning address.
+  /// The customer's lightning address, or their BOLT11 invoice.
   final String payoutAddress;
 
   /// What the customer transfers, in ARS cents. Funding can raise it by up to
@@ -226,9 +226,10 @@ class WapuApi {
     return WapuQuote.fromJson(json);
   }
 
-  /// Creates an order that pays [address]. It is not idempotent: after a
-  /// timeout, or a reply with no order id, look in [orders] instead of calling
-  /// this again.
+  /// Creates an order that pays [address], a lightning address or a BOLT11
+  /// invoice (then pass its [sats], and no [arsCents]). It is not idempotent:
+  /// after a timeout, or a reply with no order id, look in [orders] instead of
+  /// calling this again.
   Future<WapuOrder> createOrder(
       {required String address, int? arsCents, int? sats}) async {
     return _singleOrder(
