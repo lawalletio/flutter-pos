@@ -984,6 +984,10 @@ void main() {
       expect(find.text(reading), findsOneWidget);
       expect(tester.widget<TextField>(destination).enabled, isFalse);
       expect(tester.widget<FilledButton>(next).onPressed, isNull);
+      await tester.tap(find.text('Escanear QR'));
+      await settle(tester);
+      expect(find.byType(TokenScanPage), findsNothing,
+          reason: 'the scanner would race the card for the field');
 
       await tap(tester); // another card, while the first is read
       expect(buzzes(), 1, reason: 'one card at a time');
@@ -1020,11 +1024,13 @@ void main() {
 
     testWidgets('says why a card gave no address', (tester) async {
       await openWithReader(tester);
-      for (final tag in [otherCard, '']) {
-        await tap(tester, tag); // another Boltcard, then a blank one
+      // The blank one first: no message is on screen yet to pass for its own.
+      for (final tag in ['', otherCard]) {
+        await tap(tester, tag); // a blank tag, then another Boltcard
         expect(find.text('Esa tarjeta no es de LaWallet'), findsOneWidget,
             reason: tag);
       }
+      expect(buzzes(), 2, reason: 'both were taken, neither dropped');
       expect(net.calls, isEmpty, reason: 'not ours: nothing to ask');
       expect(fake.resolved, isEmpty);
 
@@ -1090,6 +1096,39 @@ void main() {
 
       await tap(tester); // back on the sale, the reader is still on
       expect(fieldText(tester), 'ana@lawallet.io');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap while Continuar checks the address is not read',
+        (tester) async {
+      fake.hold = Completer<void>();
+      await openWithReader(tester);
+      await submit(tester, 'bob@example.com');
+      expect(fake.validated, ['bob@example.com'], reason: 'the check is held');
+
+      await tap(tester);
+      expect(buzzes(), 0);
+      expect(net.calls, isEmpty, reason: 'nothing was asked of the card');
+      expect(fieldText(tester), 'bob@example.com',
+          reason: 'the card did not write over it');
+
+      fake.hold!.complete();
+      await settle(tester);
+      expect(amount, findsOneWidget);
+      expect(find.text('bob@example.com'), findsOneWidget,
+          reason: 'the sale is for the address that was checked');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap without a key is not read', (tester) async {
+      FlutterSecureStorage.setMockInitialValues({}); // this user has no key
+      await openWithReader(tester);
+      expect(find.text(_configure), findsOneWidget);
+      expect(reader, isNotNull, reason: 'the reader listens with no key too');
+
+      await tap(tester);
+      expect(buzzes(), 0);
+      expect(net.calls, isEmpty, reason: 'nothing was asked of the card');
       await tester.pumpWidget(const SizedBox());
     });
 
