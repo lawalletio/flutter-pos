@@ -12,6 +12,7 @@ import 'package:lawallet_pos/domain/config/session.dart';
 import 'package:lawallet_pos/features/wapu/wapu_account.dart';
 import 'package:lawallet_pos/features/wapu/wapu_api.dart';
 import 'package:lawallet_pos/features/wapu/wapu_settings_screen.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 const _me = 'shop@lacrypta.ar';
 const _stage = 'https://be-stage.wapu.app';
@@ -65,6 +66,32 @@ class _ReadOnlyStorage extends FlutterSecureStorage {
       throw PlatformException(code: 'w');
 }
 
+/// A camera that shows nothing and scans what the test hands it.
+class FakeScanner extends MobileScannerPlatform {
+  final scans = StreamController<BarcodeCapture?>.broadcast();
+
+  @override
+  Stream<BarcodeCapture?> get barcodesStream => scans.stream;
+  @override
+  Stream<TorchState> get torchStateStream => const Stream.empty();
+  @override
+  Stream<double> get zoomScaleStateStream => const Stream.empty();
+  @override
+  Widget buildCameraView() => const SizedBox.expand();
+  @override
+  Future<MobileScannerViewAttributes> start(StartOptions startOptions) async =>
+      const MobileScannerViewAttributes(
+          cameraDirection: CameraFacing.back,
+          currentTorchMode: TorchState.unavailable,
+          size: Size(720, 1280));
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> updateScanWindow(Rect? window) async {}
+  @override
+  Future<void> dispose() async {}
+}
+
 /// A device that already holds [_me]'s key.
 void seed({String key = 'saved-key-9999', String url = kWapuDefaultBaseUrl}) =>
     FlutterSecureStorage.setMockInitialValues({
@@ -77,6 +104,7 @@ void main() {
   final realApiFor = wapuApiFor;
   final realAccounts = wapuAccounts;
   late FakeNet net;
+  late FakeScanner camera;
 
   /// The (URL, key) of each client the screen asked for.
   late List<(String, String)> clients;
@@ -86,6 +114,7 @@ void main() {
 
   final keyField = find.byKey(const Key('wapu-key'));
   final keyEye = find.byKey(const Key('wapu-key-visibility'));
+  final keyScan = find.byKey(const Key('wapu-key-scan'));
   final urlField = find.byKey(const Key('wapu-url'));
   final beta = find.byKey(const Key('wapu-beta'));
   final save = find.byKey(const Key('wapu-save'));
@@ -96,6 +125,8 @@ void main() {
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
+    camera = FakeScanner();
+    MobileScannerPlatform.instance = camera;
     merchantAddress.value = _me;
     popped = [];
     clients = [];
@@ -182,11 +213,30 @@ void main() {
     await settle(tester);
   }
 
+  /// Taps the QR button, then has the camera read [raw]. With null it closes the
+  /// scanner with its X instead, as a merchant who changed their mind would.
+  Future<void> scan(WidgetTester tester, String? raw) async {
+    const prompt = 'Escaneá el QR de tu API key';
+    await tester.tap(keyScan);
+    await settle(tester);
+    expect(find.text(prompt), findsOneWidget);
+    if (raw == null) {
+      await tester.tap(find.byIcon(Icons.close));
+    } else {
+      camera.scans.add(BarcodeCapture(barcodes: [Barcode(rawValue: raw)]));
+    }
+    await settle(tester);
+    expect(find.text(prompt), findsNothing);
+  }
+
   bool switchOn(WidgetTester tester) =>
       tester.widget<SwitchListTile>(beta).value;
 
   bool keyHidden(WidgetTester tester) =>
       tester.widget<TextField>(keyField).obscureText;
+
+  String keyText(WidgetTester tester) =>
+      tester.widget<TextField>(keyField).controller!.text;
 
   String urlText(WidgetTester tester) =>
       tester.widget<TextField>(urlField).controller!.text;
@@ -618,6 +668,44 @@ void main() {
     expect(find.byIcon(Icons.visibility), findsOneWidget);
   });
 
+  testWidgets('scanning a QR fills the key field, and Guardar sends that key',
+      (tester) async {
+    await open(tester);
+    expect(find.byIcon(Icons.qr_code_scanner), findsOneWidget);
+    expect(find.byTooltip('Escanear la API key'), findsOneWidget);
+    await tester.enterText(keyField, 'typed-by-hand');
+
+    await scan(tester, 'first-scan');
+    expect(keyText(tester), 'first-scan', reason: 'in place of what was typed');
+    expect(keyHidden(tester), isTrue, reason: 'the eye left it hidden');
+
+    await tester.tap(keyEye);
+    await tester.pump();
+    await scan(tester, '  wapu_test_key\n');
+    expect(keyText(tester), 'wapu_test_key', reason: 'trimmed');
+    expect(keyHidden(tester), isFalse, reason: 'the eye left it shown');
+
+    await tester.tap(save);
+    await settle(tester);
+
+    expect(clients, [(kWapuDefaultBaseUrl, 'wapu_test_key')]);
+    expect(net.requests.first.headers['X-API-Key'], 'wapu_test_key');
+    expect((await stored(tester))?.apiKey, 'wapu_test_key');
+    expect(popped, [true]);
+  });
+
+  testWidgets('a closed scanner or an empty code leaves the typed key alone',
+      (tester) async {
+    await open(tester);
+    await tester.enterText(keyField, 'typed-by-hand');
+
+    await scan(tester, null); // the X
+    expect(keyText(tester), 'typed-by-hand');
+
+    await scan(tester, ' \n'); // a code with nothing in it
+    expect(keyText(tester), 'typed-by-hand');
+  });
+
   testWidgets('the screen is translated', (tester) async {
     seed();
     await open(tester, english: true);
@@ -630,6 +718,12 @@ void main() {
     await tester.tap(keyEye);
     await tester.pump();
     expect(find.byTooltip('Hide the API key'), findsOneWidget);
+    expect(find.byTooltip('Scan the API key'), findsOneWidget);
+    await tester.tap(keyScan);
+    await settle(tester);
+    expect(find.text('Scan your API key QR code'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.close));
+    await settle(tester);
     await openAdvanced(tester, title: 'Advanced');
     expect(find.text('Backend URL'), findsOneWidget);
 
