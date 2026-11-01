@@ -17,6 +17,8 @@ import 'package:lawallet_pos/data/lnurl/lnurl_service.dart';
 import 'package:lawallet_pos/domain/config/miniapp_pin.dart';
 import 'package:lawallet_pos/domain/config/session.dart';
 import 'package:lawallet_pos/domain/config/settings_state.dart';
+import 'package:lawallet_pos/features/cards/cards_api.dart'
+    show cardOwnerAddress;
 import 'package:lawallet_pos/features/cards/cards_widgets.dart'
     show TokenScanPage;
 import 'package:lawallet_pos/features/miniapps/miniapps.dart';
@@ -98,8 +100,9 @@ class FakeNet implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
-/// Resolves nothing: it records each address it is asked to validate, then
-/// fails or waits when told to.
+/// Resolves nothing on the network: it records each address it is asked to
+/// validate, then fails or waits when told to, and [resolve] answers the
+/// addresses of [callbacks] alone.
 class FakeLnurl extends LnurlService {
   /// Thrown by [validate].
   Object? fail;
@@ -109,11 +112,27 @@ class FakeLnurl extends LnurlService {
 
   final validated = <String>[];
 
+  /// The callback [resolve] answers for each address it knows.
+  final callbacks = <String, String>{};
+
+  final resolved = <String>[];
+
   @override
   Future<void> validate(String address) async {
     validated.add(address);
     await hold?.future;
     if (fail != null) throw fail!;
+  }
+
+  @override
+  Future<LnurlPayParams> resolve(String address) async {
+    resolved.add(address);
+    final callback = callbacks[address];
+    if (callback == null) {
+      throw LnurlException('La dirección no es una Lightning Address válida');
+    }
+    return LnurlPayParams(
+        callback: callback, minSendable: 1000, maxSendable: 100000000);
   }
 }
 
@@ -364,6 +383,19 @@ void main() {
   final fundButton = find.byKey(const Key('wapu-fund'));
   final reconnecting = find.byKey(const Key('wapu-reconnecting'));
   final errorDetail = find.byKey(const Key('wapu-error-detail'));
+  final details = find.byKey(const Key('wapu-quote-details'));
+  final detailsClose = find.byKey(const Key('wapu-quote-details-close'));
+
+  /// The two ways back from a step: the app bar's arrow, and the system button.
+  final backs = <(String, Future<void> Function(WidgetTester))>[
+    ('the app bar back', (tester) => tester.tap(find.byIcon(Icons.arrow_back))),
+    (
+      'the system back',
+      (tester) async {
+        await tester.binding.handlePopRoute();
+      }
+    ),
+  ];
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
@@ -397,16 +429,20 @@ void main() {
     }
   }
 
-  /// Pumps /wapu behind the till's lock redirect, on the Z92's portrait screen,
-  /// signed in as [merchant] (nobody, when empty). With [overHub] the sale is
-  /// pushed on top of the hub, so that a back has somewhere to go.
+  /// Pumps /wapu behind the till's lock redirect, on a portrait screen, signed
+  /// in as [merchant] (nobody, when empty). The screen is 720x1440 at 2x unless
+  /// [screen] and [density] say another. With [overHub] the sale is pushed on
+  /// top of the hub, so that a back has somewhere to go. The History is a
+  /// stand-in: here it is only a screen on top of the sale.
   Future<void> open(WidgetTester tester,
       {String merchant = _me,
       bool english = false,
-      bool overHub = false}) async {
+      bool overHub = false,
+      Size screen = const Size(720, 1440),
+      double density = 2}) async {
     tester.view
-      ..physicalSize = const Size(720, 1440)
-      ..devicePixelRatio = 2;
+      ..physicalSize = screen
+      ..devicePixelRatio = density;
     addTearDown(tester.view.reset);
     merchantAddress.value = merchant;
     final router = GoRouter(
@@ -420,6 +456,8 @@ void main() {
           routes: [
             GoRoute(
                 path: 'config', builder: (_, __) => const WapuSettingsScreen()),
+            GoRoute(
+                path: 'historial', builder: (_, __) => const Text('historial')),
           ],
         ),
       ],
@@ -450,6 +488,15 @@ void main() {
 
   String fieldText(WidgetTester tester) =>
       tester.widget<TextField>(destination).controller!.text;
+
+  /// Taps the info button, scrolled into view first (two warnings and the line
+  /// do not fit under the amount on a small screen), and lets the card of the
+  /// rest of the quote open.
+  Future<void> openDetails(WidgetTester tester) async {
+    await tester.ensureVisible(details);
+    await tester.tap(details);
+    await settle(tester);
+  }
 
   Future<void> enterPin(WidgetTester tester, String pin) async {
     await tester.enterText(find.byKey(const Key('miniapp-pin')), pin);
@@ -816,6 +863,342 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  group('card tap', () {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const nfc = MethodChannel('pos/nfc');
+    const tags = EventChannel('pos/nfc/tags');
+
+    /// What a LaWallet card sends: where its info is, then the SUN that spends
+    /// it.
+    const card = 'lnurlw://beta.lawallet.io/api/cards/c1/scan?p=A1B2&c=C3D4';
+    const otherCard = 'lnurlw://bolt.example.com/withdraw?p=A1B2&c=C3D4';
+    const infoRoute = 'GET /api/cards/c1/scan';
+    const settingsRoute = 'GET /api/settings';
+    const reading = 'Leyendo la tarjeta…';
+
+    /// The methods the sale called on the reader.
+    final nfcCalls = <String>[];
+
+    /// Hands the sale a tap while it listens to the reader: null before it
+    /// does, and once it let go.
+    MockStreamHandlerEventSink? reader;
+
+    /// Answers the reader's methods, as a till with a reader when [available].
+    void nfcReplies({bool available = true}) =>
+        messenger.setMockMethodCallHandler(nfc, (call) async {
+          nfcCalls.add(call.method);
+          return switch (call.method) {
+            'isAvailable' => available,
+            'startSession' => true,
+            _ => null,
+          };
+        });
+
+    setUp(() {
+      seed({_me: 'key-1'});
+      nfcCalls.clear();
+      reader = null;
+      nfcReplies();
+      wapuCardAddress =
+          (url) => cardOwnerAddress(url, dio: Dio()..httpClientAdapter = net);
+      net.routes[infoRoute] = (
+        200,
+        {
+          'id': 'c1',
+          'paired': true,
+          'user': {'pubkey': 'ab12', 'username': 'ana'},
+        }
+      );
+      net.routes[settingsRoute] = (200, {'domain': 'lawallet.io'});
+      fake.callbacks['ana@lawallet.io'] =
+          'https://beta.lawallet.io/api/lud16/ana/callback';
+    });
+
+    tearDown(() {
+      messenger.setMockMethodCallHandler(nfc, null);
+      messenger.setMockStreamHandler(tags, null);
+      wapuCardAddress = cardOwnerAddress;
+    });
+
+    /// Opens the sale on a till whose reader hands its taps to [reader]. The
+    /// reader is mocked here, in the test's own zone: mocked in setUp, its taps
+    /// would only land on real time, which the pumps never let run.
+    Future<void> openWithReader(WidgetTester tester,
+        {bool english = false}) async {
+      messenger.setMockStreamHandler(
+          tags,
+          MockStreamHandler.inline(
+            onListen: (_, sink) {
+              reader = sink;
+            },
+            onCancel: (_) {
+              reader = null;
+            },
+          ));
+      await open(tester, english: english);
+    }
+
+    /// Taps [url] on the reader and lets its lookup answer.
+    Future<void> tap(WidgetTester tester, [String url = card]) async {
+      reader!.success(url);
+      await settle(tester);
+    }
+
+    /// The taps the till took, by its buzz.
+    int buzzes() => nfcCalls.where((c) => c == 'vibrate').length;
+
+    /// Holds the card's lookup until the returned completer completes.
+    Completer<void> holdLookup() {
+      final held = Completer<void>();
+      net.hold =
+          (o) => o.uri.path.startsWith('/api/') ? held.future : Future.value();
+      return held;
+    }
+
+    /// A reply of the card's instance that gives no address, and why, in
+    /// Spanish and in English.
+    final failures = [
+      (
+        (404, {'error': 'Card not found'}),
+        'No encontramos esa tarjeta',
+        'That card was not found'
+      ),
+      (
+        (200, {'id': 'c1', 'paired': false, 'user': null}),
+        'La tarjeta no tiene una lightning address',
+        'The card has no lightning address'
+      ),
+      (
+        (400, {'error': 'Bad request'}), // an instance older than the info
+        'No se pudo leer la tarjeta',
+        'The card could not be read'
+      ),
+    ];
+
+    testWidgets("a LaWallet card puts its owner's address in the field",
+        (tester) async {
+      await openWithReader(tester);
+      expect(nfcCalls, ['isAvailable', 'startSession']);
+      await submit(tester, 'hello'); // typed, and refused
+      expect(find.text(_notAnAddress), findsOneWidget);
+
+      await tap(tester);
+
+      expect(fieldText(tester), 'ana@lawallet.io',
+          reason: 'over what was typed');
+      expect(find.text(_notAnAddress), findsNothing);
+      expect(buzzes(), 1);
+      expect(net.calls, [infoRoute, settingsRoute]);
+      expect(net.hosts.toSet(), {'beta.lawallet.io'});
+      expect(net.queries.first, isEmpty, reason: 'the SUN stays on the card');
+      expect(fake.validated, isEmpty, reason: 'Continuar was not pressed');
+      expect(destination, findsOneWidget);
+
+      await tester.tap(next);
+      await settle(tester);
+      expect(fake.validated, ['ana@lawallet.io']);
+      expect(amount, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the step waits while the card is read', (tester) async {
+      final held = holdLookup();
+      await openWithReader(tester);
+      await tap(tester);
+      expect(find.text(reading), findsOneWidget);
+      expect(tester.widget<TextField>(destination).enabled, isFalse);
+      expect(tester.widget<FilledButton>(next).onPressed, isNull);
+      await tester.tap(find.text('Escanear QR'));
+      await settle(tester);
+      expect(find.byType(TokenScanPage), findsNothing,
+          reason: 'the scanner would race the card for the field');
+
+      await tap(tester); // another card, while the first is read
+      expect(buzzes(), 1, reason: 'one card at a time');
+      expect(net.calls, [infoRoute]);
+
+      held.complete();
+      await settle(tester);
+      expect(find.text(reading), findsNothing);
+      expect(fieldText(tester), 'ana@lawallet.io');
+      expect(tester.widget<TextField>(destination).enabled, isTrue);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('an answer for a sale that was left is dropped',
+        (tester) async {
+      final held = holdLookup();
+      await openWithReader(tester);
+      await tap(tester);
+      expect(find.text(reading), findsOneWidget);
+
+      await tester.tap(newSale);
+      await settle(tester);
+      expect(find.text(reading), findsNothing);
+      expect(tester.widget<TextField>(destination).enabled, isTrue);
+
+      held.complete();
+      await settle(tester);
+      expect(fieldText(tester), isEmpty, reason: "the old sale's card");
+
+      await tap(tester); // the new sale reads its own
+      expect(fieldText(tester), 'ana@lawallet.io');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('says why a card gave no address', (tester) async {
+      await openWithReader(tester);
+      // The blank one first: no message is on screen yet to pass for its own.
+      for (final tag in ['', otherCard]) {
+        await tap(tester, tag); // a blank tag, then another Boltcard
+        expect(find.text('Esa tarjeta no es de LaWallet'), findsOneWidget,
+            reason: tag);
+      }
+      expect(buzzes(), 2, reason: 'both were taken, neither dropped');
+      expect(net.calls, isEmpty, reason: 'not ours: nothing to ask');
+      expect(fake.resolved, isEmpty);
+
+      for (final (reply, copy, _) in failures) {
+        net.routes[infoRoute] = reply;
+        await tap(tester);
+        expect(find.text(copy), findsOneWidget, reason: copy);
+      }
+      expect(fieldText(tester), isEmpty);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap past the first step is not read', (tester) async {
+      net.routes[_quoteRoute] = quoteReply();
+      net.routes[_createRoute] = createdReply();
+      net.routes[_fundRoute] = orderReply(code: 201);
+      net.routes[_detailRoute] = orderReply();
+      await openWithReader(tester);
+      await submit(tester, 'alice@example.com');
+      expect(amount, findsOneWidget);
+      await tap(tester);
+
+      await typeDigits(tester, '15000');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget, reason: 'on the status');
+      await tap(tester);
+
+      expect(buzzes(), 0);
+      expect(net.calls, isNot(contains(infoRoute)));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap under another screen is not read', (tester) async {
+      await openWithReader(tester);
+      final router = GoRouter.of(tester.element(find.byType(WapuScreen)));
+
+      await tester.tap(gear);
+      await settle(tester);
+      expect(find.byType(WapuSettingsScreen), findsOneWidget);
+      await tap(tester);
+      await tester.tap(find.byIcon(Icons.arrow_back));
+      await settle(tester);
+
+      await tester.tap(history);
+      await settle(tester);
+      expect(find.text('historial'), findsOneWidget);
+      await tap(tester);
+      router.pop();
+      await settle(tester);
+
+      await tester.tap(find.text('Escanear QR'));
+      await settle(tester);
+      expect(find.byType(TokenScanPage), findsOneWidget);
+      await tap(tester);
+      await tester.tap(find.byIcon(Icons.close));
+      await settle(tester);
+
+      expect(buzzes(), 0);
+      expect(net.calls, isNot(contains(infoRoute)));
+      expect(fieldText(tester), isEmpty);
+
+      await tap(tester); // back on the sale, the reader is still on
+      expect(fieldText(tester), 'ana@lawallet.io');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap while Continuar checks the address is not read',
+        (tester) async {
+      fake.hold = Completer<void>();
+      await openWithReader(tester);
+      await submit(tester, 'bob@example.com');
+      expect(fake.validated, ['bob@example.com'], reason: 'the check is held');
+
+      await tap(tester);
+      expect(buzzes(), 0);
+      expect(net.calls, isEmpty, reason: 'nothing was asked of the card');
+      expect(fieldText(tester), 'bob@example.com',
+          reason: 'the card did not write over it');
+
+      fake.hold!.complete();
+      await settle(tester);
+      expect(amount, findsOneWidget);
+      net.routes[_quoteRoute] = quoteReply();
+      await typeDigits(tester, '15000');
+      await tester.pump(const Duration(milliseconds: 600));
+      await openDetails(tester);
+      expect(line('Para', 'bob@example.com'), findsOneWidget,
+          reason: 'the sale is for the address that was checked');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a tap without a key is not read', (tester) async {
+      FlutterSecureStorage.setMockInitialValues({}); // this user has no key
+      await openWithReader(tester);
+      expect(find.text(_configure), findsOneWidget);
+      expect(reader, isNotNull, reason: 'the reader listens with no key too');
+
+      await tap(tester);
+      expect(buzzes(), 0);
+      expect(net.calls, isEmpty, reason: 'nothing was asked of the card');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the reader is let go with the sale', (tester) async {
+      await openWithReader(tester);
+      expect(reader, isNotNull);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(reader, isNull);
+    });
+
+    testWidgets('without a reader nothing listens', (tester) async {
+      nfcReplies(available: false);
+      await openWithReader(tester);
+
+      expect(nfcCalls, ['isAvailable']);
+      expect(reader, isNull);
+      expect(destination, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the card copy is translated', (tester) async {
+      final held = holdLookup();
+      await openWithReader(tester, english: true);
+      await tap(tester);
+      expect(find.text('Reading the card…'), findsOneWidget);
+      held.complete();
+      await settle(tester);
+
+      await tap(tester, otherCard);
+      expect(find.text('That card is not a LaWallet card'), findsOneWidget);
+      for (final (reply, _, copy) in failures) {
+        net.routes[infoRoute] = reply;
+        await tap(tester);
+        expect(find.text(copy), findsOneWidget, reason: copy);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   group('after the config closes', () {
     testWidgets('a saved key brings the sale in', (tester) async {
       await open(tester);
@@ -952,12 +1335,28 @@ void main() {
       expect(net.queries.single, containsPair('amount_ars_cents', '1500000'));
       expect(net.queries.single, isNot(contains('amount_out')));
       expect(find.byType(CircularProgressIndicator), findsNothing);
-      expect(find.text('El cliente recibe'), findsOneWidget);
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget,
+          reason: 'one plain line under the amount');
+      // The cash register's type scale: a large bold amount, and under it a
+      // small muted line.
+      final typedStyle = tester.widget<Text>(find.text(r'$ 15.000')).style!;
+      final lineStyle = tester
+          .widget<Text>(find.text('El cliente recibe 12.500 sats'))
+          .style!;
+      expect(typedStyle.fontSize, 44);
+      expect(typedStyle.fontWeight, FontWeight.w700);
+      expect(lineStyle.fontSize, 16);
+      expect(lineStyle.color, AppColors.muted);
+      expect(confirmAction(tester), isNotNull);
+
+      // The rest of the quote is in the card, not on the screen.
+      expect(find.text('Tipo de cambio'), findsNothing);
+      expect(find.text('Comisión incluida'), findsNothing);
+      expect(find.text('Fee de red estimado'), findsNothing);
+      await openDetails(tester);
       expect(line('Tipo de cambio', '\$ 120.000.000 por BTC'), findsOneWidget);
       expect(line('Comisión incluida', '1,50%'), findsOneWidget);
       expect(line('Fee de red estimado', '21 sats'), findsOneWidget);
-      expect(confirmAction(tester), isNotNull);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -977,9 +1376,10 @@ void main() {
       expect(net.calls, [_quoteRoute]);
       expect(net.queries.single, containsPair('amount_out', '50000'));
       expect(net.queries.single, isNot(contains('amount_ars_cents')));
-      expect(line('El cliente recibe', '50.000 sats'), findsOneWidget);
-      expect(line('Tipo de cambio', '\$ 20.000.000 por BTC'), findsOneWidget);
+      expect(find.text('El cliente paga \$ 10.000,00'), findsOneWidget);
       expect(confirmAction(tester), isNotNull);
+      await openDetails(tester);
+      expect(line('Tipo de cambio', '\$ 20.000.000 por BTC'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -991,17 +1391,16 @@ void main() {
       await tester.pump();
       await typeDigits(tester, '50000');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(line('El cliente paga', '\$ 224,00'), findsOneWidget);
-      expect(line('El cliente recibe', '50.000 sats'), findsOneWidget);
-      expect(tester.getTopLeft(find.text('El cliente paga')).dy,
-          lessThan(tester.getTopLeft(find.text('El cliente recibe')).dy),
-          reason: 'the figure the operator must see comes first');
+      expect(find.text('El cliente paga \$ 224,00'), findsOneWidget);
+      expect(find.text('50.000 sats'), findsOneWidget,
+          reason: 'the amount typed is what the customer receives');
+      expect(find.textContaining('El cliente recibe'), findsNothing);
 
       // To the centavo, with the thousands grouped by dots.
       net.routes[_quoteRoute] = quoteReply(ars: 123456705, out: 500000);
       await typeDigits(tester, '0');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(line('El cliente paga', '\$ 1.234.567,05'), findsOneWidget);
+      expect(find.text('El cliente paga \$ 1.234.567,05'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -1011,8 +1410,8 @@ void main() {
 
       await typeDigits(tester, '224');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(line('El cliente recibe', '50.000 sats'), findsOneWidget);
-      expect(find.text('El cliente paga'), findsNothing,
+      expect(find.text('El cliente recibe 50.000 sats'), findsOneWidget);
+      expect(find.textContaining('El cliente paga'), findsNothing,
           reason: 'what was typed is what the customer pays');
       expect(find.textContaining('224,00'), findsNothing);
       await tester.pumpWidget(const SizedBox());
@@ -1052,13 +1451,13 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         expect(net.queries, hasLength(2));
         expect(net.queries.last, containsPair('amount_ars_cents', '1200'));
-        expect(line('El cliente recibe', '2.222 sats'), findsOneWidget,
+        expect(find.text('El cliente recibe 2.222 sats'), findsOneWidget,
             reason: 'the second price came back first');
 
         first.complete(); // the first price lands last
         await settle(tester);
-        expect(line('El cliente recibe', '2.222 sats'), findsOneWidget);
-        expect(find.text('1.111 sats'), findsNothing);
+        expect(find.text('El cliente recibe 2.222 sats'), findsOneWidget);
+        expect(find.textContaining('1.111'), findsNothing);
         await tester.pumpWidget(const SizedBox());
       });
     });
@@ -1070,11 +1469,13 @@ void main() {
       await typeDigits(tester, '999');
       await tester.pump(const Duration(milliseconds: 600));
       expect(find.text('El mínimo es \$ 1.000'), findsOneWidget);
-      expect(find.text('El cliente recibe'), findsOneWidget,
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget,
           reason: 'the price is still the price');
-      expect(tester.getTopLeft(find.text('El mínimo es \$ 1.000')).dy,
-          lessThan(tester.getTopLeft(find.text('El cliente recibe')).dy),
-          reason: 'why Confirmar is off comes before the lines that scroll');
+      expect(
+          tester.getTopLeft(find.text('El mínimo es \$ 1.000')).dy,
+          lessThan(
+              tester.getTopLeft(find.text('El cliente recibe 12.500 sats')).dy),
+          reason: 'why Confirmar is off comes before the line');
       expect(confirmAction(tester), isNull);
 
       // The minimum itself is enough.
@@ -1120,7 +1521,8 @@ void main() {
       expect(find.text('El monto está fuera de los límites'), findsOneWidget);
       expect(find.text('amount out of range'), findsOneWidget,
           reason: "the backend's own words, small, under the copy");
-      expect(find.text('El cliente recibe'), findsNothing);
+      expect(find.textContaining('El cliente recibe'), findsNothing);
+      expect(details, findsNothing, reason: 'no price, nothing to detail');
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(confirmAction(tester), isNull);
 
@@ -1129,7 +1531,7 @@ void main() {
       await typeDigits(tester, '0');
       expect(find.text('El monto está fuera de los límites'), findsNothing);
       await tester.pump(const Duration(milliseconds: 600));
-      expect(find.text('El cliente recibe'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
       expect(confirmAction(tester), isNotNull);
       await tester.pumpWidget(const SizedBox());
     });
@@ -1153,17 +1555,17 @@ void main() {
       await toAmount(tester);
       await typeDigits(tester, '15000');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(find.text('El cliente recibe'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
 
       await tester.tap(inArs); // the unit it is in already: nothing to clear
       await tester.pump();
       expect(find.text('\$ 15.000'), findsOneWidget);
-      expect(find.text('El cliente recibe'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
 
       await tester.tap(inSats);
       await tester.pump();
       expect(find.text('0 sats'), findsOneWidget);
-      expect(find.text('El cliente recibe'), findsNothing);
+      expect(find.textContaining('El cliente recibe'), findsNothing);
       expect(confirmAction(tester), isNull);
 
       await settle(tester);
@@ -1202,30 +1604,177 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('the header shows the address, and its pencil goes back to it',
+    testWidgets('the amount step has no header: no address, no pencil',
         (tester) async {
       await toAmount(tester, address: '  LIGHTNING:Alice@Example.COM ');
-      expect(find.text('alice@example.com'), findsOneWidget,
-          reason: 'the normalized address: where the sats go');
+      expect(find.text('alice@example.com'), findsNothing);
+      expect(find.byIcon(Icons.edit_outlined), findsNothing);
+      expect(find.byTooltip('CAMBIAR DIRECCIÓN'), findsNothing);
+
       await typeDigits(tester, '15000');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
-
-      await tester.tap(find.byIcon(Icons.edit_outlined));
-      await tester.pump();
-      expect(destination, findsOneWidget);
-      expect(amount, findsNothing);
-      expect(fieldText(tester), '  LIGHTNING:Alice@Example.COM ',
-          reason: 'what was typed stays, to be fixed');
-
-      await submit(tester, 'Bob@Example.com');
-      expect(fake.validated, ['alice@example.com', 'bob@example.com']);
-      expect(find.text('bob@example.com'), findsOneWidget);
-      expect(find.text('alice@example.com'), findsNothing);
-      expect(find.text('\$ 15.000'), findsOneWidget,
-          reason: 'the amount does not depend on the address');
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(find.text('alice@example.com'), findsNothing,
+          reason: 'nor with the price in: it is in the card');
+      expect(find.byIcon(Icons.edit_outlined), findsNothing);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    group('the card of the rest of the quote', () {
+      final card = find.byType(AlertDialog);
+
+      testWidgets('the info button opens it, and its X closes it',
+          (tester) async {
+        await toAmount(tester, address: '  LIGHTNING:Alice@Example.COM ');
+        expect(details, findsNothing, reason: 'no price yet');
+        await typeDigits(tester, '15000');
+        expect(details, findsNothing, reason: 'the price is on its way');
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(tester.widget<IconButton>(details).onPressed, isNotNull);
+        expect(card, findsNothing, reason: 'it is opened, not shown');
+
+        await tester.tap(details);
+        await settle(tester);
+        expect(card, findsOneWidget);
+        expect(find.descendant(of: card, matching: find.text('Detalle')),
+            findsOneWidget);
+        expect(
+            line('Tipo de cambio', r'$ 120.000.000 por BTC'), findsOneWidget);
+        expect(line('Comisión incluida', '1,50%'), findsOneWidget);
+        expect(line('Fee de red estimado', '21 sats'), findsOneWidget);
+        expect(line('Para', 'alice@example.com'), findsOneWidget,
+            reason: 'the normalized address, in full: where the sats go');
+
+        await tester.tap(detailsClose);
+        await settle(tester);
+        expect(card, findsNothing);
+        expect(amount, findsOneWidget, reason: 'the sale is where it was');
+        expect(find.text(r'$ 15.000'), findsOneWidget);
+        expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
+        expect(confirmAction(tester), isNotNull);
+
+        await openDetails(tester); // as often as the operator wants
+        expect(card, findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('a tap outside closes it too', (tester) async {
+        await toAmount(tester);
+        await typeDigits(tester, '15000');
+        await tester.pump(const Duration(milliseconds: 600));
+        await openDetails(tester);
+        expect(card, findsOneWidget);
+
+        await tester.tapAt(const Offset(2, 2)); // on the barrier
+        await settle(tester);
+        expect(card, findsNothing);
+        expect(amount, findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      testWidgets('the system back closes it, and does not leave the step',
+          (tester) async {
+        await toAmount(tester);
+        await typeDigits(tester, '15000');
+        await tester.pump(const Duration(milliseconds: 600));
+        await openDetails(tester);
+        expect(card, findsOneWidget);
+
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+        expect(card, findsNothing);
+        expect(amount, findsOneWidget, reason: 'the card went first');
+        expect(destination, findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      });
+
+      // Ahem draws every glyph an em wide, so on the Z92 the rate row is
+      // wider than any card. The window is wide enough for the card's own
+      // width to be what is under test.
+      testWidgets('the rows keep their value on their line', (tester) async {
+        await open(tester, screen: const Size(1800, 1920), density: 1.5);
+        await submit(tester, 'alice@example.com');
+        await typeDigits(tester, '15000');
+        await tester.pump(const Duration(milliseconds: 600));
+        await openDetails(tester);
+
+        for (final (label, value) in [
+          ('Tipo de cambio', r'$ 120.000.000 por BTC'),
+          ('Comisión incluida', '1,50%'),
+          ('Fee de red estimado', '21 sats'),
+          ('Para', 'alice@example.com'),
+        ]) {
+          expect(tester.getTopLeft(find.text(value)).dy,
+              closeTo(tester.getTopLeft(find.text(label)).dy, 2),
+              reason: '$value is on the line of $label');
+        }
+        await tester.pumpWidget(const SizedBox());
+      });
+    });
+
+    group('back', () {
+      for (final (what, goBack) in backs) {
+        testWidgets('$what goes back to the address, which keeps the amount',
+            (tester) async {
+          await open(tester, overHub: true);
+          await submit(tester, '  LIGHTNING:Alice@Example.COM ');
+          expect(amount, findsOneWidget);
+          await typeDigits(tester, '15000');
+          await tester.pump(const Duration(milliseconds: 600));
+          expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
+
+          await goBack(tester);
+          await settle(tester);
+          expect(destination, findsOneWidget);
+          expect(amount, findsNothing);
+          expect(find.text('hub'), findsNothing, reason: 'a step, not out');
+          expect(fieldText(tester), '  LIGHTNING:Alice@Example.COM ',
+              reason: 'what was typed stays, to be fixed');
+
+          await submit(tester, 'Bob@Example.com');
+          expect(fake.validated, ['alice@example.com', 'bob@example.com']);
+          expect(find.text('\$ 15.000'), findsOneWidget,
+              reason: 'the amount does not depend on the address');
+          expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
+          await openDetails(tester);
+          expect(line('Para', 'bob@example.com'), findsOneWidget);
+          expect(find.text('alice@example.com'), findsNothing);
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        testWidgets('$what still leaves the sale from the address step',
+            (tester) async {
+          await open(tester, overHub: true);
+          expect(destination, findsOneWidget);
+
+          await goBack(tester);
+          await settle(tester);
+          expect(find.text('hub'), findsOneWidget);
+          await tester.pumpWidget(const SizedBox());
+        });
+      }
+
+      testWidgets('locked, the system back goes back from the amount too',
+          (tester) async {
+        await open(tester, overHub: true);
+        await submit(tester, 'alice@example.com');
+        lockedFlow.value = '/wapu'; // tearDown lets it go
+        await tester.pump();
+        expect(find.byIcon(Icons.arrow_back), findsNothing,
+            reason: 'locked, the bar has no back: only the system one is left');
+
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+        expect(destination, findsOneWidget);
+        expect(amount, findsNothing);
+        expect(fieldText(tester), 'alice@example.com');
+
+        // The first step of the locked sale has nothing behind it.
+        await tester.binding.handlePopRoute();
+        await settle(tester);
+        expect(destination, findsOneWidget);
+        expect(find.text('hub'), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      });
     });
 
     testWidgets('a POS switch drops the amount and the price on its way',
@@ -1249,7 +1798,7 @@ void main() {
       net.hold = null;
       await submit(tester, 'bob@example.com');
       expect(find.text('\$ 0'), findsOneWidget, reason: 'a new sale, in pesos');
-      expect(find.text('El cliente recibe'), findsNothing);
+      expect(find.textContaining('El cliente'), findsNothing);
       expect(net.queries, hasLength(1), reason: 'nothing asked again');
       await tester.pumpWidget(const SizedBox());
     });
@@ -1259,7 +1808,7 @@ void main() {
       await toAmount(tester);
       await typeDigits(tester, '15000');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
       expect(confirmAction(tester), isNotNull);
       expect(net.hosts.last, 'be-prod.wapu.app');
 
@@ -1280,13 +1829,13 @@ void main() {
 
       await submit(tester, 'alice@example.com');
       expect(find.text('\$ 0'), findsOneWidget);
-      expect(find.text('El cliente recibe'), findsNothing,
+      expect(find.textContaining('El cliente recibe'), findsNothing,
           reason: "the old backend's price is not the new one's");
       expect(confirmAction(tester), isNull);
 
       await typeDigits(tester, '15000');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
       expect(confirmAction(tester), isNotNull);
       expect(net.hosts.last, 'be-stage.wapu.app',
           reason: 'the new price is asked of the new backend');
@@ -1307,9 +1856,247 @@ void main() {
 
       expect(find.byType(WapuSettingsScreen), findsNothing);
       expect(find.text('\$ 15.000'), findsOneWidget);
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
       expect(confirmAction(tester), isNotNull);
       await tester.pumpWidget(const SizedBox());
+    });
+
+    // The Z92 is 720x1280 px at 240 dpi. Android takes 108 px of that for its
+    // status and navigation bars, and leaves the sale 720x1172.
+    group('on the Z92', () {
+      const screens = [Size(720, 1280), Size(720, 1172)];
+      const density = 1.5;
+      final pad = find.byIcon(Icons.backspace_outlined);
+
+      /// Opens the sale on [screen], at the app's text scale, and takes
+      /// alice@example.com to the amount step.
+      Future<void> toAmountOn(WidgetTester tester, Size screen) async {
+        await open(tester, screen: screen, density: density);
+        await submit(tester, 'alice@example.com');
+        expect(amount, findsOneWidget, reason: 'the address was taken');
+      }
+
+      /// What the operator works with lies inside the screen, the amount above
+      /// the line, the info button a touch target beside it, and what is under
+      /// the amount is all in view as it is: it does not need to be scrolled.
+      /// [typed] and [priced] are the amount and the line under it, [warning]
+      /// what comes before the line, if anything.
+      void expectItFits(WidgetTester tester, Size screen,
+          {required Finder typed,
+          required Finder priced,
+          Finder? warning,
+          bool withPad = true}) {
+        final view = Offset.zero & (screen / density);
+        final rects = {
+          'the amount': tester.getRect(typed),
+          if (warning != null) 'the warning': tester.getRect(warning),
+          'the line': tester.getRect(priced),
+          'the info button': tester.getRect(details),
+          if (withPad) 'the pad': tester.getRect(pad),
+          'Confirmar': tester.getRect(confirm),
+        };
+        rects.forEach((what, rect) {
+          expect(view.expandToInclude(rect), view,
+              reason: '$what, $rect, is out of $view');
+        });
+        final info = rects['the info button']!;
+        final lineRect = rects['the line']!;
+        expect(info.width, greaterThanOrEqualTo(40), reason: 'touch target');
+        expect(info.height, greaterThanOrEqualTo(40), reason: 'touch target');
+        expect(lineRect.right, lessThanOrEqualTo(info.left + 0.5),
+            reason: 'beside the line, not under it');
+        expect((info.center.dy - lineRect.center.dy).abs(), lessThan(2),
+            reason: 'on the row of the line');
+        expect(rects['the amount']!.bottom,
+            lessThanOrEqualTo(rects['the line']!.top),
+            reason: 'the amount is above the line');
+        final scroll = find.descendant(
+            of: amount, matching: find.byType(SingleChildScrollView));
+        expect(
+            tester
+                .state<ScrollableState>(find.descendant(
+                    of: scroll, matching: find.byType(Scrollable)))
+                .position
+                .maxScrollExtent,
+            0,
+            reason: 'under the amount, nothing is out of view');
+        expect(tester.takeException(), isNull);
+      }
+
+      for (final screen in screens) {
+        final on = '${screen.width.toInt()}x${screen.height.toInt()}';
+
+        testWidgets('pesos with a price fit on $on', (tester) async {
+          await toAmountOn(tester, screen);
+          await typeDigits(tester, '15000');
+          await tester.pump(const Duration(milliseconds: 600));
+
+          expectItFits(tester, screen,
+              typed: find.text(r'$ 15.000'),
+              priced: find.text('El cliente recibe 12.500 sats'));
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        testWidgets('sats with a price fit on $on', (tester) async {
+          net.routes[_quoteRoute] = quoteReply(ars: 1000000, out: 50000);
+          await toAmountOn(tester, screen);
+          await tester.tap(inSats);
+          await tester.pump();
+          await typeDigits(tester, '50000');
+          await tester.pump(const Duration(milliseconds: 600));
+
+          expectItFits(tester, screen,
+              typed: find.text('50.000 sats'),
+              priced: find.text(r'El cliente paga $ 10.000,00'));
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        testWidgets('an invoice fits on $on', (tester) async {
+          net.routes[_quoteRoute] = quoteReply(ars: 300000, out: 2500);
+          await open(tester, screen: screen, density: density);
+          await submit(tester, invoiceFor());
+          expect(amount, findsOneWidget, reason: 'the invoice was taken');
+
+          expectItFits(tester, screen,
+              typed: find.text('2.500 sats'),
+              priced: find.text(r'El cliente paga $ 3.000,00'),
+              withPad: false);
+          expect(find.text('Monto fijado por el invoice'), findsOneWidget);
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        testWidgets('twelve digits fit on $on', (tester) async {
+          await toAmountOn(tester, screen);
+          final oneLine = tester.getRect(find.text(r'$ 0')).height;
+          await typeDigits(tester, '123456789012');
+
+          final view = Offset.zero & (screen / density);
+          final typed = tester.getRect(find.text(r'$ 123.456.789.012'));
+          expect(view.expandToInclude(typed), view);
+          expect(typed.height, lessThanOrEqualTo(oneLine + 0.5),
+              reason: 'one line, shrunk to the width, not wrapped');
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        testWidgets('the amount takes at most half of the room on $on',
+            (tester) async {
+          await toAmountOn(tester, screen);
+          await typeDigits(tester, '15000');
+          await tester.pump(const Duration(milliseconds: 600));
+
+          final room = tester
+              .getSize(find
+                  .descendant(of: amount, matching: find.byType(LayoutBuilder))
+                  .first)
+              .height;
+          expect(tester.getRect(find.text(r'$ 15.000')).height,
+              lessThanOrEqualTo(room / 2 + 0.5),
+              reason: 'the cash register gives it half of the room');
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        testWidgets('the amount stays put as its price comes and goes on $on',
+            (tester) async {
+          await toAmountOn(tester, screen);
+          final typed = find.byWidgetPredicate(
+              (w) => w is Text && (w.data == r'$ 0' || w.data == r'$ 1'));
+          final nothingTyped = tester.getTopLeft(typed).dy;
+
+          await typeDigits(tester, '1');
+          expect(find.byType(CircularProgressIndicator), findsOneWidget);
+          expect(tester.getTopLeft(typed).dy, nothingTyped,
+              reason: 'while the price is on its way');
+
+          await tester.pump(const Duration(milliseconds: 600));
+          expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
+          expect(tester.getTopLeft(typed).dy, nothingTyped,
+              reason: 'when it lands');
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        // Typing 1, 5, 0, 0, 0 goes below the minimum for the first digits: the
+        // warning has to fit with the line, with the amount giving way.
+        testWidgets('the warning of the minimum fits on $on', (tester) async {
+          net.routes[_quoteRoute] = quoteReply(ars: 99900, min: 100000);
+          await toAmountOn(tester, screen);
+          await typeDigits(tester, '999');
+          await tester.pump(const Duration(milliseconds: 600));
+
+          expectItFits(tester, screen,
+              typed: find.text(r'$ 999'),
+              warning: find.text(r'El mínimo es $ 1.000'),
+              priced: find.text('El cliente recibe 12.500 sats'));
+          expect(confirmAction(tester), isNull);
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        testWidgets('a long error scrolls under the amount on $on',
+            (tester) async {
+          final long =
+              List.filled(40, 'too many open purchase orders').join(' ');
+          net.routes[_createRoute] = (429, {'error': long});
+          await toAmountOn(tester, screen);
+          await typeDigits(tester, '15000');
+          await tester.pump(const Duration(milliseconds: 600));
+          await tester.tap(confirm);
+          await settle(tester);
+          expect(errorDetail, findsOneWidget, reason: 'the long error is on');
+
+          final view = Offset.zero & (screen / density);
+          for (final (what, finder) in [
+            ('the amount', find.text(r'$ 15.000')),
+            ('the pad', pad),
+            ('Confirmar', confirm),
+          ]) {
+            expect(view.expandToInclude(tester.getRect(finder)), view,
+                reason: '$what is out of $view');
+          }
+          final scroll = find.descendant(
+              of: amount, matching: find.byType(SingleChildScrollView));
+          final scrollable = tester.state<ScrollableState>(
+              find.descendant(of: scroll, matching: find.byType(Scrollable)));
+          expect(scrollable.position.maxScrollExtent, greaterThan(0),
+              reason: 'what does not fit is scrolled');
+          expect(tester.takeException(), isNull);
+
+          await tester.ensureVisible(details);
+          await tester.pump();
+          await tester.tap(details);
+          await settle(tester);
+          expect(find.byType(AlertDialog), findsOneWidget,
+              reason: 'the line and its button are within reach');
+          await tester.pumpWidget(const SizedBox());
+        });
+
+        for (final english in [false, true]) {
+          final language = english ? 'English' : 'Spanish';
+          testWidgets('the card fits on $on in $language', (tester) async {
+            await open(tester,
+                english: english, screen: screen, density: density);
+            await submit(
+                tester, 'a-rather-long-name@a-rather-long-domain.example.com');
+            await typeDigits(tester, '15000');
+            await tester.pump(const Duration(milliseconds: 600));
+            await openDetails(tester);
+
+            final card = find.byType(AlertDialog);
+            expect(card, findsOneWidget);
+            final view = Offset.zero & (screen / density);
+            final within = tester.getRect(card);
+            expect(view.expandToInclude(within), view);
+            for (final finder in [
+              find.text(english ? 'Details' : 'Detalle'),
+              detailsClose,
+              find.text('a-rather-long-name@a-rather-long-domain.example.com'),
+            ]) {
+              expect(within.expandToInclude(tester.getRect(finder)), within);
+            }
+            expect(tester.takeException(), isNull);
+            await tester.pumpWidget(const SizedBox());
+          });
+        }
+      }
     });
 
     testWidgets('the amount step is translated', (tester) async {
@@ -1317,19 +2104,26 @@ void main() {
           quoteReply(ars: 50000, min: 2000000, liquidity: false);
       await toAmount(tester, english: true);
       expect(find.text('Confirm'), findsOneWidget);
-      expect(find.byTooltip('CHANGE ADDRESS'), findsOneWidget);
 
       await typeDigits(tester, '500');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(find.text('The customer receives'), findsOneWidget);
-      expect(line('Exchange rate', '\$ 4.000.000 per BTC'), findsOneWidget);
-      expect(find.text('Fee included'), findsOneWidget);
-      expect(find.text('Estimated network fee'), findsOneWidget);
+      expect(find.text('The customer receives 12.500 sats'), findsOneWidget);
+      expect(find.byTooltip('SHOW DETAILS'), findsOneWidget);
       expect(find.text('The minimum is \$ 20.000'), findsOneWidget);
       expect(
           find.text('No liquidity available right now. Try again in a few '
               'minutes.'),
           findsOneWidget);
+
+      await openDetails(tester);
+      expect(find.text('Details'), findsOneWidget);
+      expect(find.byTooltip('CLOSE'), findsOneWidget);
+      expect(line('Exchange rate', '\$ 4.000.000 per BTC'), findsOneWidget);
+      expect(find.text('Fee included'), findsOneWidget);
+      expect(find.text('Estimated network fee'), findsOneWidget);
+      expect(line('To', 'alice@example.com'), findsOneWidget);
+      await tester.tap(detailsClose);
+      await settle(tester);
 
       net.routes[_quoteRoute] = (422, {'error': 'out'});
       await typeDigits(tester, '0');
@@ -1341,7 +2135,7 @@ void main() {
       await tester.pump();
       await typeDigits(tester, '5');
       await tester.pump(const Duration(milliseconds: 600));
-      expect(line('The customer pays', '\$ 224,00'), findsOneWidget);
+      expect(find.text('The customer pays \$ 224,00'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -1363,8 +2157,9 @@ void main() {
 
     /// Opens the sale and pastes a good invoice, which it returns. It is made
     /// after the sale opens, so that it has all its life.
-    Future<String> toInvoice(WidgetTester tester) async {
-      await open(tester);
+    Future<String> toInvoice(WidgetTester tester,
+        {bool overHub = false}) async {
+      await open(tester, overHub: overHub);
       final invoice = invoiceFor();
       await submit(tester, invoice);
       expect(amount, findsOneWidget, reason: 'the invoice was taken');
@@ -1387,20 +2182,24 @@ void main() {
       expect(fake.validated, isEmpty, reason: 'an invoice is not looked up');
       await settle(tester);
 
-      expect(find.text(shortDestination(text)), findsOneWidget,
-          reason: 'the invoice, short, where the address goes');
-      expect(find.text(text), findsNothing);
-      expect(find.text('2.500 sats'), findsNWidgets(2),
-          reason: 'the amount, and what the customer receives');
+      expect(find.text(shortDestination(text)), findsNothing,
+          reason: 'the invoice is in the card, not in a header');
+      expect(find.text('2.500 sats'), findsOneWidget,
+          reason: 'the amount, which is what the customer receives');
       expect(setByInvoice, findsOneWidget);
       expect(inArs, findsNothing);
       expect(inSats, findsNothing);
       expect(pad, findsNothing);
-      // The lines of the sats mode: what the customer pays comes first.
-      expect(line('El cliente paga', r'$ 3.000,00'), findsOneWidget);
-      expect(line('El cliente recibe', '2.500 sats'), findsOneWidget);
-      expect(line('Tipo de cambio', r'$ 120.000.000 por BTC'), findsOneWidget);
+      // The line of the sats mode: what the customer pays.
+      expect(find.text(r'El cliente paga $ 3.000,00'), findsOneWidget);
+      expect(find.textContaining('El cliente recibe'), findsNothing);
       expect(confirmAction(tester), isNotNull);
+
+      await openDetails(tester);
+      expect(line('Para', shortDestination(text)), findsOneWidget,
+          reason: 'the invoice, short, as the receipt says it');
+      expect(find.text(text), findsNothing);
+      expect(line('Tipo de cambio', r'$ 120.000.000 por BTC'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -1435,8 +2234,9 @@ void main() {
 
       await submit(tester, invoiceFor());
       expect(amount, findsOneWidget, reason: 'a good one is taken');
-      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.tap(find.byIcon(Icons.arrow_back));
       await tester.pump();
+      expect(destination, findsOneWidget, reason: 'a step back, not out');
       expect(find.text(_expiresSoon), findsNothing,
           reason: 'the message was about the last invoice');
       await tester.pumpWidget(const SizedBox());
@@ -1493,29 +2293,33 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('the pencil drops the invoice and its amount', (tester) async {
-      final text = await toInvoice(tester);
+    for (final (what, goBack) in backs) {
+      testWidgets('$what drops the invoice and its amount', (tester) async {
+        final text = await toInvoice(tester, overHub: true);
 
-      await tester.tap(find.byIcon(Icons.edit_outlined));
-      await tester.pump();
-      expect(destination, findsOneWidget);
-      expect(fieldText(tester), text, reason: 'what was typed stays');
+        await goBack(tester);
+        await settle(tester);
+        expect(destination, findsOneWidget);
+        expect(find.text('hub'), findsNothing, reason: 'a step, not out');
+        expect(fieldText(tester), text, reason: 'what was typed stays');
 
-      await submit(tester, 'alice@example.com');
-      expect(fake.validated, ['alice@example.com']);
-      expect(find.text(r'$ 0'), findsOneWidget, reason: 'a sale in pesos');
-      expect(inArs, findsOneWidget);
-      expect(inSats, findsOneWidget);
-      expect(pad, findsOneWidget);
-      expect(setByInvoice, findsNothing);
-      expect(confirmAction(tester), isNull, reason: "the invoice's sats went");
+        await submit(tester, 'alice@example.com');
+        expect(fake.validated, ['alice@example.com']);
+        expect(find.text(r'$ 0'), findsOneWidget, reason: 'a sale in pesos');
+        expect(inArs, findsOneWidget);
+        expect(inSats, findsOneWidget);
+        expect(pad, findsOneWidget);
+        expect(setByInvoice, findsNothing);
+        expect(confirmAction(tester), isNull,
+            reason: "the invoice's sats went");
 
-      await typeDigits(tester, '15000');
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(net.queries.last, containsPair('amount_ars_cents', '1500000'));
-      expect(net.queries.last, isNot(contains('amount_out')));
-      await tester.pumpWidget(const SizedBox());
-    });
+        await typeDigits(tester, '15000');
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(net.queries.last, containsPair('amount_ars_cents', '1500000'));
+        expect(net.queries.last, isNot(contains('amount_out')));
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
 
     testWidgets('Nueva venta after an invoice starts an ordinary sale',
         (tester) async {
@@ -1558,7 +2362,7 @@ void main() {
 
       await submit(tester, invoiceFor());
       expect(find.text('Amount set by the invoice'), findsOneWidget);
-      expect(line('The customer receives', '2.500 sats'), findsOneWidget);
+      expect(find.text('The customer pays \$ 3.000,00'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });
@@ -1652,7 +2456,7 @@ void main() {
         (tester) async {
       await toAmount(tester);
       await price(tester);
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
 
       await tester.tap(confirm);
       await settle(tester);
@@ -1799,14 +2603,14 @@ void main() {
       await priceAndConfirm(tester);
       expect(find.textContaining('Hay demasiadas'), findsOneWidget);
 
-      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.tap(find.byIcon(Icons.arrow_back));
       await tester.pump();
       await submit(tester, 'bob@example.com');
 
       expect(amount, findsOneWidget);
       expect(find.textContaining('Hay demasiadas'), findsNothing,
           reason: 'it was about the old address');
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -1835,6 +2639,31 @@ void main() {
       expect(calls(_createRoute), 1);
       expect(calls(_fundRoute), 1);
       expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the card of the quote waits while an order is created',
+        (tester) async {
+      final held = holdOn('POST', _tentatives);
+      await toAmount(tester);
+      await price(tester);
+      expect(tester.widget<IconButton>(details).onPressed, isNotNull);
+      final stale = tester.widget<IconButton>(details).onPressed!;
+
+      await tester.tap(confirm);
+      await settle(tester);
+      expect(calls(_createRoute), 1, reason: 'the create is out');
+      expect(tester.widget<IconButton>(details).onPressed, isNull);
+      await tester.tap(details, warnIfMissed: false);
+      stale(); // a press that was on its way before the button went off
+      await settle(tester);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(amount, findsOneWidget, reason: 'the sale is where it was');
+
+      held.complete();
+      await settle(tester);
+      expect(find.text(_alias), findsOneWidget, reason: 'the order shows');
+      expect(find.byType(AlertDialog), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -1985,7 +2814,12 @@ void main() {
       await tester.binding.handlePopRoute();
       await settle(tester);
       expect(find.text('hub'), findsNothing, reason: 'locked, idle');
+      expect(destination, findsOneWidget, reason: 'a step back, not out');
 
+      await tester.tap(next); // the address is still in the field
+      await settle(tester);
+      expect(amount, findsOneWidget);
+      expect(confirmAction(tester), isNotNull, reason: 'its price stayed');
       await tester.tap(confirm);
       await settle(tester);
       expect(calls(_createRoute), 1, reason: 'the create is out');
@@ -2057,7 +2891,7 @@ void main() {
       await settle(tester);
       expect(confirmAction(tester), isNotNull,
           reason: 'the same account: its price stays');
-      expect(line('El cliente recibe', '12.500 sats'), findsOneWidget);
+      expect(find.text('El cliente recibe 12.500 sats'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
 
@@ -2925,7 +3759,7 @@ void main() {
 
       await submit(tester, 'bob@example.com');
       expect(find.text(r'$ 0'), findsOneWidget, reason: 'a new sale, in pesos');
-      expect(find.text('El cliente recibe'), findsNothing,
+      expect(find.textContaining('El cliente recibe'), findsNothing,
           reason: 'the old price is gone');
       expect(confirmAction(tester), isNull);
       await tester.pumpWidget(const SizedBox());

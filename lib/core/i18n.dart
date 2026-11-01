@@ -77,7 +77,6 @@ const Map<String, String> _en = {
   'Historial de la sesión': 'Session history',
   'Cuentas abiertas': 'Open tabs',
   'Tabs de clientes': 'Customer tabs',
-  'Cambiar dirección': 'Change address',
   'Ingresar otra dirección': 'Enter another address',
   'Cerrar sesión': 'Log out',
   'Sin sesión': 'No session',
@@ -422,6 +421,11 @@ const Map<String, String> _en = {
   'La lightning address no es válida': 'The Lightning address is not valid',
   'No se pudo verificar la lightning address':
       'The Lightning address could not be verified',
+  'Esa tarjeta no es de LaWallet': 'That card is not a LaWallet card',
+  'No encontramos esa tarjeta': 'That card was not found',
+  'La tarjeta no tiene una lightning address':
+      'The card has no lightning address',
+  'No se pudo leer la tarjeta': 'The card could not be read',
   'El invoice no es válido': 'The invoice is not valid',
   'El invoice no es de la red principal de Bitcoin':
       'The invoice is not for the Bitcoin mainnet',
@@ -436,6 +440,8 @@ const Map<String, String> _en = {
   ' por BTC': ' per BTC',
   'Comisión incluida': 'Fee included',
   'Fee de red estimado': 'Estimated network fee',
+  'Ver detalle': 'Show details',
+  'Detalle': 'Details',
   'El mínimo es ': 'The minimum is ',
   'Confirmar': 'Confirm',
   'Esperando la transferencia': 'Waiting for the transfer',
