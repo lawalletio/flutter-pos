@@ -38,6 +38,14 @@ class NfcChannel {
     } catch (_) {}
   }
 
+  /// Show [bolt11] to phones as an NFC tag (`lightning:<bolt11>`), so a wallet
+  /// taps to pay it; null stops. Card taps keep arriving on [tags] meanwhile.
+  static Future<void> present(String? bolt11) async {
+    try {
+      await _ch.invokeMethod('present', bolt11);
+    } catch (_) {}
+  }
+
   /// One short buzz, for a tap the till took. Silent without a motor.
   static Future<void> vibrate() async {
     try {
