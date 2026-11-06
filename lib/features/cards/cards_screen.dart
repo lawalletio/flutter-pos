@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/flow_lock.dart';
+import '../../core/pin_dialog.dart';
 import '../../core/sounds.dart';
 import '../../core/widgets.dart';
 import '../../platform/nfc_channel.dart';
@@ -415,7 +416,13 @@ class _CardsHomeState extends State<_CardsHome> {
 
   Future<void> _recover(CardDetail card) async {
     final sun = card.sun;
-    if (sun == null) return;
+    if (sun == null) {
+      _set(const _Failed('Tap the card to recover — manual entry requires a real NFC tap.'));
+      return;
+    }
+    if (!mounted) return;
+    final confirmed = await confirmMiniappPin(context, action: 'Recuperar');
+    if (!confirmed || !mounted) return;
     _set(const _Recovering());
     try {
       _set(_Qr(card, await _api.mintRecovery(card.id, sun), QrPurpose.recover));
@@ -630,21 +637,24 @@ class _CardDetailView extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final owner = this.owner;
-    // RECOVER shows for owned cards on a backend that has `/owner`; when it
-    // can't run, a short reason replaces the action.
+    // RECOVER only shows for owned cards when recovery is actually possible.
+    // Fail closed: missing owner info, blocked/disabled card, no tap proof,
+    // or recovery disabled by the owner all hide the button entirely.
     final canOfferRecover = owner != null && owner is! _OwnerUnsupported;
     final known = owner is _OwnerKnown ? owner.summary : null;
-    final String? recoverBlocked;
-    if (known != null && !known.cardRecoveryEnabled) {
-      recoverBlocked = 'The owner turned off card recovery';
-    } else if (card.disabled || (known?.cardDisabled ?? false)) {
-      recoverBlocked = 'Card is paused by its owner';
-    } else if (card.sun == null) {
-      recoverBlocked = 'Tap the card to recover';
+    final bool canRecover;
+    if (!canOfferRecover) {
+      canRecover = false;
     } else if (known == null) {
-      recoverBlocked = 'Owner info unavailable';
+      canRecover = false;
+    } else if (!known.cardRecoveryEnabled) {
+      canRecover = false;
+    } else if (card.blocked || card.disabled || known.cardDisabled) {
+      canRecover = false;
+    } else if (card.sun == null) {
+      canRecover = false;
     } else {
-      recoverBlocked = null;
+      canRecover = true;
     }
     // Top-up needs somewhere to send the sats: the owner's address.
     final topUpTo = known?.primaryAddress ??
@@ -704,46 +714,25 @@ class _CardDetailView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: known != null && topUpTo != null
                   ? [
-                      if (recoverBlocked != null) ...[
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Text(recoverBlocked,
-                              textAlign: TextAlign.center,
-                              style:
-                                  t.bodySmall?.copyWith(color: textSecondary)),
-                        ),
-                        const SizedBox(height: 8),
-                      ],
                       BrandButton('Top-up', () => onTopUp(known, topUpTo),
                           key: const Key('cards-topup'), icon: Icons.bolt),
                       const SizedBox(height: 12),
                       Row(children: [
-                        Expanded(
-                            child: GhostButton('RECOVER', onRecover,
-                                key: const Key('cards-recover'),
-                                enabled: recoverBlocked == null)),
-                        const SizedBox(width: 8),
+                        if (canRecover) ...[
+                          Expanded(
+                              child: GhostButton('RECOVER', onRecover,
+                                  key: const Key('cards-recover'))),
+                          const SizedBox(width: 8),
+                        ],
                         Expanded(child: GhostButton('ACTIVATE', onActivate)),
                         const SizedBox(width: 8),
                         Expanded(child: GhostButton('Cancel', onCancel)),
                       ]),
                     ]
-                  : canOfferRecover
+                  : canRecover
                       ? [
-                          if (recoverBlocked != null) ...[
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 16),
-                              child: Text(recoverBlocked,
-                                  textAlign: TextAlign.center,
-                                  style: t.bodySmall
-                                      ?.copyWith(color: textSecondary)),
-                            ),
-                            const SizedBox(height: 8),
-                          ],
                           BrandButton('RECOVER', onRecover,
-                              key: const Key('cards-recover'),
-                              enabled: recoverBlocked == null),
+                              key: const Key('cards-recover')),
                           const SizedBox(height: 12),
                           Row(children: [
                             Expanded(

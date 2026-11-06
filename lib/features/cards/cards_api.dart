@@ -201,6 +201,7 @@ class CardDetail {
     this.lightningAddress,
     this.kind,
     required this.owned,
+    required this.blocked,
     required this.disabled,
     this.sun,
   });
@@ -212,6 +213,7 @@ class CardDetail {
   final String? lightningAddress;
   final String? kind;
   final bool owned;
+  final bool blocked;
   final bool disabled;
 
   /// The fresh tap's SUN proof. Null for manual entry (recovery then needs a
@@ -395,6 +397,7 @@ class CardsApi {
     final username = _str(o['username']);
     final pubkey = _str(o['pubkey']);
     final assigned = username != null || pubkey != null;
+    final blocked = o['blocked'] == true;
     final disabled = o['disabled'] == true;
     return CardDetail(
       id: _str(o['id']) ?? id,
@@ -402,12 +405,15 @@ class CardsApi {
       designName: _str(design['description']),
       status: !assigned
           ? 'Not activated'
-          : disabled
-              ? 'Paused'
-              : 'Activated',
+          : blocked
+              ? 'Blocked'
+              : disabled
+                  ? 'Paused'
+                  : 'Activated',
       lightningAddress: username == null ? null : '$username@${_auth.host()}',
       kind: _str(o['kind']),
       owned: assigned,
+      blocked: blocked,
       disabled: disabled,
       sun: sun,
     );
