@@ -211,4 +211,13 @@ void main() {
     expect(net.requests, isEmpty);
     expect(fake.resolved, isEmpty);
   });
+
+  test("the default client asks the card's host; no answer is unreadable",
+      () async {
+    // Nothing listens on this host's port 443: the till's own client fails
+    // fast, without going out to the network.
+    await expectLater(
+        cardOwnerAddress('lnurlw://127.0.0.1/api/cards/c1/scan?p=A1B2&c=C3D4'),
+        throwsA(CardAddressError.unreadable));
+  });
 }
