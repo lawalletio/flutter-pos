@@ -51,6 +51,7 @@ class CardCharge {
   /// Arm the card reader while the payment is pending. No button — reader mode
   /// stays active and each tap is delivered via the tag stream.
   Future<void> arm() async {
+    present();
     if (_sub != null) return;
     available = await NfcChannel.isAvailable();
     if (!available) return;
@@ -69,7 +70,12 @@ class CardCharge {
     _collect(cardUrl);
   }
 
+  /// Offer the current [invoice] to phone wallets as an NFC tag (none = stop).
+  /// Call it whenever the invoice on screen changes or goes away.
+  void present() => NfcChannel.present(waiting() ? invoice() : null);
+
   void stop() {
+    NfcChannel.present(null);
     _sub?.cancel();
     _sub = null;
     collecting = false;
