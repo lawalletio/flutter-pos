@@ -319,6 +319,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       _invoice = null;
       _verifyUrl = null;
     });
+    _card.present(); // a phone must never pay the bolt11 this one replaces
     // Product coupons alone took the whole order off. With no invoice and no
     // nonce to redeem, nothing would ever record this sale — refuse rather
     // than hand it out unrecorded. A SCANNED coupon reaching zero settles
