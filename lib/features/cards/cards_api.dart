@@ -4,6 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/lnurl/lnurl_service.dart';
+
 // Ported from card-manager's data/{Jwt,AuthStore,Settings,Api}.kt and
 // util/Domain.kt. Same claims, same endpoints, same error texts.
 
@@ -280,6 +282,88 @@ Sun? parseSun(String cardUrl) {
   final p = param('p');
   final c = param('c');
   return p == null || c == null ? null : Sun(p, c);
+}
+
+/// Why [cardOwnerAddress] has no address for a tapped card.
+enum CardAddressError implements Exception {
+  /// The tag is not a LaWallet card: its URL's path has no `/api/cards/<id>`.
+  notLaWallet,
+
+  /// The card's instance does not know it (404).
+  notFound,
+
+  /// Nobody paired the card, or its owner has no username.
+  noAddress,
+
+  /// No answer, an instance too old to tell (400), or a reply that is not a
+  /// card's.
+  unreadable,
+}
+
+/// The client of [cardOwnerAddress]. Someone waits at the counter for it.
+final _cardInfo = Dio(BaseOptions(
+  connectTimeout: const Duration(seconds: 10),
+  receiveTimeout: const Duration(seconds: 10),
+));
+
+/// The lightning address of the owner of the LaWallet card that sent
+/// [tapUrl], from the public info of the card's instance: no login.
+///
+/// The tap's `p` and `c` spend the card, so [tapUrl] is never requested, sent,
+/// logged or kept. The info is asked of `…/api/cards/<id>/scan` with
+/// `x-request-action: info` and no query, which leaves the card's counter as
+/// it was.
+///
+/// Every instance pays its users at its own host, `<username>@<host>`. Its
+/// settings may name a domain of its own, and `<username>@<domain>` is the
+/// address given when it resolves to a callback on that same host.
+///
+/// Throws a [CardAddressError] when there is no address to give. [dio] and
+/// [service] stand in for the network in tests.
+Future<String> cardOwnerAddress(String tapUrl,
+    {Dio? dio, LnurlService? service}) async {
+  final uri = Uri.tryParse(tapUrl);
+  final host = uri?.host ?? '';
+  // The id comes from the path alone, never from the query that holds the SUN.
+  final id =
+      RegExp(r'/api/cards/([^/]+)').firstMatch(uri?.path ?? '')?.group(1);
+  if (host.isEmpty || id == null) throw CardAddressError.notLaWallet;
+  final client = dio ?? _cardInfo;
+  final Object? info;
+  try {
+    info = (await client.getUri(
+      Uri.https(host, '/api/cards/$id/scan'),
+      options: Options(headers: {'x-request-action': 'info'}),
+    ))
+        .data;
+  } catch (e) {
+    throw e is DioException && e.response?.statusCode == 404
+        ? CardAddressError.notFound
+        : CardAddressError.unreadable;
+  }
+  // The info always says who has the card, if anyone: a reply that does not
+  // is not the card's.
+  if (info is! Map || !info.containsKey('user')) {
+    throw CardAddressError.unreadable;
+  }
+  final user = info['user'];
+  final username = user is Map ? user['username'] : null;
+  if (username is! String || username.isEmpty) {
+    throw CardAddressError.noAddress;
+  }
+  try {
+    final settings =
+        (await client.getUri(Uri.https(host, '/api/settings'))).data;
+    final domain = settings is Map ? settings['domain'] : null;
+    if (domain is String && domain.trim().isNotEmpty) {
+      final address = '$username@${domain.trim().toLowerCase()}';
+      final params = await (service ?? lnurl).resolve(address);
+      if (Uri.parse(params.callback).host == host) return address;
+    }
+  } catch (_) {
+    // No settings, or a domain that does not pay here: the host does.
+  }
+  return '$username@$host';
 }
 
 /// Authenticated LaWallet API over [CardsAuth.baseUrl]: GET `/api/cards/:id`

@@ -16,6 +16,8 @@ import '../../data/lnurl/lnurl_service.dart';
 import '../../domain/config/currencies.dart';
 import '../../domain/config/formatter.dart';
 import '../../domain/config/session.dart';
+import '../../platform/nfc_channel.dart';
+import '../cards/cards_api.dart' show CardAddressError, cardOwnerAddress;
 import '../cards/cards_widgets.dart' show TokenScanPage;
 import 'wapu_account.dart';
 import 'wapu_api.dart';
@@ -75,9 +77,14 @@ bool _ticks(WapuOrder o, DateTime now) =>
 bool _sameAccount(WapuCredentials? a, WapuCredentials? b) =>
     a?.apiKey == b?.apiKey && a?.baseUrl == b?.baseUrl;
 
+/// How the sale reads the lightning address of a tapped card's owner. A
+/// variable so a test can swap in a fake network.
+Future<String> Function(String tapUrl) wapuCardAddress = cardOwnerAddress;
+
 /// The Wapu sale. It needs a signed-in POS user with a saved WapuPay key, and
 /// says so when either is missing. With both, the operator scans or types the
-/// customer's lightning address or invoice, and the sale goes on from there.
+/// customer's lightning address or invoice, or the customer taps their
+/// LaWallet card, and the sale goes on from there.
 ///
 /// Free text (an address, a message that may carry one) is Material [m.Text],
 /// not the app's [Text], which would uppercase it and squeeze it into one line.
@@ -129,6 +136,13 @@ class _WapuScreenState extends State<WapuScreen> {
   /// A lookup of the typed address, or of an order to resume, is under way, so
   /// the first step waits.
   bool _checking = false;
+
+  /// The owner of a tapped card is being looked up. The first step waits, as
+  /// it does for [_checking], and says so.
+  bool _readingCard = false;
+
+  /// The taps of the card reader, while the sale listens to it.
+  StreamSubscription<String>? _cardTaps;
 
   /// Why the address or the invoice cannot be used, or the order of the History
   /// could not be opened, as Spanish source text.
@@ -209,11 +223,13 @@ class _WapuScreenState extends State<WapuScreen> {
     super.initState();
     merchantAddress.addListener(_onMerchant);
     _load();
+    _listenForCards();
   }
 
   @override
   void dispose() {
     merchantAddress.removeListener(_onMerchant);
+    _cardTaps?.cancel();
     _debounce?.cancel();
     _stopClocks();
     _destination.dispose();
@@ -247,6 +263,7 @@ class _WapuScreenState extends State<WapuScreen> {
     _invoice = null;
     _error = null;
     _checking = false;
+    _readingCard = false;
     _step = _Step.destination;
     _mode = _Mode.ars;
     _clearAmount();
@@ -299,6 +316,56 @@ class _WapuScreenState extends State<WapuScreen> {
     setState(() {
       _destination.text = raw;
       _error = null;
+    });
+  }
+
+  /// Listens to the card reader, on a till that has one, while the sale is on
+  /// screen. The reader has one listener at a time, and nothing else listens
+  /// meanwhile: [_cardTapped] decides what a tap does.
+  Future<void> _listenForCards() async {
+    if (!await NfcChannel.isAvailable() || !mounted) return;
+    await NfcChannel.startSession();
+    if (mounted) _cardTaps = NfcChannel.taps().listen(_cardTapped);
+  }
+
+  /// A card tapped on the reader. On the first step, in front of the operator
+  /// and with nothing else under way, a LaWallet card puts its owner's
+  /// lightning address in the field, over what was typed, and Continuar
+  /// checks it as any other. Any other tag says why it was not taken.
+  Future<void> _cardTapped(String url) async {
+    if (!_inSale ||
+        _step != _Step.destination ||
+        _checking ||
+        _readingCard ||
+        ModalRoute.of(context)?.isCurrent == false) {
+      return;
+    }
+    // The cue of the Cards screen.
+    AppSounds.play(AppSound.card);
+    NfcChannel.vibrate();
+    final gen = _gen;
+    setState(() {
+      _readingCard = true;
+      _error = null;
+    });
+    String? address;
+    String? error;
+    try {
+      address = await wapuCardAddress(url);
+    } catch (e) {
+      error = switch (e) {
+        CardAddressError.notLaWallet => 'Esa tarjeta no es de LaWallet',
+        CardAddressError.notFound => 'No encontramos esa tarjeta',
+        CardAddressError.noAddress =>
+          'La tarjeta no tiene una lightning address',
+        _ => 'No se pudo leer la tarjeta',
+      };
+    }
+    if (!mounted || gen != _gen) return;
+    setState(() {
+      _readingCard = false;
+      _error = error;
+      if (address != null) _destination.text = address;
     });
   }
 
@@ -720,13 +787,25 @@ class _WapuScreenState extends State<WapuScreen> {
     // and an order made upstream would be lost, to be made again by a retry.
     // The app bar's back pops without asking the PopScope, so it is a no-op
     // then, rather than hidden: that would also hold the till's unlock.
+    // The amount step has no other way to change the destination, so there both
+    // backs go one step back to it: the system one through the callback, and
+    // the app bar's through onBack.
     return PopScope(
-      canPop: !_busy,
+      canPop: !_busy && _step != _Step.amount,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_busy && _step == _Step.amount) {
+          setState(_editDestination);
+        }
+      },
       child: Scaffold(
         appBar: PosAppBar(
           title: 'Wapu',
           lockFlow: '/wapu',
-          onBack: _busy ? () {} : null,
+          onBack: _busy
+              ? () {}
+              : _step == _Step.amount
+                  ? () => setState(_editDestination)
+                  : null,
           showSettings: false, // its gear has no PIN gate
           showSync: false,
           showInvoiceDebug: false,
@@ -859,7 +938,9 @@ class _WapuScreenState extends State<WapuScreen> {
   }
 
   Widget _destinationStep(BuildContext context) {
-    final error = _error;
+    final waiting = _checking || _readingCard;
+    // While a card is read, the line under the field says so.
+    final note = _readingCard ? 'Leyendo la tarjeta…' : _error;
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
@@ -867,7 +948,7 @@ class _WapuScreenState extends State<WapuScreen> {
         TextField(
           key: const Key('wapu-destination'),
           controller: _destination,
-          enabled: !_checking,
+          enabled: !waiting,
           keyboardType: TextInputType.emailAddress,
           textInputAction: TextInputAction.done,
           autocorrect: false,
@@ -885,25 +966,26 @@ class _WapuScreenState extends State<WapuScreen> {
             ),
           ),
         ),
-        if (error != null)
+        if (note != null)
           Padding(
             padding: const EdgeInsets.only(top: 12),
             child: m.Text(
-              context.tr(error),
+              context.tr(note),
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.error),
+              style: TextStyle(
+                  color: _readingCard ? AppColors.muted : AppColors.error),
             ),
           ),
         const SizedBox(height: 16),
         OutlinedButton.icon(
-          onPressed: _checking ? null : _scan,
+          onPressed: waiting ? null : _scan,
           icon: const Icon(Icons.qr_code_scanner),
           label: Text(context.tr('Escanear QR')),
         ),
         const SizedBox(height: 12),
         FilledButton(
           key: const Key('wapu-continue'),
-          onPressed: _checking ? null : _continue,
+          onPressed: waiting ? null : _continue,
           child: _checking
               ? const SizedBox(
                   width: 24,
@@ -916,9 +998,12 @@ class _WapuScreenState extends State<WapuScreen> {
     );
   }
 
-  /// The address, the unit, the amount with its price, and the pad. Only the
-  /// middle scrolls: the pad and Confirmar stay put on a short screen. An
-  /// invoice sets the amount, so it has neither the unit nor the pad.
+  /// The unit, the amount with what the customer gets for it, and the pad, as
+  /// the cash register lays them out. The middle takes what the pad leaves:
+  /// the amount shrinks to fit, and what is under it scrolls, so the pad and
+  /// Confirmar stay put on a short screen. The rest of the quote is behind the
+  /// info button. An invoice sets the amount, so it has neither the unit nor
+  /// the pad.
   Widget _amountStep(BuildContext context) {
     final quote = _quote;
     final error = _quoteError;
@@ -928,24 +1013,6 @@ class _WapuScreenState extends State<WapuScreen> {
     return Column(
       key: const Key('wapu-amount'),
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: m.Text(
-                shortDestination(_address ?? ''),
-                softWrap: true,
-                style: const TextStyle(color: AppColors.muted),
-              ),
-            ),
-            IconButton(
-              tooltip: context.tr('Cambiar dirección').toUpperCase(),
-              icon: const Icon(Icons.edit_outlined),
-              // The order that is being created is for this destination, so it
-              // waits for that.
-              onPressed: _busy ? null : () => setState(_editDestination),
-            ),
-          ],
-        ),
         if (!fixed)
           SegmentedButton<_Mode>(
             style: SegmentedButton.styleFrom(
@@ -968,19 +1035,26 @@ class _WapuScreenState extends State<WapuScreen> {
             onSelectionChanged: (s) => _setMode(s.first),
           ),
         Expanded(
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+          // What is under the amount takes what it needs, up to two thirds of
+          // the room, and scrolls past that. The amount takes the rest, up to
+          // half of the room as in the cash register, and shrinks to it.
+          child: LayoutBuilder(
+            builder: (context, room) => Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const SizedBox(height: 4),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: m.Text(
-                    _mode == _Mode.ars
-                        ? '\$ ${_pesos.format(typed)}'
-                        : _satsText(typed),
-                    style: const TextStyle(
-                        fontSize: 40, fontWeight: FontWeight.w700),
+                Flexible(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: room.maxHeight / 2),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: m.Text(
+                        _mode == _Mode.ars
+                            ? '\$ ${_pesos.format(typed)}'
+                            : _satsText(typed),
+                        style: const TextStyle(
+                            fontSize: 44, fontWeight: FontWeight.w700),
+                      ),
+                    ),
                   ),
                 ),
                 if (fixed)
@@ -989,25 +1063,41 @@ class _WapuScreenState extends State<WapuScreen> {
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: AppColors.muted),
                   ),
-                const SizedBox(height: 8),
-                // Before the price: the lines scroll, and this must be read.
-                if (createError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: WapuErrorText(createError, creating: true),
-                  ),
-                if (quote != null)
-                  ..._quoteLines(context, quote)
-                else if (error != null)
-                  WapuErrorText(error)
-                else if (typed > 0)
-                  const Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 3),
+                const SizedBox(height: 6),
+                ConstrainedBox(
+                  constraints:
+                      BoxConstraints(maxHeight: room.maxHeight * 2 / 3),
+                  child: SingleChildScrollView(
+                    // The height of the line and its button, kept while the
+                    // price comes and goes, so the amount does not jump.
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 40),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Before the price: it must be read, and it is the
+                          // order's, not the quote's.
+                          if (createError != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: WapuErrorText(createError, creating: true),
+                            ),
+                          if (quote != null)
+                            ..._quoteLines(context, quote)
+                          else if (error != null)
+                            WapuErrorText(error)
+                          else if (typed > 0)
+                            const SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 3),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
+                ),
               ],
             ),
           ),
@@ -1030,13 +1120,12 @@ class _WapuScreenState extends State<WapuScreen> {
     );
   }
 
-  /// What stands in the way of the order, if anything, then what the customer
-  /// gets for the amount. The warnings come first: on a short screen the lines
-  /// scroll, and a Confirmar that is off must say why where it can be seen. In
-  /// sats mode the pesos are not what was typed, so what the customer pays leads
-  /// the lines: the operator reads it before confirming.
+  /// What stands in the way of the order, if anything, then the one line of
+  /// what the customer gets for the amount, with the button of the rest of the
+  /// quote. The warnings come first: a Confirmar that is off must say why where
+  /// it can be seen. In sats mode the pesos are not what was typed, so the line
+  /// is what the customer pays: the operator reads it before confirming.
   List<Widget> _quoteLines(BuildContext context, WapuQuote q) {
-    final rate = '\$ ${_pesos.format(q.arsPerBtc.round())}';
     final minimum = '\$ ${_pesos.format(q.minAmountArsCents ~/ 100)}';
     return [
       if (_belowMinimum(q))
@@ -1054,13 +1143,77 @@ class _WapuScreenState extends State<WapuScreen> {
           padding: EdgeInsets.only(bottom: 8),
           child: WapuErrorText(WapuApiException('', statusCode: 409)),
         ),
-      if (_mode == _Mode.sats)
-        _line(context, 'El cliente paga', formatArsCents(q.amountArsCents)),
-      _line(context, 'El cliente recibe', _satsText(q.amountOut)),
-      _line(context, 'Tipo de cambio', '$rate${context.tr(' por BTC')}'),
-      _line(context, 'Comisión incluida', '${_percent.format(q.feePercent)}%'),
-      _line(context, 'Fee de red estimado', _satsText(q.networkFeeOut)),
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: m.Text(
+                _mode == _Mode.ars
+                    ? '${context.tr('El cliente recibe')} '
+                        '${_satsText(q.amountOut)}'
+                    : '${context.tr('El cliente paga')} '
+                        '${formatArsCents(q.amountArsCents)}',
+                style: const TextStyle(color: AppColors.muted, fontSize: 16),
+              ),
+            ),
+          ),
+          IconButton(
+            key: const Key('wapu-quote-details'),
+            tooltip: context.tr('Ver detalle').toUpperCase(),
+            icon: const Icon(Icons.info_outline, size: 22),
+            color: AppColors.muted,
+            visualDensity: VisualDensity.compact, // 40 dp, not 48
+            // Not while an order is being created: its card would be left
+            // open over the status when the reply lands.
+            onPressed: _busy ? null : () => _showDetails(q),
+          ),
+        ],
+      ),
     ];
+  }
+
+  /// The rest of the quote, in a card the X closes, as it stood when it was
+  /// opened: the rate, the fee already in the price, the network fee and where
+  /// the sats go.
+  void _showDetails(WapuQuote q) {
+    if (_busy) return; // a press that was on its way as the order began
+    final rate = '\$ ${_pesos.format(q.arsPerBtc.round())}';
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Row(
+          children: [
+            Expanded(child: Text(ctx.tr('Detalle'))),
+            IconButton(
+              key: const Key('wapu-quote-details-close'),
+              tooltip: ctx.tr('Cerrar').toUpperCase(),
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.of(ctx).pop(),
+            ),
+          ],
+        ),
+        // A definite width: the dialog sizes its content by its intrinsic
+        // width, and a Wrap's leaves out its spacing, so its widest row would
+        // always drop its value to a second line.
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _line(ctx, 'Tipo de cambio', '$rate${ctx.tr(' por BTC')}'),
+              _line(ctx, 'Comisión incluida',
+                  '${_percent.format(q.feePercent)}%'),
+              _line(ctx, 'Fee de red estimado', _satsText(q.networkFeeOut)),
+              _line(ctx, 'Para', shortDestination(_address ?? '')),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// A label and its value, apart on one line. When they do not fit side by
