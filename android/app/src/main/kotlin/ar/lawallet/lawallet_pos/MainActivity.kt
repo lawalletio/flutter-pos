@@ -85,11 +85,16 @@ class MainActivity : FlutterActivity() {
 
     // Foreground dispatch delivers card taps here while an invoice is presented.
     override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
         @Suppress("DEPRECATION")
         val tag = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java)
         else intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
-        tag?.let(::onNfcTag)
+        // Not super: Flutter would push the card's lnurlw:// URL as a deep link
+        // and the router would navigate off the charge screen.
+        if (tag == null) return super.onNewIntent(intent)
+        // Each dispatch pauses/resumes us, which restarts discovery and re-reads a
+        // card still on the till (a SUN card counts every read). Ignore it until lifted.
+        runCatching { NfcAdapter.getDefaultAdapter(this)?.ignore(tag, 1000, null, null) }
+        onNfcTag(tag)
     }
 
     override fun onDestroy() {
