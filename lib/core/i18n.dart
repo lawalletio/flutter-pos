@@ -394,10 +394,16 @@ const Map<String, String> _en = {
   'El servicio no está disponible. Probá más tarde.':
       'The service is unavailable. Try again later.',
   'No se pudo completar la operación': 'The operation could not be completed',
+  'Problema en la conexión. Intentando reconectar.':
+      'Connection problem. Trying to reconnect.',
   'Configuración de Wapu': 'Wapu settings',
   'Avanzado': 'Advanced',
   'URL del backend': 'Backend URL',
   'Guardada: ': 'Saved: ',
+  'Mostrar la API key': 'Show the API key',
+  'Ocultar la API key': 'Hide the API key',
+  'Escanear la API key': 'Scan the API key',
+  'Escaneá el QR de tu API key': 'Scan your API key QR code',
   'La URL tiene que empezar con https://': 'The URL must start with https://',
   'Olvidar key': 'Forget key',
   'Bitcoin sin KYC': 'Bitcoin without KYC',
@@ -434,17 +440,34 @@ const Map<String, String> _en = {
   'Copiado': 'Copied',
   'Orden creada': 'Order created',
   'Pedir datos de transferencia': 'Request transfer details',
-  'Venció el plazo': 'The time limit has passed',
   'Si el cliente ya transfirió, lo seguimos buscando hasta las ':
       'If the customer already transferred, we keep looking until ',
   'Orden vencida': 'Order expired',
-  'Pago recibido. Enviando los sats…': 'Payment received. Sending the sats…',
+  'No se recibieron ARS ni se enviaron sats.':
+      'No ARS was received and no sats were sent.',
+  'Pago recibido': 'Payment received',
+  'Enviando los sats…': 'Sending the sats…',
   'En revisión': 'Under review',
   'Guardá el ID de la orden: ': 'Save the order ID: ',
   '¡Listo! El cliente recibió ': 'Done! The customer received ',
   'No se pudieron enviar los sats': 'The sats could not be sent',
   'El monto quedó en tu saldo de Wapu.':
       'The amount went to your Wapu balance.',
+  'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en la cuenta de Wapu ':
+      'The order expired but the ARS deposit was detected; the balance was credited to the Wapu account ',
+  'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en tu cuenta de Wapu.':
+      'The order expired but the ARS deposit was detected; the balance was credited to your Wapu account.',
+  'Comprado': 'Purchased',
+  'Monto': 'Amount',
+  'Fecha': 'Date',
+  'Estado': 'Status',
+  'Acreditada en saldo Wapu': 'Credited to Wapu balance',
+  'Para': 'To',
+  'ID de transacción': 'Transaction ID',
+  'Comisión de la operación': 'Transaction fee',
+  'Depósito del cliente': 'Client deposit',
+  'Depósito esperado': 'Expected deposit',
+  'Mostrar QR': 'Show QR',
   'Nueva venta': 'New sale',
   'La orden queda abierta hasta que venza. La podés retomar desde el Historial.':
       'The order stays open until it expires. You can resume it from the History.',

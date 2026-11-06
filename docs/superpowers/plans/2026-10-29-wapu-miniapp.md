@@ -120,11 +120,13 @@
   - `class WapuOrder` with:
     - `String` fields `id` (from `tentative_id`, via `toString()`), `status`, `payoutStatus` and `payoutAddress`;
     - `int` fields `amountArsCents`, `amountOut` and `networkFeeOut`;
-    - `DateTime?` fields `expiresAt` and `lateWatchUntil`, parsed as UTC;
+    - `DateTime?` fields `createdAt`, `expiresAt` and `lateWatchUntil`, parsed as UTC;
     - `bool watchPending`;
+    - `int?` fields `totalAmountUsdt` and `fundingAmountUsdt`, null when the body has none;
     - `String?` fields `alias`, `cvu`, `paymentHash`, `errorCode` and `type`;
     - `factory WapuOrder.fromJson(Map<String, dynamic>)`;
     - `bool get hasBankDetails`;
+    - `int get purchasedSats`, the sats the customer's ARS bought, equal to `((amountOut + networkFeeOut) * totalAmountUsdt + fundingAmountUsdt ~/ 2) ~/ fundingAmountUsdt`, or `amountOut + networkFeeOut` without both figures;
     - `bool isInProgress(DateTime now)`, true when `watchPending`, or when status is CREATED and `now` is before `expiresAt`.
   - `class WapuApi` with:
     - `WapuApi({required String baseUrl, required String apiKey, Dio? dio})`;
@@ -134,7 +136,8 @@
     - `Future<WapuOrder> order(String orderId)`;
     - `Future<List<WapuOrder>> orders()`, which keeps only `type == 'crypto_purchase'` when `type` is present;
     - `Future<bool> betaEnabled()`, true when `beta_version` is `true` or `1`;
-    - `Future<void> setBeta(bool enabled)`.
+    - `Future<void> setBeta(bool enabled)`;
+    - `Future<String> username()`, the non-empty `username` of `GET /users/profile`. Any other reply throws the no-status failure.
   - `WapuApi Function(String baseUrl, String apiKey) wapuApiFor = (b, k) => WapuApi(baseUrl: b, apiKey: k);`. This is non-final, so tests can swap it.
   - `String wapuErrorKey(WapuApiException e, {bool creating = false})` returns the Spanish copy key below. It is pure, with no Flutter import.
 
@@ -144,7 +147,8 @@
 - `POST /transactions/direct-fiat/tentatives/{id}/funding`, with body `{}`;
 - `GET /transactions/direct-fiat/tentatives/{id}`;
 - `GET /transactions/direct-fiat/tentatives`, which returns `{"tentatives": [...]}`;
-- `GET /users/user-settings` and `PATCH /users/user-settings` with `{"beta_version": bool}`.
+- `GET /users/user-settings` and `PATCH /users/user-settings` with `{"beta_version": bool}`;
+- `GET /users/profile`, which returns `{username, ...}`.
 
 **Dio setup:**
 - Build absolute URLs from `baseUrl`, and pass headers and timeouts per request through `Options`. Then an injected test `Dio` behaves the same.
@@ -405,14 +409,13 @@
 
 | State | Copy |
 |---|---|
-| FUNDING_ISSUED | Title `'Esperando la transferencia'`. Rows `'Alias'`, `'CVU'` and `'Monto exacto'` (`formatArsCents(amountArsCents)`), each with a copy button; the amount copies the plain decimal string `'15000.37'`. Hint `'Transferí exactamente este monto, con centavos'`. `'Vence en '` + `formatCountdown(expiresAt - now)`. |
+| FUNDING_ISSUED, `expiresAt` after `now` | Title `'Esperando la transferencia'`. Rows `'Alias'`, `'CVU'` and `'Monto exacto'` (`formatArsCents(amountArsCents)`), each with a copy button; the amount copies the plain decimal string `'15000.37'`. Hint `'Transferí exactamente este monto, con centavos'`. `'Vence en '` + `formatCountdown(expiresAt - now)`. |
 | CREATED, not expired | `'Orden creada'`, plus a `'Pedir datos de transferencia'` button (`Key('wapu-fund')`) that calls `onRequestFunding`. |
-| EXPIRED with `watchPending` | `'Venció el plazo'`, plus `'Si el cliente ya transfirió, lo seguimos buscando hasta las '` + `HH:mm`, the local time of `lateWatchUntil`. |
-| EXPIRED, or CREATED past `expiresAt` | `'Orden vencida'` |
-| EXECUTED + `sending` | `'Pago recibido. Enviando los sats…'` |
+| EXPIRED, FUNDING_ISSUED with `expiresAt` not after `now`, or CREATED past `expiresAt` | Title `'Orden vencida'`, then `'No se recibieron ARS ni se enviaron sats.'`. With `watchPending` and `lateWatchUntil`, also `'Si el cliente ya transfirió, lo seguimos buscando hasta las '` + `HH:mm`, the local time of `lateWatchUntil`. Then the `WapuReceipt`, with the status `'Vencida'` and the deposit row `'Depósito esperado'`. The big `'Nueva venta'` shows only without `watchPending`. |
+| EXECUTED + `sending` | The Wapu logo (`Key('wapu-logo')`, `assets/images/wapu_logo.png`) on a white plate, then `'Pago recibido'`, a small spinner beside `'Enviando los sats…'`, and the sats and the payout address. |
 | EXECUTED + `review` | `'En revisión'`, plus `'Guardá el ID de la orden: '` + id |
-| COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, with `paymentHash` in a `SelectableText` |
-| SETTLED_TO_BALANCE | `'No se pudieron enviar los sats'`, plus `'El monto quedó en tu saldo de Wapu.'` |
+| COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, then the `WapuReceipt` (`lib/features/wapu/wapu_receipt.dart`, `Key('wapu-receipt')`): the rows `'Comprado'` (`purchasedSats`), `'Fecha'` (only with `createdAt`), `'Estado'`, `'Para'` (`shortDestination`), the id with its copy (`Key('wapu-copy-id')`) and QR (`Key('wapu-id-qr')`) buttons, `'Comisión de la operación'` (`networkFeeOut`), `'Depósito del cliente'` and `'Total'` (`amountOut`, the sats of the headline). |
+| SETTLED_TO_BALANCE | `'No se pudieron enviar los sats'`, plus `'El monto quedó en tu saldo de Wapu.'`, then the `WapuReceipt` (status `'Acreditada en saldo Wapu'`). With `errorCode == 'invoice_expired'` the message is `'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en la cuenta de Wapu '` + the `wapuUser` the screen passes, or `'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en tu cuenta de Wapu.'` when it is null. |
 | any other status | the raw `status` |
 
 - [ ] **Step 1: Write the failing tests:**
@@ -450,7 +453,8 @@
   - On error it keeps the last order: a 401 shows the copy key above the view and keeps the bank details.
   - Polling stops when `!watchPending`.
   - A transition into COMPLETED calls `AppSounds.play(AppSound.paid)` once.
-  - A 1 s `Timer.periodic` repaints the countdown while the status is FUNDING_ISSUED.
+  - A 1 s `Timer.periodic` repaints the countdown while the status is FUNDING_ISSUED or CREATED and `expiresAt` is after now. It stops at the repaint that crosses `expiresAt`, and the 10 s poll goes on while `watchPending`.
+  - An order that is SETTLED_TO_BALANCE with `error_code == 'invoice_expired'` makes the screen read `GET /users/profile` once per loaded credentials, through `wapuCall`, and pass the `username` to the view as `wapuUser`. The cache goes when `_load` swaps the credentials. A failure shows nothing: the message says `tu cuenta`.
   - Cancel every timer in `dispose` and on a new sale.
 - **Nueva venta (new sale):**
   - Tapping `Key('wapu-new-sale')` while the order is FUNDING_ISSUED shows a dialog titled `'Nueva venta'` with `'La orden queda abierta hasta que venza. La podés retomar desde el Historial.'` and the actions `'Cancelar'` and `'Nueva venta'`.

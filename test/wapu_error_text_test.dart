@@ -14,10 +14,10 @@ const _tooMany =
 void main() {
   final detail = find.byKey(const Key('wapu-error-detail'));
 
-  Future<void> show(
+  /// Pumps [child] alone on a screen [width] wide.
+  Future<void> pumpIn(
     WidgetTester tester,
-    WapuApiException error, {
-    bool creating = false,
+    Widget child, {
     bool english = false,
     double width = 400,
   }) async {
@@ -26,16 +26,21 @@ void main() {
       localizationsDelegates:
           english ? const [AppLocalizationsDelegate()] : null,
       home: Scaffold(
-        body: Center(
-          child: SizedBox(
-            width: width,
-            child: WapuErrorText(error, creating: creating),
-          ),
-        ),
+        body: Center(child: SizedBox(width: width, child: child)),
       ),
     ));
     await tester.pump(); // the language loads before the first frame
   }
+
+  Future<void> show(
+    WidgetTester tester,
+    WapuApiException error, {
+    bool creating = false,
+    bool english = false,
+    double width = 400,
+  }) =>
+      pumpIn(tester, WapuErrorText(error, creating: creating),
+          english: english, width: width);
 
   testWidgets(
       'a 429 with a backend message shows the mapped copy and the detail',
@@ -133,5 +138,66 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(tester.getSize(detail).width, lessThanOrEqualTo(160));
     expect(tester.getSize(detail).height, greaterThan(30)); // several lines
+  });
+
+  group('WapuReconnecting', () {
+    const copy = 'Problema en la conexión. Intentando reconectar.';
+    const lookup = WapuApiException(
+        'The connection errored: Failed host lookup: be-prod.wapu.app');
+    final reconnecting = find.byKey(const Key('wapu-reconnecting'));
+
+    Future<void> showReconnecting(
+      WidgetTester tester,
+      WapuApiException error, {
+      bool english = false,
+    }) =>
+        pumpIn(tester, WapuReconnecting(error), english: english);
+
+    testWidgets('says it is reconnecting, muted, with the details closed',
+        (tester) async {
+      await showReconnecting(tester, lookup);
+
+      expect(find.text(copy), findsOneWidget);
+      expect(find.byIcon(Icons.wifi_off), findsOneWidget);
+      expect(
+          tester.widget<Text>(find.text(copy)).style?.color, AppColors.muted);
+      expect(find.text('No se pudo completar la operación'), findsNothing);
+      expect(detail, findsNothing);
+    });
+
+    testWidgets('a tap opens the details and another closes them',
+        (tester) async {
+      await showReconnecting(tester, lookup);
+
+      await tester.tap(reconnecting);
+      await tester.pump();
+      expect(find.text(copy), findsOneWidget);
+      expect(find.text('No se pudo completar la operación'), findsOneWidget);
+      expect(tester.widget<Text>(detail).data, lookup.message);
+
+      await tester.tap(reconnecting);
+      await tester.pump();
+      expect(find.text(copy), findsOneWidget);
+      expect(find.text('No se pudo completar la operación'), findsNothing);
+      expect(detail, findsNothing);
+    });
+
+    testWidgets('stays open while a newer failure takes the place of the old',
+        (tester) async {
+      await showReconnecting(tester, lookup);
+      await tester.tap(reconnecting);
+      await tester.pump();
+
+      await showReconnecting(tester, const WapuApiException('socket closed'));
+
+      expect(tester.widget<Text>(detail).data, 'socket closed');
+    });
+
+    testWidgets('the line is translated', (tester) async {
+      await showReconnecting(tester, lookup, english: true);
+
+      expect(find.text('Connection problem. Trying to reconnect.'),
+          findsOneWidget);
+    });
   });
 }
