@@ -23,4 +23,12 @@ void main() {
     expect(lockRedirect('/rueda'), isNull);
     expect(lockRedirect('/rueda/config'), '/rueda');
   });
+
+  test('a locked Wapu keeps its history within reach and its config out', () {
+    lockedFlow.value = '/wapu';
+    expect(lockRedirect('/wapu'), isNull);
+    expect(lockRedirect('/wapu/historial'), isNull);
+    expect(lockRedirect('/wapu/config'), '/wapu');
+    expect(lockRedirect('/hub'), '/wapu');
+  });
 }

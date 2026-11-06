@@ -62,6 +62,14 @@ const miniapps = [
     route: '/cards',
     icon: Icons.credit_card,
   ),
+  // Sells sats to walk-in customers with the merchant's WapuPay key. Its own
+  // setup, so nothing to check before opening it.
+  MiniappManifest(
+    name: 'Wapu',
+    sublabel: 'Bitcoin sin KYC',
+    route: '/wapu',
+    icon: Icons.currency_bitcoin,
+  ),
 ];
 
 /// The requirements of [app] this device and account don't meet.

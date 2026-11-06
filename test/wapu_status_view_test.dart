@@ -1,0 +1,644 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
+import 'package:lawallet_pos/core/i18n.dart';
+import 'package:lawallet_pos/core/theme.dart';
+import 'package:lawallet_pos/features/wapu/wapu_api.dart';
+import 'package:lawallet_pos/features/wapu/wapu_status_view.dart';
+
+/// The clock every view is read at, so the countdown is the same on any day.
+final _now = DateTime.utc(2026, 10, 29, 15, 0);
+
+const _alias = 'Mi.Alias.Cobro';
+const _cvu = '0000003100012345678901';
+const _id = 'tent_9f2c1a7b';
+const _hash =
+    '3f9a1c0be2d84a76b5c3d1e0f9a8b7c6d5e4f30211223344556677889900aabb';
+
+final _lateWatchUntil = DateTime.utc(2026, 10, 29, 15, 41);
+
+/// The `HH:mm` the late-watch copy shows: the device's own clock, not UTC.
+final _lateWatchClock = DateFormat.Hm().format(_lateWatchUntil.toLocal());
+
+/// An order as the backend reports it. Only the orders that have bank details
+/// carry [alias] and [cvu]: EXECUTED and COMPLETED ones come back without.
+WapuOrder _order({
+  String status = 'FUNDING_ISSUED',
+  String payoutStatus = 'waiting_ars',
+  bool watchPending = true,
+  DateTime? expiresAt,
+  DateTime? lateWatchUntil,
+  String? alias,
+  String? cvu,
+  String? paymentHash,
+}) =>
+    WapuOrder(
+      id: _id,
+      status: status,
+      payoutStatus: payoutStatus,
+      payoutAddress: 'cliente@wallet.com',
+      amountArsCents: 1500037,
+      amountOut: 12500,
+      networkFeeOut: 21,
+      watchPending: watchPending,
+      expiresAt: expiresAt,
+      lateWatchUntil: lateWatchUntil,
+      alias: alias,
+      cvu: cvu,
+      paymentHash: paymentHash,
+    );
+
+/// 14:59 left of the payment window.
+final _waiting = _order(
+  alias: _alias,
+  cvu: _cvu,
+  expiresAt: _now.add(const Duration(seconds: 899)),
+);
+
+final _created = _order(
+  status: 'CREATED',
+  watchPending: false,
+  expiresAt: _now.add(const Duration(minutes: 5)),
+);
+
+/// Its window closed a second ago and the poll has not said so yet.
+final _createdPastExpiry = _order(
+  status: 'CREATED',
+  watchPending: false,
+  expiresAt: _now.subtract(const Duration(seconds: 1)),
+);
+
+/// Closed, but a late transfer is still detected (the backend still sends the
+/// bank details then).
+final _lateWatch = _order(
+  status: 'EXPIRED',
+  payoutStatus: 'expired',
+  alias: _alias,
+  cvu: _cvu,
+  lateWatchUntil: _lateWatchUntil,
+);
+
+final _expired = _order(
+  status: 'EXPIRED',
+  payoutStatus: 'expired',
+  watchPending: false,
+);
+
+final _sending = _order(status: 'EXECUTED', payoutStatus: 'sending');
+final _review = _order(status: 'EXECUTED', payoutStatus: 'review');
+
+final _completed = _order(
+  status: 'COMPLETED',
+  payoutStatus: 'completed',
+  watchPending: false,
+  paymentHash: _hash,
+);
+
+final _settled = _order(
+  status: 'SETTLED_TO_BALANCE',
+  payoutStatus: 'settled_to_balance',
+  watchPending: false,
+);
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  /// What the last Copiar put on the clipboard.
+  String? copied;
+
+  setUp(() {
+    copied = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied = (call.arguments as Map)['text'] as String;
+      }
+      return null;
+    });
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null);
+  });
+
+  final newSaleBig = find.byKey(const Key('wapu-new-sale-big'));
+  final fund = find.byKey(const Key('wapu-fund'));
+
+  Future<void> show(
+    WidgetTester tester,
+    WapuOrder order, {
+    VoidCallback? onRequestFunding,
+    VoidCallback? onNewSale,
+    bool busy = false,
+    bool english = false,
+  }) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: buildAppTheme(),
+      locale: english ? const Locale('en') : null,
+      localizationsDelegates:
+          english ? const [AppLocalizationsDelegate()] : null,
+      home: Scaffold(
+        body: WapuStatusView(
+          order: order,
+          now: _now,
+          onRequestFunding: onRequestFunding,
+          onNewSale: onNewSale,
+          busy: busy,
+        ),
+      ),
+    ));
+    await tester.pump(); // the language loads before the first frame
+  }
+
+  /// What a widget really draws, as a string.
+  String drawn(WidgetTester tester, Finder of) => tester
+      .widget<RichText>(
+          find.descendant(of: of, matching: find.byType(RichText)))
+      .text
+      .toPlainText();
+
+  group('formatArsCents', () {
+    test('groups the pesos with dots and puts the cents after a comma', () {
+      expect(formatArsCents(1500037), r'$ 15.000,37');
+      expect(formatArsCents(5), r'$ 0,05');
+    });
+
+    test('always has two decimals', () {
+      expect(formatArsCents(1500000), r'$ 15.000,00');
+      expect(formatArsCents(0), r'$ 0,00');
+      expect(formatArsCents(120), r'$ 1,20');
+    });
+  });
+
+  group('formatCountdown', () {
+    test('is minutes and seconds, two digits each', () {
+      expect(formatCountdown(const Duration(seconds: 899)), '14:59');
+      expect(formatCountdown(const Duration(minutes: 5)), '05:00');
+      expect(formatCountdown(const Duration(seconds: 65)), '01:05');
+    });
+
+    test('stops at zero', () {
+      expect(formatCountdown(Duration.zero), '00:00');
+      expect(formatCountdown(const Duration(seconds: -3)), '00:00');
+    });
+  });
+
+  group('FUNDING_ISSUED', () {
+    testWidgets('shows the alias, the exact amount and the countdown',
+        (tester) async {
+      await show(tester, _waiting);
+
+      expect(find.text('Esperando la transferencia'), findsOneWidget);
+      expect(find.text('Alias'), findsOneWidget);
+      expect(find.text(_alias), findsOneWidget);
+      expect(find.text('CVU'), findsNothing);
+      expect(find.text(_cvu), findsNothing, reason: 'the alias only');
+      expect(find.text('Monto exacto'), findsOneWidget);
+      expect(find.text(r'$ 15.000,37'), findsOneWidget);
+      expect(find.text('Transferí exactamente este monto, con centavos'),
+          findsOneWidget);
+      expect(find.text('Vence en 14:59'), findsOneWidget);
+      expect(find.text('Copiar'), findsNWidgets(2));
+      expect(newSaleBig, findsNothing, reason: 'the order is still open');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final (what, key, text) in [
+      ('the alias', 'wapu-copy-alias', _alias),
+      ('the amount, as a plain decimal', 'wapu-copy-amount', '15000.37'),
+    ]) {
+      testWidgets('copying $what puts $text on the clipboard and says so',
+          (tester) async {
+        await show(tester, _waiting);
+
+        await tester.tap(find.byKey(Key(key)));
+        await tester.pump();
+
+        expect(copied, text);
+        expect(find.text('Copiado'), findsOneWidget);
+        expect(tester.widget<SnackBar>(find.byType(SnackBar)).duration,
+            const Duration(seconds: 1));
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    testWidgets('keeps the value as typed: no uppercase, no squeezing',
+        (tester) async {
+      await show(tester, _waiting);
+
+      // The app's Text would uppercase these, and wrap each in a FittedBox.
+      for (final value in [_alias, r'$ 15.000,37']) {
+        expect(drawn(tester, find.text(value)), value);
+        expect(
+            find.descendant(
+                of: find.text(value), matching: find.byType(FittedBox)),
+            findsNothing,
+            reason: value);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('leaves out a bank row that has no value', (tester) async {
+      await show(tester, _order(cvu: _cvu));
+
+      expect(find.text('Alias'), findsNothing);
+      expect(find.text('Monto exacto'), findsOneWidget);
+      expect(find.text('Copiar'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('counts down to zero and no further', (tester) async {
+      await show(
+          tester,
+          _order(
+              alias: _alias,
+              cvu: _cvu,
+              expiresAt: _now.subtract(const Duration(seconds: 3))));
+
+      expect(find.text('Vence en 00:00'), findsOneWidget);
+      expect(find.text(_alias), findsOneWidget,
+          reason: 'until the poll closes');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('has no countdown without an expiry', (tester) async {
+      await show(tester, _order(alias: _alias, cvu: _cvu));
+
+      expect(find.textContaining('Vence en'), findsNothing);
+      expect(find.text(_alias), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('CREATED', () {
+    testWidgets('offers to ask for the transfer details', (tester) async {
+      var asked = 0;
+      await show(tester, _created, onRequestFunding: () => asked++);
+
+      expect(find.text('Orden creada'), findsOneWidget);
+      expect(find.text('Pedir datos de transferencia'), findsOneWidget);
+      expect(find.text('Copiar'), findsNothing, reason: 'no bank details yet');
+      expect(newSaleBig, findsNothing);
+
+      await tester.tap(fund);
+      expect(asked, 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('waits while the details are being asked for', (tester) async {
+      var asked = 0;
+      await show(tester, _created, onRequestFunding: () => asked++, busy: true);
+
+      expect(tester.widget<FilledButton>(fund).onPressed, isNull);
+      expect(
+          find.descendant(
+              of: fund, matching: find.byType(CircularProgressIndicator)),
+          findsOneWidget);
+      await tester.tap(fund, warnIfMissed: false);
+      expect(asked, 0);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('past its expiry it is an expired order', (tester) async {
+      await show(tester, _createdPastExpiry);
+
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(fund, findsNothing);
+      expect(newSaleBig, findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('EXPIRED', () {
+    testWidgets('with the late watch on, says until when a transfer is seen',
+        (tester) async {
+      await show(tester, _lateWatch);
+
+      expect(find.text('Venció el plazo'), findsOneWidget);
+      expect(
+          find.text('Si el cliente ya transfirió, '
+              'lo seguimos buscando hasta las $_lateWatchClock'),
+          findsOneWidget);
+      expect(find.text('Orden vencida'), findsNothing);
+      expect(newSaleBig, findsNothing, reason: 'still being watched');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('with the late watch on but no time, says only that it passed',
+        (tester) async {
+      await show(tester, _order(status: 'EXPIRED', payoutStatus: 'expired'));
+
+      expect(find.text('Venció el plazo'), findsOneWidget);
+      expect(find.textContaining('lo seguimos buscando'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('closed, says so', (tester) async {
+      await show(tester, _expired);
+
+      expect(find.text('Orden vencida'), findsOneWidget);
+      expect(find.text('Venció el plazo'), findsNothing);
+      expect(find.textContaining('lo seguimos buscando'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('EXECUTED', () {
+    testWidgets('while sending, says the sats are on their way',
+        (tester) async {
+      await show(tester, _sending);
+
+      expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget);
+      expect(newSaleBig, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('in review, says to keep the order id', (tester) async {
+      await show(tester, _review);
+
+      expect(find.text('En revisión'), findsOneWidget);
+      expect(find.text('Guardá el ID de la orden: $_id'), findsOneWidget);
+      expect(newSaleBig, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('lets the operator select the order id, as it is',
+        (tester) async {
+      await show(tester, _review);
+
+      // Selectable text is not the app's Text: nothing uppercases the id.
+      expect(tester.widget<SelectableText>(find.byType(SelectableText)).data,
+          'Guardá el ID de la orden: $_id');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('with any other payout status says the sats are on their way',
+        (tester) async {
+      // The ARS was received, whatever the payout says: never the raw status.
+      for (final payout in ['pending', 'failed', '']) {
+        await show(tester, _order(status: 'EXECUTED', payoutStatus: payout));
+
+        expect(find.text('Pago recibido. Enviando los sats…'), findsOneWidget,
+            reason: payout);
+        expect(find.text('EXECUTED'), findsNothing, reason: payout);
+        expect(find.text('En revisión'), findsNothing, reason: payout);
+        expect(newSaleBig, findsNothing, reason: payout);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('COMPLETED', () {
+    testWidgets('says what the customer received, with the payment hash',
+        (tester) async {
+      await show(tester, _completed);
+
+      expect(
+          find.text('¡Listo! El cliente recibió 12.500 sats'), findsOneWidget);
+      expect(find.byType(SelectableText), findsOneWidget);
+      expect(tester.widget<SelectableText>(find.byType(SelectableText)).data,
+          _hash);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('has no hash line when the backend sent none', (tester) async {
+      await show(tester, _order(status: 'COMPLETED', watchPending: false));
+
+      expect(find.textContaining('¡Listo!'), findsOneWidget);
+      expect(find.byType(SelectableText), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('SETTLED_TO_BALANCE', () {
+    testWidgets('says the sats were not sent and where the money is',
+        (tester) async {
+      await show(tester, _settled);
+
+      expect(find.text('No se pudieron enviar los sats'), findsOneWidget);
+      expect(find.text('El monto quedó en tu saldo de Wapu.'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('any other status', () {
+    testWidgets('shows the status as the backend wrote it', (tester) async {
+      await show(
+          tester,
+          _order(
+              status: 'CANCELLED',
+              payoutStatus: 'cancelled',
+              watchPending: false));
+
+      expect(find.text('CANCELLED'), findsOneWidget);
+      expect(newSaleBig, findsNothing);
+      expect(fund, findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('bank rows', () {
+    for (final (state, order) in [
+      ('CREATED', _created),
+      ('EXPIRED', _expired),
+      ('EXECUTED sending', _sending),
+      ('EXECUTED review', _review),
+      ('COMPLETED', _completed),
+      ('SETTLED_TO_BALANCE', _settled),
+    ]) {
+      testWidgets('$state shows none: its order has no alias or CVU',
+          (tester) async {
+        await show(tester, order);
+
+        expect(find.text('Alias'), findsNothing);
+        expect(find.text('CVU'), findsNothing);
+        expect(find.text('Monto exacto'), findsNothing);
+        expect(find.text('Copiar'), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+  });
+
+  group('Nueva venta', () {
+    for (final (state, order) in [
+      ('COMPLETED', _completed),
+      ('SETTLED_TO_BALANCE', _settled),
+      ('a closed EXPIRED order', _expired),
+      ('a CREATED order past its expiry', _createdPastExpiry),
+    ]) {
+      testWidgets('$state offers it, and it starts the next sale',
+          (tester) async {
+        var started = 0;
+        await show(tester, order, onNewSale: () => started++);
+
+        expect(find.text('Nueva venta'), findsOneWidget);
+        expect(tester.widget<FilledButton>(newSaleBig).onPressed, isNotNull);
+
+        await tester.ensureVisible(newSaleBig);
+        await tester.tap(newSaleBig);
+        expect(started, 1);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    for (final (state, order) in [
+      ('FUNDING_ISSUED', _waiting),
+      ('CREATED', _created),
+      ('EXPIRED with the late watch on', _lateWatch),
+      ('EXECUTED sending', _sending),
+      ('EXECUTED review', _review),
+    ]) {
+      testWidgets('$state does not: the app bar has it', (tester) async {
+        await show(tester, order);
+
+        expect(newSaleBig, findsNothing);
+        expect(find.text('Nueva venta'), findsNothing);
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+  });
+
+  group('in English', () {
+    for (final (state, order, lines) in [
+      (
+        'FUNDING_ISSUED',
+        _waiting,
+        [
+          'Waiting for the transfer',
+          'Alias',
+          'Exact amount',
+          'Transfer exactly this amount, including the cents',
+          'Expires in 14:59',
+        ]
+      ),
+      ('CREATED', _created, ['Order created', 'Request transfer details']),
+      (
+        'EXPIRED with the late watch on',
+        _lateWatch,
+        [
+          'The time limit has passed',
+          'If the customer already transferred, '
+              'we keep looking until $_lateWatchClock',
+        ]
+      ),
+      ('a closed EXPIRED order', _expired, ['Order expired', 'New sale']),
+      ('EXECUTED sending', _sending, ['Payment received. Sending the sats…']),
+      ('EXECUTED review', _review, ['Under review', 'Save the order ID: $_id']),
+      (
+        'COMPLETED',
+        _completed,
+        ['Done! The customer received 12.500 sats', 'New sale']
+      ),
+      (
+        'SETTLED_TO_BALANCE',
+        _settled,
+        [
+          'The sats could not be sent',
+          'The amount went to your Wapu balance.',
+          'New sale',
+        ]
+      ),
+    ]) {
+      testWidgets('$state is translated', (tester) async {
+        await show(tester, order, english: true);
+
+        for (final line in lines) {
+          expect(find.text(line), findsOneWidget, reason: line);
+        }
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+
+    testWidgets('the copy buttons and what they say are translated',
+        (tester) async {
+      await show(tester, _waiting, english: true);
+      expect(find.text('Copy'), findsNWidgets(2));
+
+      await tester.tap(find.byKey(const Key('wapu-copy-alias')));
+      await tester.pump();
+
+      expect(copied, _alias, reason: 'the value is never translated');
+      expect(find.text('Copied'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  group('on the till screen', () {
+    /// The Z92: 720x1280 at 1.5, with the app's 1.3 text scale (lib/app.dart).
+    Future<void> showOnTill(WidgetTester tester, WapuOrder order,
+        {Size size = const Size(720, 1280)}) async {
+      tester.view
+        ..physicalSize = size
+        ..devicePixelRatio = 1.5;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: buildAppTheme(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(1.3)),
+          child: child!,
+        ),
+        home: Scaffold(body: WapuStatusView(order: order, now: _now)),
+      ));
+      await tester.pump();
+    }
+
+    const longAlias = 'una.alias.muy.larga.que.tiene.que.partirse.en.lineas';
+
+    testWidgets('wraps long values inside the width', (tester) async {
+      await showOnTill(
+          tester,
+          _order(
+              alias: longAlias,
+              cvu: _cvu,
+              expiresAt: _now.add(const Duration(minutes: 15))));
+
+      expect(tester.takeException(), isNull);
+      for (final value in [longAlias]) {
+        // A selection over the whole text has one box per line.
+        final lines = tester
+            .renderObject<RenderParagraph>(find.descendant(
+                of: find.text(value), matching: find.byType(RichText)))
+            .getBoxesForSelection(
+                TextSelection(baseOffset: 0, extentOffset: value.length));
+        expect(lines.length, greaterThan(1), reason: '$value wraps');
+        expect(tester.getSize(find.text(value)).width, lessThan(480));
+      }
+      for (final key in ['alias', 'amount']) {
+        final button = find.byKey(Key('wapu-copy-$key'));
+        expect(tester.getRect(button).right, lessThanOrEqualTo(480),
+            reason: key);
+      }
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('scrolls on a short screen instead of overflowing',
+        (tester) async {
+      await showOnTill(tester, _waiting, size: const Size(720, 450)); // 300 dp
+
+      final content = find
+          .descendant(
+              of: find.byType(SingleChildScrollView),
+              matching: find.byType(Column))
+          .first;
+      expect(tester.getSize(content).height, greaterThan(300),
+          reason: 'taller than the screen');
+      expect(tester.takeException(), isNull);
+      await tester.scrollUntilVisible(find.text('Vence en 14:59'), 100);
+      expect(find.text('Vence en 14:59'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the big Nueva venta button is large', (tester) async {
+      await showOnTill(tester, _completed);
+
+      expect(tester.getSize(newSaleBig).height, greaterThanOrEqualTo(74));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+}
