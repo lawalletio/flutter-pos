@@ -191,7 +191,7 @@ class WapuStatusView extends StatelessWidget {
       ),
       // A reply without them reads as 0 and empty: nothing to say.
       if (order.amountOut > 0 && order.payoutAddress.isNotEmpty)
-        _note('$sats sats → ${order.payoutAddress}'),
+        _note('$sats sats → ${shortDestination(order.payoutAddress)}'),
     ];
   }
 

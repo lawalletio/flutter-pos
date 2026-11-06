@@ -475,6 +475,21 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('shortens an invoice in the line of the amount',
+        (tester) async {
+      await show(
+          tester,
+          _order(
+            status: 'EXECUTED',
+            payoutStatus: 'sending',
+            payoutAddress: 'lnbc25u1p3xyzabcdefghijklmnopqrstuvwxyz0123456789',
+          ));
+
+      expect(find.text('12.500 sats → lnbc25u1p3xy…23456789'), findsOneWidget);
+      expect(find.textContaining('lnbc25u1p3xyz'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('shows the Wapu logo while sending, and not in review',
         (tester) async {
       await show(tester, _sending);

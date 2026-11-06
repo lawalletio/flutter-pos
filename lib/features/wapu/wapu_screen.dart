@@ -21,6 +21,7 @@ import 'wapu_account.dart';
 import 'wapu_api.dart';
 import 'wapu_destination.dart';
 import 'wapu_error_text.dart';
+import 'wapu_receipt.dart' show shortDestination;
 import 'wapu_status_view.dart';
 
 /// Where the sale is: the customer's address, then the amount, then the order.
@@ -76,7 +77,7 @@ bool _sameAccount(WapuCredentials? a, WapuCredentials? b) =>
 
 /// The Wapu sale. It needs a signed-in POS user with a saved WapuPay key, and
 /// says so when either is missing. With both, the operator scans or types the
-/// customer's lightning address, and the sale goes on from there.
+/// customer's lightning address or invoice, and the sale goes on from there.
 ///
 /// Free text (an address, a message that may carry one) is Material [m.Text],
 /// not the app's [Text], which would uppercase it and squeeze it into one line.
@@ -117,16 +118,20 @@ class _WapuScreenState extends State<WapuScreen> {
 
   _Step _step = _Step.destination;
 
-  /// The customer's address once it resolved, normalized: what the sale sends
-  /// sats to. Set from the amount step on.
+  /// The customer's address once it resolved, or their invoice, normalized: what
+  /// the sale sends sats to. Set from the amount step on.
   String? _address;
+
+  /// The invoice [_address] is, when it is one. Its amount is its own: it is
+  /// the sats of the sale, and the operator cannot type another.
+  WapuInvoice? _invoice;
 
   /// A lookup of the typed address, or of an order to resume, is under way, so
   /// the first step waits.
   bool _checking = false;
 
-  /// Why the address cannot be used, or the order of the History could not be
-  /// opened, as Spanish source text.
+  /// Why the address or the invoice cannot be used, or the order of the History
+  /// could not be opened, as Spanish source text.
   String? _error;
 
   /// Counts sales. Whatever is still on its way for an earlier one compares it
@@ -239,6 +244,7 @@ class _WapuScreenState extends State<WapuScreen> {
     _reading = false;
     _destination.clear();
     _address = null;
+    _invoice = null;
     _error = null;
     _checking = false;
     _step = _Step.destination;
@@ -285,7 +291,8 @@ class _WapuScreenState extends State<WapuScreen> {
   }
 
   Future<void> _scan() async {
-    final prompt = context.tr('Escaneá la lightning address del cliente');
+    final prompt =
+        context.tr('Escaneá la lightning address o el invoice del cliente');
     final raw = await Navigator.of(context).push<String>(
         MaterialPageRoute(builder: (_) => TokenScanPage(prompt: prompt)));
     if (raw == null || !mounted) return;
@@ -296,13 +303,16 @@ class _WapuScreenState extends State<WapuScreen> {
   }
 
   /// Checks the typed text is an address the backend takes, then that it
-  /// resolves. Only then does the sale move on.
+  /// resolves, or an invoice it can pay. Only then does the sale move on.
   Future<void> _continue() async {
     final text = _destination.text;
-    final problem = switch (classifyDestination(text)) {
-      DestinationKind.lightningAddress => null,
-      DestinationKind.invoice =>
-        'Eso es un invoice. Pedile al cliente su lightning address',
+    final kind = classifyDestination(text);
+    if (kind == DestinationKind.invoice) {
+      _useInvoice(normalizeDestination(text));
+      return;
+    }
+    final problem = switch (kind) {
+      DestinationKind.lightningAddress || DestinationKind.invoice => null,
       DestinationKind.lnurl =>
         'Eso es un LNURL. Pedile al cliente su lightning address',
       DestinationKind.invalid => 'La lightning address no es válida',
@@ -334,6 +344,44 @@ class _WapuScreenState extends State<WapuScreen> {
         _step = _Step.amount;
       }
     });
+  }
+
+  /// Takes [text], a normalized invoice, as the destination and the amount of
+  /// the sale if the backend can pay it, and asks for its price at once: the
+  /// sats are the invoice's, so there is nothing to wait for.
+  void _useInvoice(String text) {
+    final WapuInvoice invoice;
+    try {
+      invoice = parseWapuInvoice(text, DateTime.now());
+    } on WapuInvoiceException catch (e) {
+      setState(() => _error = e.message); // already Spanish
+      return;
+    }
+    final api = _api!; // the first step only shows with a key
+    setState(() {
+      _clearAmount();
+      _error = null;
+      _address = text;
+      _invoice = invoice;
+      _mode = _Mode.sats;
+      _raw = '${invoice.sats}';
+      _sats = invoice.sats;
+      _step = _Step.amount;
+    });
+    _fetchQuote(api);
+  }
+
+  /// One step back, not a new sale: the field keeps what was typed. An address
+  /// leaves the amount as it was, as it does not depend on it. An invoice's
+  /// amount is its own, so it goes with it. Call it inside [setState].
+  void _editDestination() {
+    _step = _Step.destination;
+    _createError = null; // it was about the old destination
+    if (_invoice != null) {
+      _invoice = null;
+      _mode = _Mode.ars;
+      _clearAmount();
+    }
   }
 
   /// Forgets the amount and all that was asked for it: the clock that was
@@ -432,6 +480,20 @@ class _WapuScreenState extends State<WapuScreen> {
     // The button is off then, but a second tap can get here before it is
     // rebuilt.
     if (!_canConfirm || api == null || address == null) return;
+    // An invoice keeps ageing while the operator reads the price: it may have
+    // crossed the line since the first step, and no order is made for it then.
+    final invoice = _invoice;
+    if (invoice != null) {
+      try {
+        parseWapuInvoice(invoice.text, DateTime.now());
+      } on WapuInvoiceException catch (e) {
+        setState(() {
+          _editDestination(); // the next invoice is typed in the field
+          _error = e.message; // already Spanish
+        });
+        return;
+      }
+    }
     final ars = _arsCents;
     final sats = _sats;
     final gen = ++_gen;
@@ -812,7 +874,7 @@ class _WapuScreenState extends State<WapuScreen> {
           enableSuggestions: false,
           onSubmitted: (_) => _continue(),
           decoration: InputDecoration(
-            labelText: context.tr('Lightning address del cliente'),
+            labelText: context.tr('Lightning address o invoice del cliente'),
             hintText: context.tr('nombre@dominio.com'),
             floatingLabelBehavior: FloatingLabelBehavior.always,
             filled: true,
@@ -855,12 +917,14 @@ class _WapuScreenState extends State<WapuScreen> {
   }
 
   /// The address, the unit, the amount with its price, and the pad. Only the
-  /// middle scrolls: the pad and Confirmar stay put on a short screen.
+  /// middle scrolls: the pad and Confirmar stay put on a short screen. An
+  /// invoice sets the amount, so it has neither the unit nor the pad.
   Widget _amountStep(BuildContext context) {
     final quote = _quote;
     final error = _quoteError;
     final createError = _createError;
     final typed = int.parse(_raw);
+    final fixed = _invoice != null;
     return Column(
       key: const Key('wapu-amount'),
       children: [
@@ -868,7 +932,7 @@ class _WapuScreenState extends State<WapuScreen> {
           children: [
             Expanded(
               child: m.Text(
-                _address ?? '',
+                shortDestination(_address ?? ''),
                 softWrap: true,
                 style: const TextStyle(color: AppColors.muted),
               ),
@@ -876,38 +940,33 @@ class _WapuScreenState extends State<WapuScreen> {
             IconButton(
               tooltip: context.tr('Cambiar dirección').toUpperCase(),
               icon: const Icon(Icons.edit_outlined),
-              // One step back, not a new sale: the field keeps what was typed.
-              // The order that is being created is for this address, so it
+              // The order that is being created is for this destination, so it
               // waits for that.
-              onPressed: _busy
-                  ? null
-                  : () => setState(() {
-                        _step = _Step.destination;
-                        _createError = null; // it was about the old address
-                      }),
+              onPressed: _busy ? null : () => setState(_editDestination),
             ),
           ],
         ),
-        SegmentedButton<_Mode>(
-          style: SegmentedButton.styleFrom(
-            backgroundColor: AppColors.surface,
-            selectedBackgroundColor: AppColors.primary,
-            selectedForegroundColor: Colors.black,
+        if (!fixed)
+          SegmentedButton<_Mode>(
+            style: SegmentedButton.styleFrom(
+              backgroundColor: AppColors.surface,
+              selectedBackgroundColor: AppColors.primary,
+              selectedForegroundColor: Colors.black,
+            ),
+            segments: const [
+              ButtonSegment(
+                value: _Mode.ars,
+                label: Text('ARS', key: Key('wapu-mode-ars')),
+              ),
+              ButtonSegment(
+                value: _Mode.sats,
+                label: Text('SATS', key: Key('wapu-mode-sats')),
+              ),
+            ],
+            selected: {_mode},
+            showSelectedIcon: false,
+            onSelectionChanged: (s) => _setMode(s.first),
           ),
-          segments: const [
-            ButtonSegment(
-              value: _Mode.ars,
-              label: Text('ARS', key: Key('wapu-mode-ars')),
-            ),
-            ButtonSegment(
-              value: _Mode.sats,
-              label: Text('SATS', key: Key('wapu-mode-sats')),
-            ),
-          ],
-          selected: {_mode},
-          showSelectedIcon: false,
-          onSelectionChanged: (s) => _setMode(s.first),
-        ),
         Expanded(
           child: SingleChildScrollView(
             child: Column(
@@ -924,6 +983,12 @@ class _WapuScreenState extends State<WapuScreen> {
                         fontSize: 40, fontWeight: FontWeight.w700),
                   ),
                 ),
+                if (fixed)
+                  m.Text(
+                    context.tr('Monto fijado por el invoice'),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.muted),
+                  ),
                 const SizedBox(height: 8),
                 // Before the price: the lines scroll, and this must be read.
                 if (createError != null)
@@ -947,7 +1012,7 @@ class _WapuScreenState extends State<WapuScreen> {
             ),
           ),
         ),
-        Numpad(onDigit: _digit, onBackspace: _back),
+        if (!fixed) Numpad(onDigit: _digit, onBackspace: _back),
         const SizedBox(height: 8),
         FilledButton(
           key: const Key('wapu-confirm'),

@@ -11,6 +11,7 @@ import '../../domain/config/session.dart';
 import 'wapu_account.dart';
 import 'wapu_api.dart';
 import 'wapu_error_text.dart';
+import 'wapu_receipt.dart' show shortDestination;
 import 'wapu_status_view.dart' show formatArsCents;
 
 /// The orders of the signed-in POS user's Wapu account, the ones still in
@@ -181,7 +182,7 @@ class _WapuHistoryScreenState extends State<WapuHistoryScreen> {
               ),
               m.Text('${formatToPreference(Currency.sat, o.amountOut)} sats'),
               m.Text(
-                o.payoutAddress,
+                shortDestination(o.payoutAddress),
                 softWrap: true,
                 style: const TextStyle(color: AppColors.muted, fontSize: 13),
               ),

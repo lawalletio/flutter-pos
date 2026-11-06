@@ -71,6 +71,10 @@
   - `String normalizeDestination(String raw)`
   - `bool isWapuLightningAddress(String normalized)`
   - `DestinationKind classifyDestination(String raw)`
+  - `const kWapuInvoiceMinLife = Duration(minutes: 15)`
+  - `class WapuInvoice`, an invoice the backend can pay, with `String text` (normalized), `int sats` and `DateTime expiresAt`
+  - `class WapuInvoiceException implements Exception`, whose `message` is the Spanish copy key of the problem
+  - `WapuInvoice parseWapuInvoice(String normalized, DateTime now)`, which throws a `WapuInvoiceException`
 
 - [ ] **Step 1: Write the failing tests** in `test/wapu_destination_test.dart`:
   - `normalizes case, spaces and the lightning: prefix`: `normalizeDestination('  LIGHTNING:Alice@Example.COM ')` equals `'alice@example.com'`.
@@ -89,6 +93,13 @@
     - `classifyDestination('LNURL1DP68GURN8GHJ7')` is `lnurl`;
     - `classifyDestination(' Alice@Example.com ')` is `lightningAddress`;
     - `classifyDestination('hello')` is `invalid`.
+  - `parseWapuInvoice`, with invoices the test builds with `Bech32Codec().encode` (the decoder does not check the signature) and a fixed `now`:
+    - an `lnbc25u` invoice reads as 2500 sats, and expires at its timestamp plus its `x` field, or an hour after it when it has none;
+    - with 14 minutes left, with exactly 15, and when it expired already, it is refused with `'El invoice vence en menos de 15 minutos. Pedile al cliente uno nuevo.'`, and with 15 minutes 1 second left it is accepted;
+    - `lntb`, `lntbs` and `lnbcrt` invoices are refused with `'El invoice no es de la red principal de Bitcoin'`;
+    - one with no amount is refused with `'El invoice no tiene monto. Pedile al cliente uno con monto.'`;
+    - a fraction of a sat, a negative amount, a flipped character (a bad checksum), a cut text and `'lnbc10u1p3xyz'` are refused with `'El invoice no es válido'`;
+    - a scanned `'LIGHTNING:LNBC…'` normalizes and reads like a typed invoice.
 - [ ] **Step 2: Run the tests and see them fail**
   - Run: `bash -lc 'cd /home/senshi/projects/flutter-pos-worktrees/wapu-miniapp && flutter test test/wapu_destination_test.dart'`
   - Expected: FAIL to compile, because the file is missing.
@@ -98,6 +109,7 @@
   - The domain matches `^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`.
   - The text has exactly one `@`.
   - An invoice starts with `lnbc` or `lntb`, and an lnurl starts with `lnurl`. Both checks run on the normalized text.
+  - `parseWapuInvoice` takes only mainnet: the text starts with `lnbc` and not `lnbcrt`. It decodes with `bolt11_decoder`, and any exception is "not valid". The sats are `amount.shift(8)`, which must be a whole, positive number that an int holds, and an amount of zero is "no amount". The life is the timestamp plus the `x` field (3600 s when there is none), and it must be more than `kWapuInvoiceMinLife` after `now`. `decimal` and `fixnum` are only transitive dependencies: the code calls methods on their values and imports neither.
 - [ ] **Step 4: Run the tests and see them pass**, then run `flutter analyze`. Expected: all pass, and analyze reports No issues found.
 - [ ] **Step 5: Commit:** `git add lib/features/wapu/wapu_destination.dart test/wapu_destination_test.dart && git commit -m "feat(wapu): add lightning destination helpers"`
 
@@ -319,10 +331,10 @@
   - No credentials shows `'Configurá tu API key de Wapu'`, plus a `'Configurar'` button (`Key('wapu-setup')`) that runs the gear action.
     - While the till is locked, the button is replaced by the copy `'Desbloqueá el POS para configurar Wapu'` (English: `'Unlock the POS to set up Wapu'`), as the gear is hidden: the config stays out of reach.
 - **Destination step:**
-  - A `TextField` (`Key('wapu-destination')`) with hint `'nombre@dominio.com'` and label `'Lightning address del cliente'`.
-  - A `'Escanear QR'` button that pushes `TokenScanPage(prompt: context.tr('Escaneá la lightning address del cliente'))` and puts the popped raw text into the field.
+  - A `TextField` (`Key('wapu-destination')`) with hint `'nombre@dominio.com'` and label `'Lightning address o invoice del cliente'`.
+  - A `'Escanear QR'` button that pushes `TokenScanPage(prompt: context.tr('Escaneá la lightning address o el invoice del cliente'))` and puts the popped raw text into the field.
   - A `'Continuar'` button (`Key('wapu-continue')`) that classifies the text:
-    - `invoice` shows `'Eso es un invoice. Pedile al cliente su lightning address'`;
+    - `invoice` runs `parseWapuInvoice(normalized, DateTime.now())`. A `WapuInvoiceException` shows its `message`, translated, where the other destination errors show. On success the sale takes the invoice as the destination and moves to the amount step (Task 6). The invoice is not looked up with `lnurl.validate`;
     - `lnurl` shows `'Eso es un LNURL. Pedile al cliente su lightning address'`;
     - `invalid` shows `'La lightning address no es válida'`;
     - `lightningAddress` runs `await lnurl.validate(normalized)`. A throw shows the exception's message, or `'No se pudo verificar la lightning address'`. Success stores the normalized address and moves to the amount step, which renders a placeholder `SizedBox` until Task 6.
@@ -339,7 +351,7 @@
     - `asks to configure when the merchant has no key`: shows `'Configurá tu API key de Wapu'` and `Key('wapu-setup')`.
     - `the gear asks for the PIN when one is set`: with `miniappPin.value = '1234'`, tapping `Key('wapu-config')` shows `Key('miniapp-pin')`. Cancel stays on `/wapu`; the right PIN opens `WapuSettingsScreen`.
     - `the gear is hidden while locked`: with `lockedFlow.value = '/wapu'`, `Key('wapu-config')` is not found.
-    - `rejects invoices and lnurls with a hint`: entering `'lnbc10u1p3xyz'` shows the invoice copy, and `lnurl.validate` was not called.
+    - `rejects broken invoices and lnurls with a hint`: entering `'lnbc10u1p3xyz'` shows `'El invoice no es válido'`, and `lnurl.validate` was not called.
     - `normalizes and validates the address`: entering `'  LIGHTNING:Alice@Example.COM '` makes `lnurl.validate` receive `'alice@example.com'`, and the destination field is gone, so the step advanced.
     - `switching POS user resets to that user's state`: with merchant A having a key, change `merchantAddress.value` to B, which has no key, and the setup copy appears.
     - `the manifest lists Wapu`: `miniapps.any((m) => m.route == '/wapu' && m.sublabel == 'Bitcoin sin KYC')`.
@@ -378,7 +390,11 @@
   - When `amountArsCents < minAmountArsCents`, show `'El mínimo es '` plus the formatted minimum.
   - When `!liquidityOk`, show the 409 copy key.
   - Confirm is enabled only when the quote is fresh, `liquidityOk` is true, and the amount is not below the minimum.
-- **Header:** above the pad, show the destination address with an edit icon that returns to the destination step.
+- **Header:** above the pad, show the destination address with an edit icon that returns to the destination step. An invoice is shown with `shortDestination`.
+- **Invoice:** an invoice sets the amount.
+  - Taking it puts the sale in sats mode with the invoice's sats, and asks for the quote at once (no debounce) with `quote(sats:)`.
+  - The unit toggle and the pad are not shown. The amount is shown with the muted note `'Monto fijado por el invoice'`, and the quote lines are those of the sats mode.
+  - The edit icon drops the invoice and its amount, and the next destination starts a sale in pesos. An address keeps the amount as it was.
 
 - [ ] **Step 1: Write the failing widget tests**, reusing Task 5's harness with a validated destination:
   - `quotes in pesos after the debounce`: tap 1,5,0,0,0, pump 400 ms, and no request yet; pump 200 ms more, and one quote request with `amount_ars_cents: '1500000'`. `'El cliente recibe'` and the sats are shown.
@@ -387,6 +403,10 @@
   - `below the minimum disables confirm`: with `min_amount_ars_cents` above the amount, the minimum copy shows and `Key('wapu-confirm')`'s `onPressed` is null.
   - `no liquidity disables confirm`.
   - `a quote error is shown and confirm stays disabled`: a 422 shows `'El monto está fuera de los límites'`.
+  - Invoices, with a mainnet invoice for 2,500 sats that has an hour left, built in the test:
+    - `an invoice sets the amount, which cannot be typed over`: after Continuar the quote request goes out at once with `amount_out=2500` and no `amount_ars_cents`. There is no toggle and no pad, `'Monto fijado por el invoice'` is shown, and so is the shortened invoice.
+    - `an invoice with 14 minutes left is refused at Continuar`, `says why any other invoice is refused` (another network, no amount, a fraction of a sat, expired, broken) and `the invoice copy is translated`.
+    - `the pencil drops the invoice and its amount`, and `Nueva venta after an invoice starts an ordinary sale`: the toggle and the pad are back.
 - [ ] **Step 2: Run the tests and see them fail.**
 - [ ] **Step 3: Implement**, and add the `_en` entries.
 - [ ] **Step 4: Run the tests and analyze, and see them pass.**
@@ -412,7 +432,7 @@
 | FUNDING_ISSUED, `expiresAt` after `now` | Title `'Esperando la transferencia'`. Rows `'Alias'`, `'CVU'` and `'Monto exacto'` (`formatArsCents(amountArsCents)`), each with a copy button; the amount copies the plain decimal string `'15000.37'`. Hint `'Transferí exactamente este monto, con centavos'`. `'Vence en '` + `formatCountdown(expiresAt - now)`. |
 | CREATED, not expired | `'Orden creada'`, plus a `'Pedir datos de transferencia'` button (`Key('wapu-fund')`) that calls `onRequestFunding`. |
 | EXPIRED, FUNDING_ISSUED with `expiresAt` not after `now`, or CREATED past `expiresAt` | Title `'Orden vencida'`, then `'No se recibieron ARS ni se enviaron sats.'`. With `watchPending` and `lateWatchUntil`, also `'Si el cliente ya transfirió, lo seguimos buscando hasta las '` + `HH:mm`, the local time of `lateWatchUntil`. Then the `WapuReceipt`, with the status `'Vencida'` and the deposit row `'Depósito esperado'`. The big `'Nueva venta'` shows only without `watchPending`. |
-| EXECUTED + `sending` | The Wapu logo (`Key('wapu-logo')`, `assets/images/wapu_logo.png`) on a white plate, then `'Pago recibido'`, a small spinner beside `'Enviando los sats…'`, and the sats and the payout address. |
+| EXECUTED + `sending` | The Wapu logo (`Key('wapu-logo')`, `assets/images/wapu_logo.png`) on a white plate, then `'Pago recibido'`, a small spinner beside `'Enviando los sats…'`, and the sats and the payout address (`shortDestination`: an invoice is shortened). |
 | EXECUTED + `review` | `'En revisión'`, plus `'Guardá el ID de la orden: '` + id |
 | COMPLETED | `'¡Listo! El cliente recibió '` + sats + `' sats'`, then the `WapuReceipt` (`lib/features/wapu/wapu_receipt.dart`, `Key('wapu-receipt')`): the rows `'Comprado'` (`purchasedSats`), `'Fecha'` (only with `createdAt`), `'Estado'`, `'Para'` (`shortDestination`), the id with its copy (`Key('wapu-copy-id')`) and QR (`Key('wapu-id-qr')`) buttons, `'Comisión de la operación'` (`networkFeeOut`), `'Depósito del cliente'` and `'Total'` (`amountOut`, the sats of the headline). |
 | SETTLED_TO_BALANCE | `'No se pudieron enviar los sats'`, plus `'El monto quedó en tu saldo de Wapu.'`, then the `WapuReceipt` (status `'Acreditada en saldo Wapu'`). With `errorCode == 'invoice_expired'` the message is `'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en la cuenta de Wapu '` + the `wapuUser` the screen passes, or `'La orden expiró pero se detectó el depósito en ARS, el saldo fue acreditado en tu cuenta de Wapu.'` when it is null. |
@@ -443,7 +463,8 @@
 
 **Behavior:**
 - **Confirm:**
-  1. Increment `_gen`, then call `createOrder` with the destination and the amount from the current mode.
+  0. With an invoice, read it again first with `parseWapuInvoice(text, DateTime.now())`. If that throws, make no order: go back to the destination step with the message, the old invoice still in the field. The invoice may have crossed the 15-minute line while the operator waited.
+  1. Increment `_gen`, then call `createOrder` with the destination and the amount from the current mode. An invoice goes as `address` with its sats, and no `arsCents`.
   2. On a `WapuApiException`, show `wapuErrorKey(e, creating: true)` and stay on the amount step.
   3. On success, move to the status step with the created order, then call `fund(id)`.
   4. A funding error shows its copy key; the CREATED view's `'Pedir datos de transferencia'` button retries funding.
@@ -462,6 +483,8 @@
 
 - [ ] **Step 1: Write the failing widget tests:**
   - `confirm creates, funds and shows the funded amount`: the quote said 1500000 and funding returned 1500037. The screen shows `'$ 15.000,37'`, the alias and the CVU, and the request order is quote, create, funding.
+  - `confirm creates the order for the invoice and its sats`: the create body has `payout_address` as the invoice and `amount_out` as its sats, and no `amount_ars_cents`.
+  - `an invoice that crossed the 15-minute line is not paid`: an invoice with 3 s over the line passes Continuar. After a real 3.1 s wait, Confirmar makes no create request, and the sale is back on the destination step with the message. A new invoice then goes through.
   - `a create timeout says to check the history and does not retry`: exactly one create request, and the "check the History" copy is shown.
   - `funding failure offers a retry`: funding first returns 503, then 201. The CREATED view shows `Key('wapu-fund')`, and tapping it shows the bank details.
   - `polling advances to done and plays once`: detail replies FUNDING_ISSUED, then EXECUTED, then COMPLETED, pumped 10 s apart. `'¡Listo!'` shows, and polling stops: there are no more requests after another 30 s.
@@ -490,7 +513,7 @@
 
 **Behavior:**
 - **List:** in-progress orders come first (`isInProgress(DateTime.now())`), stable within each group.
-- **Rows:** each row (`Key('wapu-order-<id>')`) shows the ARS amount, the sats, the destination address and a short status label:
+- **Rows:** each row (`Key('wapu-order-<id>')`) shows the ARS amount, the sats, the destination address (`shortDestination`: an invoice is shortened) and a short status label:
   - `'En curso'` for in-progress orders;
   - `'Completada'` for COMPLETED;
   - `'Vencida'` for EXPIRED;
