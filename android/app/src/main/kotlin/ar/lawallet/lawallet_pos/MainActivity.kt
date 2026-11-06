@@ -9,6 +9,7 @@ import android.graphics.Rect
 import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.app.PendingIntent
 import android.content.Intent
@@ -67,6 +68,7 @@ class MainActivity : FlutterActivity() {
     private var nfcEvents: EventChannel.EventSink? = null
     private var nfcActive = false
     private var presenting = false // an invoice is up as an NFC tag (InvoiceTagService)
+    private var nfcBeepMuted = false
 
     override fun onResume() {
         super.onResume()
@@ -97,7 +99,14 @@ class MainActivity : FlutterActivity() {
         onNfcTag(tag)
     }
 
+    // Not onPause: every card dispatch pauses us right as Android plays its beep.
+    override fun onStop() {
+        muteNfcBeep(false)
+        super.onStop()
+    }
+
     override fun onDestroy() {
+        muteNfcBeep(false)
         printExecutor.shutdown()
         soundExecutor.shutdown()
         super.onDestroy()
@@ -427,8 +436,10 @@ class MainActivity : FlutterActivity() {
                 PendingIntent.FLAG_MUTABLE,
             )
             nfcActive = runCatching { adapter.enableForegroundDispatch(this, pi, null, null) }.isSuccess
+            muteNfcBeep(true)
             return
         }
+        muteNfcBeep(false)
         runCatching { adapter.disableForegroundDispatch(this) }
         val flags = NfcAdapter.FLAG_READER_NFC_A or
             NfcAdapter.FLAG_READER_NFC_B or
@@ -437,6 +448,18 @@ class MainActivity : FlutterActivity() {
             NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS
         adapter.enableReaderMode(this, { tag -> onNfcTag(tag) }, flags, null)
         nfcActive = true
+    }
+
+    /** Outside reader mode Android beeps on every tag and offers no flag to stop it.
+     *  That beep plays on the system stream; the till's own sounds are media, so
+     *  muting system while an invoice is up leaves only the app's card sound. */
+    private fun muteNfcBeep(mute: Boolean) {
+        if (nfcBeepMuted == mute) return
+        val am = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return
+        runCatching {
+            am.adjustStreamVolume(AudioManager.STREAM_SYSTEM, if (mute) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE, 0)
+            nfcBeepMuted = mute
+        }
     }
 
     /** Show [bolt11] to phones as an NFC tag, or stop with null. */
