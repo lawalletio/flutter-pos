@@ -238,6 +238,12 @@ final copy = <(String, WapuApiException, bool, String, String)>[
 ];
 
 void main() {
+  test('the default client factory builds a WapuApi, and errors read as text',
+      () {
+    expect(wapuApiFor('https://wapu.test', 'k'), isA<WapuApi>());
+    expect('${const WapuApiException('boom', statusCode: 500)}', 'boom');
+  });
+
   test('quote by sats sends only the API key and amount_out', () async {
     final net = FakeNet({
       'GET /transactions/direct-fiat/quote': (200, quoteJson()),

@@ -21,6 +21,7 @@ import 'package:lawallet_pos/features/wapu/wapu_account.dart';
 import 'package:lawallet_pos/features/wapu/wapu_api.dart';
 import 'package:lawallet_pos/features/wapu/wapu_history_screen.dart';
 import 'package:lawallet_pos/features/wapu/wapu_screen.dart';
+import 'package:lawallet_pos/features/wapu/wapu_settings_screen.dart';
 
 const _me = 'shop@lacrypta.ar';
 const _other = 'other@lacrypta.ar';
@@ -260,9 +261,8 @@ void main() {
   /// Holds the requests to [path] until the returned completer completes.
   Completer<void> holdOn(String method, String path) {
     final held = Completer<void>();
-    net.hold = (o) => o.method == method && o.uri.path == path
-        ? held.future
-        : Future.value();
+    net.hold = (o) =>
+        o.method == method && o.uri.path == path ? held.future : Future.value();
     return held;
   }
 
@@ -280,8 +280,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('keeps the order of the API within each group',
-        (tester) async {
+    testWidgets('keeps the order of the API within each group', (tester) async {
       net.routes[_listRoute] = listReply([
         orderJson('d', status: 'COMPLETED', payout: 'completed', watch: false),
         orderJson('e'),
@@ -608,6 +607,18 @@ void main() {
       expect(find.text('alias.b'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
+
+    testWidgets("the app's own router serves the config", (tester) async {
+      net.routes['GET /users/user-settings'] = (200, {'beta_version': true});
+      merchantAddress.value = _me;
+      appRouter.go('/wapu/config');
+      await tester.pumpWidget(
+          MaterialApp.router(theme: buildAppTheme(), routerConfig: appRouter));
+      await settle(tester);
+
+      expect(find.byType(WapuSettingsScreen), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   group('resume', () {
@@ -650,7 +661,8 @@ void main() {
       await pick(tester, 'b');
 
       expect(find.byType(WapuHistoryScreen), findsNothing);
-      expect(destination, findsNothing, reason: 'the order, not the first step');
+      expect(destination, findsNothing,
+          reason: 'the order, not the first step');
       expect(find.text('Esperando la transferencia'), findsOneWidget);
       expect(find.text('alias.b'), findsOneWidget);
       expect(find.text(r'$ 15.000,37'), findsOneWidget);
@@ -670,8 +682,8 @@ void main() {
 
       await pick(tester, 'a');
 
-      expect(find.text('¡Listo! El cliente recibió 17.000 sats'),
-          findsOneWidget);
+      expect(
+          find.text('¡Listo! El cliente recibió 17.000 sats'), findsOneWidget);
       expect(find.text(_hash), findsOneWidget);
       expect(find.text('alias.a'), findsNothing);
       await tester.pump(const Duration(seconds: 30));
@@ -690,7 +702,10 @@ void main() {
       for (final (reply, copy) in [
         ((404, {'error': 'tentative not found'}), 'La orden no existe'),
         ((401, {'error': 'invalid api key'}), 'La API key no es válida'),
-        ((500, {'error': 'internal error'}), 'No se pudo completar la operación'),
+        (
+          (500, {'error': 'internal error'}),
+          'No se pudo completar la operación'
+        ),
       ]) {
         net.routes[_read('b')] = reply;
         await pick(tester, 'b');
@@ -700,8 +715,8 @@ void main() {
         expect(tester.getTopLeft(find.text(copy)).dy,
             greaterThan(tester.getBottomLeft(destination).dy),
             reason: 'under the field');
-        expect(tester.widget<Text>(find.text(copy)).style?.color,
-            AppColors.error);
+        expect(
+            tester.widget<Text>(find.text(copy)).style?.color, AppColors.error);
         expect(find.byKey(const Key('wapu-error-detail')), findsNothing,
             reason: 'the copy alone, as on the other first-step errors');
         expect(destination, findsOneWidget);
