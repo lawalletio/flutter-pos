@@ -1,6 +1,7 @@
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../core/app_update.dart';
 import '../../core/i18n.dart';
 import '../../core/pin_dialog.dart';
 import '../../core/print_error.dart';
@@ -965,18 +966,22 @@ class _VersionFooter extends StatelessWidget {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.only(bottom: 8),
-        child: FutureBuilder<PackageInfo>(
-          future: _packageInfo,
-          builder: (context, snap) {
-            final info = snap.data;
-            final label = info != null
-                ? 'v${info.version} (${info.buildNumber})'
-                : 'v$kFallbackVersion';
-            return Text(label,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.muted, fontSize: 12));
-          },
-        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const CheckUpdatesButton(),
+          FutureBuilder<PackageInfo>(
+            future: _packageInfo,
+            builder: (context, snap) {
+              final info = snap.data;
+              final label = info != null
+                  ? 'v${info.version} (${info.buildNumber})'
+                  : 'v$kFallbackVersion';
+              return Text(label,
+                  textAlign: TextAlign.center,
+                  style:
+                      const TextStyle(color: AppColors.muted, fontSize: 12));
+            },
+          ),
+        ]),
       ),
     );
   }

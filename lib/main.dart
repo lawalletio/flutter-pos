@@ -2,6 +2,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'core/app_update.dart';
+import 'core/router.dart';
 import 'core/sounds.dart';
 import 'core/ui.dart';
 import 'data/lnurl/lnurl_service.dart';
@@ -57,5 +59,7 @@ Future<void> main() async {
   runApp(const ProviderScope(child: LaWalletPosApp()));
   WidgetsBinding.instance.addPostFrameCallback((_) {
     AppSounds.play(AppSound.start);
+    autoCheckForUpdate(
+        () => appRouter.routerDelegate.navigatorKey.currentContext!);
   });
 }

@@ -189,6 +189,28 @@ class MainActivity : FlutterActivity() {
                 }
             })
 
+        // Self-update from GitHub releases (see lib/core/app_update.dart).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "pos/update")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "info" -> result.success(mapOf(
+                        "abi" to Build.SUPPORTED_ABIS.first(),
+                        "dir" to cacheDir.absolutePath,
+                        "fromStore" to (installerPackage() == "com.android.vending"),
+                    ))
+                    "install" -> {
+                        val file = java.io.File(call.argument<String>("path")!!)
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            this, "$packageName.updates", file)
+                        startActivity(Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, soundsChannelName)
             .setMethodCallHandler { call, result ->
                 val args = call.arguments as? Map<*, *>
@@ -236,6 +258,12 @@ class MainActivity : FlutterActivity() {
                 }
             }
     }
+
+    private fun installerPackage(): String? = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            packageManager.getInstallSourceInfo(packageName).installingPackageName
+        else @Suppress("DEPRECATION") packageManager.getInstallerPackageName(packageName)
+    } catch (_: Exception) { null }
 
     // ---- sounds ----
 
