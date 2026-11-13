@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lawallet_pos/data/lnurl/lnurl_service.dart';
+import 'package:lawallet_pos/data/nostr/identity.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// A Dio adapter that returns the same canned response for any request.
 class _CannedAdapter implements HttpClientAdapter {
@@ -14,6 +17,29 @@ class _CannedAdapter implements HttpClientAdapter {
   Future<ResponseBody> fetch(RequestOptions options,
       Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
     return ResponseBody.fromString(body, status, headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    });
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+/// Serves the lnurlp body, then [invoiceBody] for the callback, and records
+/// every URL asked for.
+class _RoutedAdapter implements HttpClientAdapter {
+  _RoutedAdapter(this.lnurlp, this.invoiceBody);
+  final String lnurlp;
+  final String invoiceBody;
+  final List<Uri> seen = [];
+
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    seen.add(options.uri);
+    final body =
+        options.uri.path.contains('.well-known') ? lnurlp : invoiceBody;
+    return ResponseBody.fromString(body, 200, headers: {
       Headers.contentTypeHeader: [Headers.jsonContentType],
     });
   }
@@ -44,5 +70,34 @@ void main() {
     final svc = _serviceReturning('{"status":"ERROR","reason":"not found"}');
     await expectLater(
         svc.validate('nobody@example.com'), throwsA(isA<LnurlException>()));
+  });
+
+  // Live walletofsatoshi.com responses (2026-11): allowsNostr, but the
+  // invoice has no LUD-21 `verify`, and its NIP-05 has no entry for the user,
+  // so there is no merchant pubkey. The zap receipt is the only way to see
+  // the payment, so a zap request must go out anyway.
+  test('a Wallet of Satoshi invoice is watched by zap receipt', () async {
+    SharedPreferences.setMockInitialValues({});
+    const wosKey =
+        'be1d89794bf92de5dd64c1e60f6a2c70c140abac9932418fee30c5c637fe9479';
+    final adapter = _RoutedAdapter(
+      '{"callback":"https://livingroomofsatoshi.com/api/v1/lnurl/payreq/x",'
+          '"maxSendable":100000000000,"minSendable":1000,"metadata":"[]",'
+          '"tag":"payRequest","allowsNostr":true,"nostrPubkey":"$wosKey"}',
+      '{"pr":"lnbc10n1wos","routes":[]}',
+    );
+    final svc = LnurlService(dio: Dio()..httpClientAdapter = adapter);
+
+    final inv = await svc.requestInvoice('test@walletofsatoshi.com', 1,
+        relays: const ['wss://relay.damus.io']);
+
+    expect(inv.verify, isNull);
+    expect(inv.zapEnabled, isTrue);
+    expect(inv.zapPubkey, wosKey);
+    final zap = jsonDecode(adapter.seen.last.queryParameters['nostr']!) as Map;
+    final p = [for (final t in zap['tags'] as List) if (t[0] == 'p') t[1]];
+    // The till's own key, never the provider's shared one.
+    expect(p, [await nostrIdentity.publicKey()]);
+    expect(p, isNot(contains(wosKey)));
   });
 }
