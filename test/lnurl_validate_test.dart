@@ -100,4 +100,24 @@ void main() {
     expect(p, [await nostrIdentity.publicKey()]);
     expect(p, isNot(contains(wosKey)));
   });
+
+  test('a merchant with their own NIP-05 key is still the zap recipient',
+      () async {
+    const merchant =
+        '2ad91f1dca2dcd5fc89e7208d1e5059f0bac0870d63fc3bac21c7a9388fa18fd';
+    final adapter = _RoutedAdapter(
+      '{"callback":"https://getalby.com/lnurlp/x/callback",'
+          '"minSendable":1000,"maxSendable":10000000000,"tag":"payRequest",'
+          '"allowsNostr":true,"nostrPubkey":"79f00d3f5a19ec806189fcab03c1be4ff81d18ee4f653c88fac41fe03570f432"}',
+      '{"pr":"lnbc10n1alby","verify":"https://getalby.com/v"}',
+    );
+    final svc = LnurlService(dio: Dio()..httpClientAdapter = adapter);
+
+    await svc.requestInvoice('barra@lacrypta.ar', 1,
+        relays: const ['wss://relay.lacrypta.ar'], recipientPubkey: merchant);
+
+    final zap = jsonDecode(adapter.seen.last.queryParameters['nostr']!) as Map;
+    expect([for (final t in zap['tags'] as List) if (t[0] == 'p') t[1]],
+        [merchant]);
+  });
 }
