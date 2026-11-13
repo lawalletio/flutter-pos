@@ -967,7 +967,7 @@ class _VersionFooter extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const _UpdateButton(),
+          const CheckUpdatesButton(),
           FutureBuilder<PackageInfo>(
             future: _packageInfo,
             builder: (context, snap) {
@@ -983,67 +983,6 @@ class _VersionFooter extends StatelessWidget {
           ),
         ]),
       ),
-    );
-  }
-}
-
-/// Small full-width "check for updates" (Android sideloads only).
-class _UpdateButton extends StatefulWidget {
-  const _UpdateButton();
-
-  @override
-  State<_UpdateButton> createState() => _UpdateButtonState();
-}
-
-class _UpdateButtonState extends State<_UpdateButton> {
-  final Future<bool> _supported = canSelfUpdate();
-  bool _checking = false;
-
-  Future<void> _check() async {
-    setState(() => _checking = true);
-    final messenger = ScaffoldMessenger.of(context);
-    String? message;
-    try {
-      final update = await checkForUpdate();
-      if (!mounted) return;
-      if (update != null) {
-        await showUpdateDialog(context, update);
-      } else {
-        message = context.tr('Ya tenés la última versión');
-      }
-    } catch (_) {
-      if (mounted) message = context.tr('No se pudo buscar actualizaciones');
-    }
-    if (!mounted) return;
-    setState(() => _checking = false);
-    if (message != null) {
-      messenger.showSnackBar(SnackBar(content: Text(message)));
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<bool>(
-      future: _supported,
-      builder: (context, snap) => snap.data != true
-          ? const SizedBox.shrink()
-          : Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-              child: SizedBox(
-                width: double.infinity,
-                height: 40,
-                child: OutlinedButton.icon(
-                  onPressed: _checking ? null : _check,
-                  icon: _checking
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.system_update_rounded, size: 18),
-                  label: Text(context.tr('Buscar actualizaciones'),
-                      style: const TextStyle(fontSize: 13)),
-                ),
-              ),
-            ),
     );
   }
 }

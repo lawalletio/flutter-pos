@@ -1,6 +1,5 @@
-import 'dart:io';
-
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -13,7 +12,8 @@ import 'ui.dart';
 const _latestRelease =
     'https://api.github.com/repos/lawalletio/flutter-pos/releases/latest';
 const MethodChannel _ch = MethodChannel('pos/update');
-final _dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 15)));
+@visibleForTesting
+Dio updateDio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 15)));
 
 class AppUpdate {
   const AppUpdate(this.version, this.apkUrl, this.notes);
@@ -56,7 +56,7 @@ String? pickApk(List<String> urls, String abi) {
 /// Native facts: device ABI, where to save the APK, and whether Play
 /// installed us (then Play owns updates).
 Future<Map<String, dynamic>?> _info() async {
-  if (!Platform.isAndroid) return null;
+  if (defaultTargetPlatform != TargetPlatform.android) return null;
   try {
     return await _ch.invokeMapMethod<String, dynamic>('info');
   } on MissingPluginException {
@@ -69,7 +69,7 @@ Future<Map<String, dynamic>?> _info() async {
 Future<AppUpdate?> checkForUpdate() async {
   final info = await _info();
   if (info == null || info['fromStore'] == true) return null;
-  final res = await _dio.get<Map<String, dynamic>>(_latestRelease);
+  final res = await updateDio.get<Map<String, dynamic>>(_latestRelease);
   final release = res.data!;
   final tag = release['tag_name'] as String;
   final current = (await PackageInfo.fromPlatform()).version;
@@ -98,7 +98,8 @@ Future<void> _downloadAndInstall(
     AppUpdate update, void Function(double) onProgress) async {
   final info = (await _info())!;
   final path = '${info['dir']}/lawallet-pos-update.apk';
-  await _dio.download(update.apkUrl, path, onReceiveProgress: (got, total) {
+  await updateDio.download(update.apkUrl, path,
+      onReceiveProgress: (got, total) {
     if (total > 0) onProgress(got / total);
   });
   await _ch.invokeMethod('install', {'path': path});
@@ -200,6 +201,67 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                 ),
               ],
       ),
+    );
+  }
+}
+
+/// Small full-width "check for updates" (Android sideloads only).
+class CheckUpdatesButton extends StatefulWidget {
+  const CheckUpdatesButton({super.key});
+
+  @override
+  State<CheckUpdatesButton> createState() => _CheckUpdatesButtonState();
+}
+
+class _CheckUpdatesButtonState extends State<CheckUpdatesButton> {
+  final Future<bool> _supported = canSelfUpdate();
+  bool _checking = false;
+
+  Future<void> _check() async {
+    setState(() => _checking = true);
+    final messenger = ScaffoldMessenger.of(context);
+    String? message;
+    try {
+      final update = await checkForUpdate();
+      if (!mounted) return;
+      if (update != null) {
+        await showUpdateDialog(context, update);
+      } else {
+        message = context.tr('Ya tenés la última versión');
+      }
+    } catch (_) {
+      if (mounted) message = context.tr('No se pudo buscar actualizaciones');
+    }
+    if (!mounted) return;
+    setState(() => _checking = false);
+    if (message != null) {
+      messenger.showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _supported,
+      builder: (context, snap) => snap.data != true
+          ? const SizedBox.shrink()
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+              child: SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: OutlinedButton.icon(
+                  onPressed: _checking ? null : _check,
+                  icon: _checking
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.system_update_rounded, size: 18),
+                  label: Text(context.tr('Buscar actualizaciones'),
+                      style: const TextStyle(fontSize: 13)),
+                ),
+              ),
+            ),
     );
   }
 }
